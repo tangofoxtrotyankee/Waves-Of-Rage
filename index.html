@@ -40,94 +40,28 @@
         display: block;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
-        touch-action: none;
+      }
+      #game {
+        touch-action: none; /* the whole page is the drag surface */
       }
 
-      /* --- Touch controls (created by src/input/TouchControls.ts) --- */
-      #touch {
+      /* --- Touch hint (src/input/TouchControls.ts); the whole page is the touch surface --- */
+      #touch-hint {
         position: absolute;
-        inset: 0;
-        pointer-events: none; /* only the buttons take input; taps elsewhere reach the canvas */
-        font-family: monospace;
-        color: #fff;
-        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-        box-sizing: border-box;
-      }
-      #touch[hidden] {
-        display: none;
-      }
-      .touch-pad,
-      .touch-actions {
-        position: absolute;
-        bottom: calc(16px + env(safe-area-inset-bottom));
-        display: grid;
-        gap: 10px;
-        pointer-events: none;
-      }
-      .touch-pad {
-        left: calc(16px + env(safe-area-inset-left));
-        grid-template-columns: repeat(3, 56px);
-        grid-template-rows: repeat(3, 56px);
-      }
-      .touch-actions {
-        right: calc(16px + env(safe-area-inset-right));
-        grid-template-columns: repeat(2, 72px);
-        grid-template-rows: 72px;
-        align-items: end;
-      }
-      .touch-btn {
-        pointer-events: auto;
-        touch-action: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 14px;
-        background: rgba(26, 11, 46, 0.55);
-        border: 2px solid rgba(127, 246, 255, 0.55);
-        color: #fff;
-        font-size: 18px;
-        font-weight: bold;
-        letter-spacing: 1px;
-        text-shadow: 1px 1px 0 #1a0b2e;
-        user-select: none;
-      }
-      .touch-btn.is-down {
-        background: rgba(127, 246, 255, 0.45);
-        border-color: #fff;
-      }
-      .touch-btn--round {
-        border-radius: 50%;
-        background: rgba(230, 57, 70, 0.5);
-        border-color: rgba(255, 209, 102, 0.7);
-      }
-      .touch-btn--round.is-down {
-        background: rgba(255, 209, 102, 0.6);
-      }
-      .touch-hint {
-        position: absolute;
-        bottom: calc(24px + env(safe-area-inset-bottom));
         left: 0;
         right: 0;
+        bottom: calc(24px + env(safe-area-inset-bottom));
         text-align: center;
-        font-size: 12px;
-        opacity: 0.7;
+        font-family: monospace;
+        font-size: 13px;
+        color: #fff;
+        opacity: 0.75;
         text-shadow: 1px 1px 0 #1a0b2e;
+        pointer-events: none;
         transition: opacity 0.6s ease;
       }
-      #touch.touch--used .touch-hint {
+      #game.touch--used #touch-hint {
         opacity: 0;
-      }
-
-      /* Portrait phones: the 16:9 canvas sits mid-screen; keep the controls in the black band below it. */
-      @media (orientation: portrait) {
-        .touch-pad {
-          grid-template-columns: repeat(3, 64px);
-          grid-template-rows: repeat(3, 64px);
-        }
-        .touch-actions {
-          grid-template-columns: repeat(2, 84px);
-          grid-template-rows: 84px;
-        }
       }
     </style>
   </head>

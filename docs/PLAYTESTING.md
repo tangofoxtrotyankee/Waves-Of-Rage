@@ -26,6 +26,15 @@ Space.
 - Ramps: from 12 s, launch you into big air. Spin with left/right, grab
   with X/J, land within 50 degrees of upright. Bad landing = 1 damage.
 
+## On a phone
+
+Touch play is deliberately simpler: drag to steer, tap to jump, drag
+sideways in big air to spin, tap in big air to grab. No punching or barging.
+Rivals still shoulder-check you, so they are obstacles to dodge. When
+balancing, remember the two audiences: keyboard players fight, touch players
+only avoid. The drag feel is tuned by `TOUCH.sensitivity` in
+`src/input/TouchControls.ts`.
+
 ## The session
 
 Play 10 to 20 full runs. Vary your style: pure dodging, pure fighting,

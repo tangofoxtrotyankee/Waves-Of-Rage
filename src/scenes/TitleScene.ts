@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
-import { requestImmersiveMode, touchState } from '../input/TouchControls';
+import { consumeTap, requestImmersiveMode, touchState } from '../input/TouchControls';
 import { pixelText } from '../ui/PixelText';
 
 /**
@@ -38,11 +38,16 @@ export class TitleScene extends Phaser.Scene {
       keyboard.once('keydown-ENTER', () => this.startGame());
     }
 
-    // A tap (or click) on the canvas also starts; on phones try to go fullscreen in landscape.
-    this.input.once('pointerdown', () => {
-      if (touchState.enabled) void requestImmersiveMode();
+    // A click on the canvas also starts. On touch, a tap starts (polled in update) and
+    // we try to go fullscreen in landscape.
+    if (!touchState.enabled) this.input.once('pointerdown', () => this.startGame());
+  }
+
+  override update(): void {
+    if (touchState.enabled && consumeTap()) {
+      void requestImmersiveMode();
       this.startGame();
-    });
+    }
   }
 
   private startGame(): void {

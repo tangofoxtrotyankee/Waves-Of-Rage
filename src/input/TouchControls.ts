@@ -1,33 +1,37 @@
 /**
- * On-screen touch controls, rendered as DOM buttons over the game canvas.
+ * Touch input: drag anywhere to steer, tap to jump.
  *
- * Shown automatically on touch devices (or with `?touch=1` for desktop
- * testing). Button state is exposed through `touchState`, which the
- * keyboard-oriented `Controls` class merges in, so the rest of the game
- * never knows which input device is in use. Taps on the canvas itself are
- * handled by the scenes (they act like Space).
+ * Playtesting showed that on-screen buttons do not work for a portrait
+ * phone, so the whole page is one touch surface. Movement is relative: the
+ * surfer follows the finger's deltas (so a thumb in the black band below
+ * the canvas never covers the action). A short tap with little movement is
+ * a jump (and a grab while in big air; a start on the title screen).
+ *
+ * Deltas are converted from screen pixels to game pixels using the canvas'
+ * current scale and exposed through `touchState`, which `Controls` merges
+ * with the keyboard. Combat (punch, barge) is keyboard-only.
  */
+import { GAME_WIDTH } from '../game/constants';
 
 export interface TouchState {
-  left: boolean;
-  right: boolean;
-  up: boolean;
-  down: boolean;
-  attackRequested: boolean;
-  bargeRequested: boolean;
-  /** True once the overlay has been installed (used for on-screen hints). */
+  /** Accumulated drag since last consumed, in game pixels. */
+  dragX: number;
+  dragY: number;
+  /** Set by a tap; consumed by the player (jump/grab) or a scene (start/restart). */
+  tapRequested: boolean;
+  /** True once touch input has been installed (used for on-screen wording). */
   enabled: boolean;
 }
 
-export const touchState: TouchState = {
-  left: false,
-  right: false,
-  up: false,
-  down: false,
-  attackRequested: false,
-  bargeRequested: false,
-  enabled: false,
-};
+export const touchState: TouchState = { dragX: 0, dragY: 0, tapRequested: false, enabled: false };
+
+/** Drag feel. Finger movement is multiplied by this before being applied in game pixels. */
+export const TOUCH = {
+  sensitivity: 1.15,
+  /** A press shorter than this with less movement than `tapMaxMovePx` is a tap. */
+  tapMaxMs: 250,
+  tapMaxMovePx: 10,
+} as const;
 
 /** True on phones/tablets, or when forced with `?touch=1`. */
 export function shouldUseTouch(): boolean {
@@ -37,87 +41,76 @@ export function shouldUseTouch(): boolean {
   return coarse || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 }
 
-type Held = keyof Pick<TouchState, 'left' | 'right' | 'up' | 'down'>;
-
-interface ButtonSpec {
-  id: string;
-  label: string;
-  className?: string;
-  style?: Partial<CSSStyleDeclaration>;
-  hold?: Held;
-  press?: 'attack' | 'barge';
+/** Take the drag accumulated since the last call (game pixels) and reset it. */
+export function consumeDrag(): { x: number; y: number } {
+  const out = { x: touchState.dragX, y: touchState.dragY };
+  touchState.dragX = 0;
+  touchState.dragY = 0;
+  return out;
 }
 
-const BUTTONS: ButtonSpec[] = [
-  { id: 'touch-up', label: '▲', hold: 'up', style: { gridColumn: '2', gridRow: '1' } },
-  { id: 'touch-left', label: '◀', hold: 'left', style: { gridColumn: '1', gridRow: '2' } },
-  { id: 'touch-right', label: '▶', hold: 'right', style: { gridColumn: '3', gridRow: '2' } },
-  { id: 'touch-down', label: '▼', hold: 'down', style: { gridColumn: '2', gridRow: '3' } },
-  { id: 'touch-barge', label: 'BARGE', press: 'barge', className: 'touch-btn--round' },
-  { id: 'touch-attack', label: 'HIT', press: 'attack', className: 'touch-btn--round' },
-];
+/** True once per tap; reading it clears the request. */
+export function consumeTap(): boolean {
+  const tapped = touchState.tapRequested;
+  touchState.tapRequested = false;
+  return tapped;
+}
 
-/** Build the overlay inside the game's parent element. Safe to call once. */
+/** Install the drag/tap surface over the game's parent element. Safe to call once. */
 export function installTouchControls(parentId = 'game'): void {
   const parent = document.getElementById(parentId);
-  if (!parent || document.getElementById('touch')) return;
-
-  const root = document.createElement('div');
-  root.id = 'touch';
-
-  const pad = document.createElement('div');
-  pad.className = 'touch-pad';
-  const actions = document.createElement('div');
-  actions.className = 'touch-actions';
-
-  for (const spec of BUTTONS) {
-    const el = document.createElement('div');
-    el.id = spec.id;
-    el.className = `touch-btn ${spec.className ?? ''}`.trim();
-    el.textContent = spec.label;
-    Object.assign(el.style, spec.style ?? {});
-    bind(el, spec);
-    (spec.hold ? pad : actions).appendChild(el);
-  }
+  if (!parent || parent.dataset.touchInstalled) return;
+  parent.dataset.touchInstalled = '1';
 
   const hint = document.createElement('div');
-  hint.className = 'touch-hint';
-  hint.textContent = 'TAP = JUMP / START';
+  hint.id = 'touch-hint';
+  hint.textContent = 'DRAG TO MOVE · TAP TO JUMP';
+  parent.appendChild(hint);
 
-  root.append(hint, pad, actions);
-  parent.appendChild(root);
+  let activeId: number | null = null;
+  let lastX = 0;
+  let lastY = 0;
+  let startX = 0;
+  let startY = 0;
+  let startTime = 0;
+  let moved = 0;
+
+  /** Screen pixels per game pixel, from the canvas' rendered size. */
+  const scale = () => {
+    const canvas = parent.querySelector('canvas');
+    return canvas ? canvas.getBoundingClientRect().width / GAME_WIDTH : 1;
+  };
+
+  parent.addEventListener('pointerdown', (e) => {
+    if (activeId !== null) return; // one steering finger at a time
+    activeId = e.pointerId;
+    lastX = startX = e.clientX;
+    lastY = startY = e.clientY;
+    startTime = performance.now();
+    moved = 0;
+    parent.classList.add('touch--used');
+  });
+
+  parent.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activeId) return;
+    const s = scale();
+    touchState.dragX += ((e.clientX - lastX) / s) * TOUCH.sensitivity;
+    touchState.dragY += ((e.clientY - lastY) / s) * TOUCH.sensitivity;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    moved = Math.max(moved, Math.hypot(e.clientX - startX, e.clientY - startY));
+  });
+
+  const end = (e: PointerEvent) => {
+    if (e.pointerId !== activeId) return;
+    activeId = null;
+    const quick = performance.now() - startTime <= TOUCH.tapMaxMs;
+    if (quick && moved <= TOUCH.tapMaxMovePx) touchState.tapRequested = true;
+  };
+  parent.addEventListener('pointerup', end);
+  parent.addEventListener('pointercancel', end);
+
   touchState.enabled = true;
-
-  // Fade the hint out once the player has tapped the canvas.
-  parent.addEventListener('pointerdown', () => root.classList.add('touch--used'), { once: true });
-}
-
-/** Wire one button: held directions track pointer down/up, actions latch a request. */
-function bind(el: HTMLElement, spec: ButtonSpec): void {
-  const activePointers = new Set<number>();
-
-  const down = (event: PointerEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    activePointers.add(event.pointerId);
-    el.classList.add('is-down');
-    if (spec.hold) touchState[spec.hold] = true;
-    if (spec.press === 'attack') touchState.attackRequested = true;
-    if (spec.press === 'barge') touchState.bargeRequested = true;
-  };
-
-  const up = (event: PointerEvent) => {
-    activePointers.delete(event.pointerId);
-    if (activePointers.size > 0) return;
-    el.classList.remove('is-down');
-    if (spec.hold) touchState[spec.hold] = false;
-  };
-
-  el.addEventListener('pointerdown', down);
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointercancel', up);
-  el.addEventListener('pointerleave', up);
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 /** Best-effort fullscreen + landscape lock for phones. Never throws. */
