@@ -2,20 +2,35 @@
  * Platform detection, evaluated once at module load so the internal
  * resolution and every layout constant derived from it agree.
  *
- * - Touch devices (phones, tablets) get the portrait field: the game is a
- *   one-thumb avoidance game held upright.
- * - Everything else gets the landscape field.
+ * - Phones and tablets get touch play and the portrait field: the game is
+ *   a one-thumb avoidance game held upright.
+ * - Everything else, including touchscreen laptops and desktop monitors
+ *   whose primary input is a mouse or trackpad, gets the landscape field
+ *   and keyboard play.
  *
  * Overrides for testing: `?touch=1` forces touch, `?portrait=1` /
  * `?landscape=1` force a field orientation.
  */
 const params = typeof window === 'undefined' ? new URLSearchParams() : new URLSearchParams(window.location.search);
 
+/** Screens whose shorter side is at most this many CSS pixels count as handheld. */
+const HANDHELD_MAX_SHORT_SIDE = 820;
+
+/**
+ * True for a phone/tablet form factor, not merely "has a touchscreen".
+ * A hybrid laptop reports touch points but its primary pointer is fine
+ * and hover-capable, so it stays on the desktop layout.
+ */
 export function isTouchDevice(): boolean {
   if (typeof window === 'undefined') return false;
   if (params.get('touch') === '1') return true;
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-  return coarse || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+
+  const hasTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  if (!hasTouch) return false;
+
+  const handheldPointer = window.matchMedia?.('(pointer: coarse) and (hover: none)').matches ?? false;
+  const shortSide = Math.min(window.screen?.width ?? Infinity, window.screen?.height ?? Infinity);
+  return handheldPointer || shortSide <= HANDHELD_MAX_SHORT_SIDE;
 }
 
 export function usePortraitLayout(): boolean {
