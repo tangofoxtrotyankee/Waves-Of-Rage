@@ -118,6 +118,15 @@ try {
   // (2 - 2 = 0 would end the run; the check above accepts 0.)
   await wait(1900);
   check('zero health -> GameOverScene', (await scenes()).join() === 'GameOverScene');
+  // First run on a fresh profile always qualifies for the top 10: a name prompt appears.
+  await wait(300);
+  check('high score: name prompt shown', await page.evaluate(() => !!document.getElementById('name-entry')));
+  await page.keyboard.press('Space'); await wait(300);
+  check('high score: Space while typing does not restart', (await scenes()).join() === 'GameOverScene');
+  await page.fill('#ne-input', 'tester'); await page.keyboard.press('Enter'); await wait(300);
+  const table = await page.evaluate(() => window.game.scene.getScene('GameOverScene').tableTexts.map((t) => t.text));
+  check('high score: table lists TESTER at rank 1', table.some((l) => l.startsWith(' 1 TESTER')), table.slice(0, 2).join('|'));
+  check('high score: persisted to localStorage', await page.evaluate(() => { const v = JSON.parse(localStorage.getItem('waves-of-rage.highscores.v1') || '[]'); return v.length === 1 && v[0].name === 'TESTER'; }));
   await wait(700); await page.keyboard.press('Space'); await wait(500);
   check('Space restarts', (await scenes()).join() === 'GameScene' && (await st()).health === 3);
   await freeze(true); await clearField(); await setHealth(50);

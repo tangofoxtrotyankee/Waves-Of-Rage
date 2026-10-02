@@ -22,7 +22,7 @@ game with original assets and gameplay.
 | Game framework     | [Phaser 3](https://phaser.io/) (3.90.x)             |
 | Language           | TypeScript (strict mode)                            |
 | Bundler / dev tool | [Vite](https://vite.dev/)                           |
-| Internal resolution| 320 x 180 (16:9, scales to 1920x1080 at exactly 6x) |
+| Internal resolution| 320 x 180 landscape on desktop; 180 x 320 portrait on touch devices (same pixel scale) |
 | Scaling            | `Phaser.Scale.FIT` + `CENTER_BOTH` (aspect ratio preserved, letterboxed) |
 | Rendering          | `pixelArt: true`, anti-aliasing off, nearest-neighbour upscaling, rounded pixels |
 | Input              | Keyboard (desktop browsers)                         |
@@ -82,7 +82,9 @@ builds.
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
 
-**Touch (phones and tablets):** the whole screen is the control surface.
+**Touch (phones and tablets):** the game runs as a portrait field (180x320)
+that fills the phone upright: horizon at the top, a long run of water ahead,
+the surfer near the bottom. The whole screen is the control surface.
 Drag anywhere to steer (the surfer follows your finger's movement, so your
 thumb can rest in the black band below the canvas), tap to jump. In big air,
 drag sideways to spin and tap to grab. Taps also start the game and restart
@@ -173,13 +175,14 @@ Waves-Of-Rage/
     ├── vite-env.d.ts       # Vite client type definitions
     ├── game/
     │   ├── config.ts       # Phaser GameConfig (renderer, scale, scene list)
-    │   ├── constants.ts    # GAME_WIDTH / GAME_HEIGHT, SceneKeys, AssetKeys
+    │   ├── constants.ts    # GAME_WIDTH / GAME_HEIGHT (orientation-dependent), SceneKeys, AssetKeys
+    │   ├── platform.ts     # Touch / portrait detection, evaluated once at boot
     │   └── gameplay.ts     # GAMEPLAY (health, scoring) and DIFFICULTY thresholds
     ├── scenes/
     │   ├── BootScene.ts    # Loads assets, then starts TitleScene
     │   ├── TitleScene.ts   # Concept art background + pulsing PRESS SPACE
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
-    │   └── GameOverScene.ts# WIPEOUT screen with results, restart and title prompts
+    │   └── GameOverScene.ts# WIPEOUT screen: results, top-10 table, name prompt, restart/title
     ├── entities/
     │   ├── Player.ts       # The surfer: movement, facing, jump, big air, spin/grab, landing, punch, barge, hit
     │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
@@ -191,6 +194,8 @@ Waves-Of-Rage/
     │   ├── Combat.ts       # Resolves punches/barges vs rivals and rivals vs hazards
     │   ├── Combo.ts        # Knockout combo multiplier with a timed window
     │   ├── GameSpeed.ts    # Ramping forward speed with collision penalty (GAME_SPEED)
+    │   ├── HighScores.ts   # Persistent top-10 table (qualifies / add / best)
+    │   ├── Storage.ts      # Guarded localStorage JSON helpers (the persistence layer)
     │   ├── ObstacleSpawner.ts # Distance-based spawning with lateral clearance (SPAWN)
     │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
     │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed
@@ -272,8 +277,11 @@ Waves-Of-Rage/
 
 ## Design decisions
 
-- **320 x 180 internal resolution.** A true 16:9 ratio that scales to common
-  display sizes by whole numbers (4x = 1280x720, 6x = 1920x1080).
+- **Orientation-dependent internal resolution.** Desktop plays 320x180
+  (16:9, 6x = 1920x1080); touch devices play 180x320 so the phone is held
+  upright and the field fills the screen. The choice is made once at boot in
+  `src/game/platform.ts`; every layout is anchored to `GAME_WIDTH` /
+  `GAME_HEIGHT` or `PLAYER_BOUNDS`, never to literal pixel positions.
 - **FIT scaling.** The canvas grows to the largest size that fits the window
   while keeping the aspect ratio, and is centred with black letterboxing. At
   non-integer zoom levels some pixels may be one screen pixel wider than

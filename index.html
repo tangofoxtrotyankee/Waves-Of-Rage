@@ -63,6 +63,59 @@
       #game.touch--used #touch-hint {
         opacity: 0;
       }
+
+      /* --- High-score name entry (src/ui/NameEntry.ts) --- */
+      #name-entry {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+        padding: 16px 20px;
+        background: rgba(26, 11, 46, 0.95);
+        border: 3px solid #7ff6ff;
+        border-radius: 6px;
+        font-family: monospace;
+        color: #fff;
+        text-align: center;
+        z-index: 10;
+        pointer-events: auto;
+      }
+      #name-entry .ne-title {
+        color: #ffd166;
+        font-weight: bold;
+        font-size: 18px;
+        letter-spacing: 2px;
+      }
+      #name-entry .ne-label {
+        font-size: 12px;
+        opacity: 0.8;
+      }
+      #name-entry input {
+        width: 9ch;
+        font: bold 24px monospace;
+        text-transform: uppercase;
+        text-align: center;
+        letter-spacing: 3px;
+        color: #fff;
+        background: #000;
+        border: 2px solid #ffd166;
+        border-radius: 4px;
+        padding: 6px 8px;
+        outline: none;
+      }
+      #name-entry button {
+        font: bold 16px monospace;
+        padding: 8px 28px;
+        color: #1a0b2e;
+        background: #7ff6ff;
+        border: 0;
+        border-radius: 4px;
+        letter-spacing: 2px;
+      }
     </style>
   </head>
   <body>

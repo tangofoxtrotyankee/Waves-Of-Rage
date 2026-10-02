@@ -11,7 +11,8 @@
  * current scale and exposed through `touchState`, which `Controls` merges
  * with the keyboard. Combat (punch, barge) is keyboard-only.
  */
-import { GAME_WIDTH } from '../game/constants';
+import { GAME_WIDTH, IS_PORTRAIT } from '../game/constants';
+import { isTouchDevice } from '../game/platform';
 
 export interface TouchState {
   /** Accumulated drag since last consumed, in game pixels. */
@@ -35,10 +36,7 @@ export const TOUCH = {
 
 /** True on phones/tablets, or when forced with `?touch=1`. */
 export function shouldUseTouch(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (new URLSearchParams(window.location.search).get('touch') === '1') return true;
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-  return coarse || navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  return isTouchDevice();
 }
 
 /** Take the drag accumulated since the last call (game pixels) and reset it. */
@@ -113,7 +111,7 @@ export function installTouchControls(parentId = 'game'): void {
   touchState.enabled = true;
 }
 
-/** Best-effort fullscreen + landscape lock for phones. Never throws. */
+/** Best-effort fullscreen + orientation lock (matching the field) for phones. Never throws. */
 export async function requestImmersiveMode(): Promise<void> {
   try {
     const el = document.documentElement;
@@ -123,7 +121,7 @@ export async function requestImmersiveMode(): Promise<void> {
   }
   try {
     const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
-    await orientation.lock?.('landscape');
+    await orientation.lock?.(IS_PORTRAIT ? 'portrait' : 'landscape');
   } catch {
     /* iOS and desktop: not supported */
   }

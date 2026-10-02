@@ -31,7 +31,8 @@ export class OceanScroller {
   constructor(scene: Phaser.Scene) {
     const oceanHeight = GAME_HEIGHT - HORIZON_Y;
 
-    scene.add.image(0, 0, AssetKeys.Sky).setOrigin(0);
+    // The sky strip is 320 wide; centring it keeps the sun in the middle on the 180-wide portrait field.
+    scene.add.image(GAME_WIDTH / 2, 0, AssetKeys.Sky).setOrigin(0.5, 0);
     this.water = scene.add.tileSprite(0, HORIZON_Y, GAME_WIDTH, oceanHeight, AssetKeys.Water).setOrigin(0);
     this.foam = scene.add.tileSprite(0, HORIZON_Y, GAME_WIDTH, oceanHeight, AssetKeys.Foam).setOrigin(0);
   }

@@ -77,7 +77,10 @@ Use this after any change to movement, combat or scoring:
    title.
 9. F1: debug readout and hitbox outlines toggle on and off.
 10. Console: no errors in the browser console throughout.
-11. Touch (open `?touch=1` on desktop, or a real phone): a tap starts the
-    game and jumps; dragging anywhere (including the black band below the
-    canvas in portrait) moves the surfer; in big air a sideways drag spins
-    and a tap grabs; on game over a tap restarts and TITLE goes back.
+11. Touch (open `?touch=1` on desktop, or a real phone): the field is
+    portrait and fills the width; a tap starts the game and jumps; dragging
+    anywhere moves the surfer; in big air a sideways drag spins and a tap
+    grabs; on game over a tap restarts and TITLE goes back.
+12. High scores: a qualifying run shows the name prompt; Space while typing
+    does not restart; after OK the table highlights the entry; reload and
+    the title shows BEST; a non-qualifying run shows no prompt.
