@@ -1,13 +1,19 @@
 import Phaser from 'phaser';
 
 import { GAME_WIDTH } from '../game/constants';
+import { GAMEPLAY } from '../game/gameplay';
 
-/** World pixels per displayed distance unit. */
-const PIXELS_PER_UNIT = 8;
+export interface HudInfo {
+  health: number;
+  score: number;
+  distanceUnits: number;
+}
 
-/** Simple arcade HUD: a label and a zero-padded distance counter. */
+/** Simple arcade HUD: hearts on the left, score and distance on the right. */
 export class Hud {
-  private readonly value: Phaser.GameObjects.Text;
+  private readonly health: Phaser.GameObjects.Text;
+  private readonly score: Phaser.GameObjects.Text;
+  private readonly distance: Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene) {
     const style: Phaser.Types.GameObjects.Text.TextStyle = {
@@ -17,14 +23,25 @@ export class Hud {
       stroke: '#1a0b2e',
       strokeThickness: 2,
     };
+    const label = { ...style, color: '#ffd166' };
 
-    scene.add.text(GAME_WIDTH - 4, 3, 'DISTANCE', { ...style, color: '#ffd166' }).setOrigin(1, 0).setDepth(1000);
-    this.value = scene.add.text(GAME_WIDTH - 4, 12, '00000', style).setOrigin(1, 0).setDepth(1000);
+    scene.add.text(4, 3, 'HEALTH', label).setDepth(1000);
+    this.health = scene.add.text(4, 12, '', { ...style, color: '#ff4d6d' }).setDepth(1000);
+
+    scene.add.text(GAME_WIDTH - 4, 3, 'SCORE', label).setOrigin(1, 0).setDepth(1000);
+    this.score = scene.add.text(GAME_WIDTH - 4, 12, '000000', style).setOrigin(1, 0).setDepth(1000);
+
+    scene.add.text(GAME_WIDTH - 64, 3, 'DIST', label).setOrigin(1, 0).setDepth(1000);
+    this.distance = scene.add.text(GAME_WIDTH - 64, 12, '00000', style).setOrigin(1, 0).setDepth(1000);
   }
 
-  /** `travelledPixels` is the total world distance covered so far. */
-  update(travelledPixels: number): void {
-    const units = Math.floor(travelledPixels / PIXELS_PER_UNIT);
-    this.value.setText(String(units).padStart(5, '0'));
+  update(info: HudInfo): void {
+    this.health.setText('♥'.repeat(Math.max(0, info.health)) + '♡'.repeat(Math.max(0, GAMEPLAY.startHealth - info.health)));
+    this.score.setText(Hud.pad(info.score, 6));
+    this.distance.setText(Hud.pad(info.distanceUnits, 5));
+  }
+
+  static pad(value: number, digits: number): string {
+    return String(Math.max(0, Math.floor(value))).padStart(digits, '0');
   }
 }

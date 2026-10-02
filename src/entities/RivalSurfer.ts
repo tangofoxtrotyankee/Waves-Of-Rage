@@ -7,11 +7,16 @@ const TEXTURE_KEY = 'rival-placeholder';
 const WIDTH = 24;
 const HEIGHT = 32;
 
-/** Rivals surf forward too, so they close on the player more slowly. */
-const APPROACH_FACTOR = 0.55;
-/** Side-to-side weave, in pixels and radians per second. */
-const WEAVE_AMPLITUDE = 18;
-const WEAVE_RATE = 2.2;
+export const RIVAL = {
+  damage: 1,
+  /** Too tall to hop over: must be dodged. */
+  jumpable: false,
+  /** Rivals surf forward too, so they close on the player more slowly. */
+  approachFactor: 0.55,
+  /** Side-to-side weave, in pixels and radians per second. */
+  weaveAmplitude: 18,
+  weaveRate: 2.2,
+} as const;
 
 /** Another surfer weaving across the wave. */
 export class RivalSurfer extends Obstacle {
@@ -21,14 +26,20 @@ export class RivalSurfer extends Obstacle {
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     RivalSurfer.ensureTexture(scene);
-    super(scene, x, y, TEXTURE_KEY, APPROACH_FACTOR);
+    super(scene, x, y, {
+      kind: 'rival',
+      texture: TEXTURE_KEY,
+      approachFactor: RIVAL.approachFactor,
+      damage: RIVAL.damage,
+      jumpable: RIVAL.jumpable,
+    });
     this.baseX = x;
     this.phase = Math.random() * Math.PI * 2;
   }
 
   protected override onUpdate(dt: number): void {
     this.elapsed += dt;
-    const offset = Math.sin(this.phase + this.elapsed * WEAVE_RATE) * WEAVE_AMPLITUDE;
+    const offset = Math.sin(this.phase + this.elapsed * RIVAL.weaveRate) * RIVAL.weaveAmplitude;
     this.x = Phaser.Math.Clamp(this.baseX + offset, PLAYER_BOUNDS.minX, PLAYER_BOUNDS.maxX);
   }
 

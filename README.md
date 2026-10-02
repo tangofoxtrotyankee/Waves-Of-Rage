@@ -7,10 +7,9 @@ a 16-bit, Mega Drive-era arcade style inspired by the energy and presentation
 of games such as *Streets of Rage* and *Road Rash*, but it is an original surfing
 game with original assets and gameplay.
 
-> **Status:** first arcade loop. A title screen leads into an endless run
-> down the wave: speed ramps up, distance counts up, and placeholder rocks
-> and rival surfers come at you. Collisions knock you back and slow you
-> down but there is no health or game over yet. No finished art or audio.
+> **Status:** a complete placeholder arcade run. Title screen, surf down the
+> wave, jump rocks, dodge rival surfers and sharks, lose health, wipe out,
+> see your distance and score, and restart. No finished art or audio yet.
 
 ## Tech stack
 
@@ -71,12 +70,29 @@ builds.
 | Move right                          | Right arrow / D |
 | Move further up the wave            | Up arrow / W    |
 | Move down towards the foreground    | Down arrow / S  |
+| Jump (clears rocks only)            | Space / X       |
 | Toggle debug readout                | F1              |
+| Game over: surf again / title       | Space / Esc     |
 
 Both movement schemes work at the same time. Movement accelerates while a key
-is held and decelerates to a stop when released. The debug readout (off by
-default) shows position, velocity, game speed, live obstacle count and time to
-the next spawn; it lives in `src/ui/DebugHud.ts` and is easy to delete later.
+is held and decelerates to a stop when released. You cannot jump again until
+you have landed. The debug readout (off by default) shows player state,
+health, score, position, velocity, air height, game speed, live hazards by
+type and time to the next spawn; it lives in `src/ui/DebugHud.ts` and is easy
+to delete later.
+
+## How a run works
+
+- You start with 3 health. Rocks and rival surfers take 1, sharks take 2.
+- A hit knocks you sideways, flashes the surfer, cuts speed for a moment and
+  grants about a second of immunity.
+- Rocks can be jumped for a bonus. Rival surfers and sharks must be dodged.
+- Score grows with distance plus jump bonuses. Distance is shown separately.
+- Speed ramps up over time, spawn gaps shrink gradually, and sharks only
+  appear after you have survived for a while (see `DIFFICULTY` in
+  `src/game/gameplay.ts`).
+- At zero health the world coasts to a stop and the WIPEOUT screen shows
+  your distance and score. Space restarts, Escape returns to the title.
 
 ## Production build
 
@@ -118,16 +134,19 @@ Waves-Of-Rage/
     ├── vite-env.d.ts       # Vite client type definitions
     ├── game/
     │   ├── config.ts       # Phaser GameConfig (renderer, scale, scene list)
-    │   └── constants.ts    # GAME_WIDTH / GAME_HEIGHT and SceneKeys
+    │   ├── constants.ts    # GAME_WIDTH / GAME_HEIGHT, SceneKeys, AssetKeys
+    │   └── gameplay.ts     # GAMEPLAY (health, scoring) and DIFFICULTY thresholds
     ├── scenes/
     │   ├── BootScene.ts    # Loads assets, then starts TitleScene
     │   ├── TitleScene.ts   # Concept art background + pulsing PRESS SPACE
-    │   └── GameScene.ts    # Core loop: wires systems, entities and HUD together
+    │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
+    │   └── GameOverScene.ts# WIPEOUT screen with results, restart and title prompts
     ├── entities/
-    │   ├── Player.ts       # The surfer: movement tuning, bounds, hit reaction
-    │   ├── Obstacle.ts     # Base class: approaches at game speed, perspective, hitbox
-    │   ├── Rock.ts         # Stationary obstacle
-    │   └── RivalSurfer.ts  # Slower-closing obstacle that weaves sideways
+    │   ├── Player.ts       # The surfer: movement, jump, hit reaction, wipeout, states
+    │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, approach, perspective, hitbox
+    │   ├── Rock.ts         # Stationary, jumpable, 1 damage
+    │   ├── RivalSurfer.ts  # Slower-closing, weaves sideways, 1 damage
+    │   └── Shark.ts        # Swims at you, lunges sideways now and then, 2 damage
     ├── systems/
     │   ├── GameSpeed.ts    # Ramping forward speed with collision penalty (GAME_SPEED)
     │   ├── ObstacleSpawner.ts # Distance-based spawning with lateral clearance (SPAWN)
@@ -152,13 +171,20 @@ Waves-Of-Rage/
    resulting speed to the `OceanScroller` and `ObstacleSpawner`, updates the
    `Player` from `Controls`, checks player/obstacle overlaps, and refreshes
    the HUDs. Distance travelled is accumulated from game speed.
-6. `Player` integrates its own velocity (acceleration while a key is held,
-   deceleration when released) and clamps itself to `PLAYER_BOUNDS`. On a hit
-   it is shoved away, flashes, blinks and is immune for a short time.
-7. `Obstacle` subclasses only supply a texture, an approach factor and any
-   extra motion. The base class moves them down the screen at game speed,
-   applies the perspective scale and destroys them off-screen.
-8. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
+6. `Player` is a small container: its x/y is the position on the wave, the
+   sprite inside is lifted along a fixed parabola while jumping and a shadow
+   stays on the water. It integrates its own velocity, clamps itself to
+   `PLAYER_BOUNDS`, and exposes a `playerState` of surfing, jumping, hit or
+   wipedOut. Its hitbox is the footprint on the wave; jumping does not move
+   it, the obstacle's `jumpable` flag decides whether an overlap counts.
+7. `Obstacle` subclasses supply a config (kind, texture, approach factor,
+   damage, jumpable) and optional extra motion. The base class moves them
+   down the screen at game speed, applies perspective and destroys them
+   off-screen. `ObstacleSpawner` picks the type using `DIFFICULTY`.
+8. When health reaches zero `GameScene` stops spawning, tells `GameSpeed`
+   to coast to a halt, plays the wipeout on the player and then starts
+   `GameOverScene` with the run's distance and score.
+9. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
    and scrolls them as TileSprites at multiples of game speed. Nothing else
    depends on it, so it can be replaced by pixel-art wave tiles later.
 
@@ -173,11 +199,14 @@ Waves-Of-Rage/
 - **Position things** using `GAME_WIDTH` / `GAME_HEIGHT` rather than hard-coded
   numbers so the resolution can be changed in one place.
 - **Tune the game** through the exported config objects at the top of each
-  module: `PLAYER_MOVEMENT`, `PLAYER_HIT` and `PLAYER_BOUNDS` in `Player.ts`,
-  `GAME_SPEED` in `GameSpeed.ts`, `SPAWN` in `ObstacleSpawner.ts`, and
+  module: `PLAYER_MOVEMENT`, `PLAYER_JUMP`, `PLAYER_HIT` and `PLAYER_BOUNDS`
+  in `Player.ts`, `ROCK` / `RIVAL` / `SHARK` in their entity files,
+  `GAME_SPEED` in `GameSpeed.ts`, `SPAWN` in `ObstacleSpawner.ts`,
+  `GAMEPLAY` and `DIFFICULTY` in `src/game/gameplay.ts`, and
   `OCEAN_SPEED_FACTORS` in `OceanScroller.ts`.
-- **Add an obstacle type** by extending `Obstacle` (see `Rock.ts` for the
-  minimal version) and adding it to the spawn choice in `ObstacleSpawner`.
+- **Add a hazard type** by extending `Obstacle` (see `Rock.ts` for the
+  minimal version), giving it a `kind`, `damage` and `jumpable` flag, and
+  adding it to `ObstacleSpawner.pick()`.
 - **Add an entity** under `src/entities/`, give it an `update(delta)` method
   and call it from `GameScene.update()`. Visual-only or world-level systems
   go under `src/systems/`.
@@ -209,8 +238,8 @@ it. Gameplay graphics are still placeholders.
 
 ## Roadmap (not started)
 
-Sharks, jumping, fighting and tricks, health and game over, menus, audio,
-touch controls, and the full 16-bit art pass.
+Fighting and tricks, near-miss bonuses, menus, audio, touch controls, and the
+full 16-bit art pass.
 
 ## License
 

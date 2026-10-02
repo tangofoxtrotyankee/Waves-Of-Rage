@@ -9,22 +9,41 @@ const HITBOX_INSET = 0.2;
 /** Once an obstacle is this far below the screen it is destroyed. */
 const OFFSCREEN_MARGIN = 32;
 
+export type HazardKind = 'rock' | 'rival' | 'shark';
+
+export interface ObstacleConfig {
+  kind: HazardKind;
+  texture: string;
+  /** 1 = stationary in the world (approaches at full game speed); lower = also moving forward. */
+  approachFactor: number;
+  /** Health points removed when the player collides with it. */
+  damage: number;
+  /** Whether the player passes safely over it while airborne. */
+  jumpable: boolean;
+}
+
 /**
- * Base class for things that come down the wave towards the player.
+ * Base class for hazards that come down the wave towards the player.
  *
- * Subclasses provide a texture and an `approachFactor`: 1 means the object
- * is stationary in the world (so it approaches at full game speed), lower
- * values mean it is also travelling forward and closes more slowly.
+ * Subclasses provide their config (texture, approach speed, damage, whether
+ * a jump clears them) and optionally extra motion via onUpdate().
  */
 export abstract class Obstacle extends Phaser.GameObjects.Image {
-  constructor(
-    scene: Phaser.Scene,
-    x: number,
-    y: number,
-    texture: string,
-    private readonly approachFactor: number,
-  ) {
-    super(scene, x, y, texture);
+  readonly kind: HazardKind;
+  readonly damage: number;
+  readonly jumpable: boolean;
+  private readonly approachFactor: number;
+
+  /** Set once the player has been credited for clearing this hazard. */
+  cleared = false;
+
+  constructor(scene: Phaser.Scene, x: number, y: number, config: ObstacleConfig) {
+    super(scene, x, y, config.texture);
+    this.kind = config.kind;
+    this.damage = config.damage;
+    this.jumpable = config.jumpable;
+    this.approachFactor = config.approachFactor;
+
     this.setOrigin(0.5, 1);
     this.applyPerspective();
     scene.add.existing(this);

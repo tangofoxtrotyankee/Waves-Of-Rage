@@ -26,6 +26,14 @@ export const PLAYER_MOVEMENT = {
   decelerationY: 800,
 } as const;
 
+/** Arcade jump: a fixed-duration parabola, no gravity simulation. */
+export const PLAYER_JUMP = {
+  /** Peak lift in pixels. */
+  height: 26,
+  /** Total airtime in seconds. */
+  durationSeconds: 0.6,
+} as const;
+
 /** What happens when the surfer hits something. */
 export const PLAYER_HIT = {
   /** Sideways shove away from the obstacle, pixels per second. */
@@ -53,25 +61,52 @@ export const PLAYER_BOUNDS = {
   maxY: GAME_HEIGHT,
 } as const;
 
+export type PlayerState = 'surfing' | 'jumping' | 'hit' | 'wipedOut';
+
 /**
  * The player's surfer.
  *
- * A simple velocity model with acceleration and deceleration, integrated by
- * hand in update(). No physics engine is involved; this keeps the feel
- * arcade-like and fully under our control.
+ * The container's x/y is the position on the wave (bottom-centre of the
+ * board). The sprite inside it is lifted during a jump while the shadow
+ * stays on the water. Movement is a simple hand-integrated velocity model
+ * with acceleration and deceleration; no physics engine is involved.
  */
-export class Player extends Phaser.GameObjects.Image {
+export class Player extends Phaser.GameObjects.Container {
+  private readonly sprite: Phaser.GameObjects.Image;
+  private readonly shadow: Phaser.GameObjects.Ellipse;
+
   private velocityX = 0;
   private velocityY = 0;
   private invulnerableUntil = 0;
   private blinkTween?: Phaser.Tweens.Tween;
 
+  /** Jump progress from 0 (take-off) to 1 (landed); -1 when on the wave. */
+  private jumpProgress = -1;
+  private wipedOut = false;
+
   constructor(scene: Phaser.Scene, x: number, y: number) {
     Player.ensureTexture(scene);
-    super(scene, x, y, TEXTURE_KEY);
-    this.setOrigin(0.5, 1);
+    super(scene, x, y);
+
+    this.shadow = scene.add.ellipse(0, -2, SPRITE_WIDTH, 6, 0x000000, 0.35).setVisible(false);
+    this.sprite = scene.add.image(0, 0, TEXTURE_KEY).setOrigin(0.5, 1);
+    this.add([this.shadow, this.sprite]);
+
     this.applyPerspective();
     scene.add.existing(this);
+  }
+
+  // --- state ---------------------------------------------------------------
+
+  get playerState(): PlayerState {
+    if (this.wipedOut) return 'wipedOut';
+    if (this.isInvulnerable) return 'hit';
+    if (this.isJumping) return 'jumping';
+    return 'surfing';
+  }
+
+  get isJumping(): boolean {
+    return this.jumpProgress >= 0;
   }
 
   /** True while the post-hit immunity window is active. */
@@ -79,10 +114,45 @@ export class Player extends Phaser.GameObjects.Image {
     return this.scene.time.now < this.invulnerableUntil;
   }
 
-  /** Collision rectangle, slightly smaller than the drawn sprite. */
+  get isWipedOut(): boolean {
+    return this.wipedOut;
+  }
+
+  /** Current horizontal velocity in pixels per second. */
+  get vx(): number {
+    return this.velocityX;
+  }
+
+  /** Current vertical velocity in pixels per second. */
+  get vy(): number {
+    return this.velocityY;
+  }
+
+  /** How far above the wave the surfer currently is, in pixels. */
+  get airHeight(): number {
+    return -this.sprite.y;
+  }
+
+  /**
+   * Collision rectangle: the surfer's footprint on the wave, inset a little.
+   * It deliberately ignores the jump lift; whether an overlap counts as a hit
+   * while airborne is decided by the obstacle's `jumpable` flag.
+   */
   get hitBox(): Phaser.Geom.Rectangle {
-    const b = this.getBounds();
-    return Phaser.Geom.Rectangle.Inflate(b, -b.width * HITBOX_INSET, -b.height * HITBOX_INSET);
+    const w = SPRITE_WIDTH * this.scaleX;
+    const h = SPRITE_HEIGHT * this.scaleY;
+    const b = new Phaser.Geom.Rectangle(this.x - w / 2, this.y - h, w, h);
+    return Phaser.Geom.Rectangle.Inflate(b, -w * HITBOX_INSET, -h * HITBOX_INSET);
+  }
+
+  // --- actions -------------------------------------------------------------
+
+  /** Start a jump if on the wave. Returns true if a jump started. */
+  jump(): boolean {
+    if (this.isJumping || this.wipedOut) return false;
+    this.jumpProgress = 0;
+    this.shadow.setVisible(true);
+    return true;
   }
 
   /**
@@ -96,9 +166,11 @@ export class Player extends Phaser.GameObjects.Image {
     this.invulnerableUntil = this.scene.time.now + PLAYER_HIT.invulnerableSeconds * 1000;
 
     this.blinkTween?.stop();
-    this.setTint(0xff3b3b).setAlpha(1);
+    this.sprite.setTint(0xff3b3b);
+    this.setAlpha(1);
     this.scene.time.delayedCall(PLAYER_HIT.flashSeconds * 1000, () => {
-      this.clearTint();
+      if (this.wipedOut) return;
+      this.sprite.clearTint();
       this.blinkTween = this.scene.tweens.add({
         targets: this,
         alpha: 0.25,
@@ -110,19 +182,31 @@ export class Player extends Phaser.GameObjects.Image {
     });
   }
 
-  /** Current horizontal velocity in pixels per second. */
-  get vx(): number {
-    return this.velocityX;
+  /** Final hit: controls stop, the surfer slumps and stays tinted. */
+  wipeOut(): void {
+    if (this.wipedOut) return;
+    this.wipedOut = true;
+    this.velocityX = 0;
+    this.velocityY = 0;
+    this.blinkTween?.stop();
+    this.setAlpha(1);
+    this.sprite.setTint(0xff3b3b);
+    this.scene.tweens.add({ targets: this.sprite, angle: 90, y: 6, duration: 500, ease: 'Back.easeIn' });
   }
 
-  /** Current vertical velocity in pixels per second. */
-  get vy(): number {
-    return this.velocityY;
-  }
+  // --- per-frame -----------------------------------------------------------
 
   /** Advance movement by `delta` milliseconds using the given controls. */
   update(controls: Controls, delta: number): void {
     const dt = delta / 1000;
+
+    if (this.wipedOut) {
+      this.applyPerspective();
+      return;
+    }
+
+    if (controls.consumeJump()) this.jump();
+    this.updateJump(dt);
 
     this.velocityX = Player.integrateAxis(
       this.velocityX,
@@ -150,6 +234,23 @@ export class Player extends Phaser.GameObjects.Image {
 
     this.setPosition(nextX, nextY);
     this.applyPerspective();
+  }
+
+  /** Lift the sprite along a parabola, then land cleanly back at zero. */
+  private updateJump(dt: number): void {
+    if (!this.isJumping) return;
+
+    this.jumpProgress += dt / PLAYER_JUMP.durationSeconds;
+    if (this.jumpProgress >= 1) {
+      this.jumpProgress = -1;
+      this.sprite.y = 0;
+      this.shadow.setVisible(false);
+      return;
+    }
+
+    const t = this.jumpProgress;
+    const lift = PLAYER_JUMP.height * 4 * t * (1 - t);
+    this.sprite.y = -Math.round(lift);
   }
 
   /** Subtle size change with depth, and draw order by Y so nearer things are on top. */

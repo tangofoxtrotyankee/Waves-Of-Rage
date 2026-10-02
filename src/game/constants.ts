@@ -14,6 +14,7 @@ export const SceneKeys = {
   Boot: 'BootScene',
   Title: 'TitleScene',
   Game: 'GameScene',
+  GameOver: 'GameOverScene',
 } as const;
 
 /** Keys for assets loaded from public/assets by BootScene. */

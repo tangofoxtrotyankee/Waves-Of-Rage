@@ -14,25 +14,37 @@ export const GAME_SPEED = {
   hitMultiplier: 0.45,
   /** Seconds for the hit penalty to fade back to full speed. */
   hitRecoverySeconds: 1.6,
+  /** Seconds for the world to coast to a stop after a wipeout. */
+  wipeoutStopSeconds: 1.0,
 } as const;
 
 /**
  * Tracks how fast the player is travelling down the wave.
  *
  * A slowly ramping base speed is multiplied by a temporary penalty factor
- * that collisions pull down and time eases back to 1.
+ * that collisions pull down and time eases back to 1. After a wipeout a
+ * separate factor eases to 0 so everything drifts to a halt.
  */
 export class GameSpeed {
   private base: number = GAME_SPEED.start;
   private penalty = 1;
+  private stopFactor = 1;
+  private stopping = false;
 
   /** Current effective speed in pixels per second. */
   get value(): number {
-    return Phaser.Math.Clamp(this.base * this.penalty, GAME_SPEED.min, GAME_SPEED.max);
+    const running = Phaser.Math.Clamp(this.base * this.penalty, GAME_SPEED.min, GAME_SPEED.max);
+    return running * this.stopFactor;
   }
 
   update(delta: number): void {
     const dt = delta / 1000;
+
+    if (this.stopping) {
+      this.stopFactor = Math.max(0, this.stopFactor - dt / GAME_SPEED.wipeoutStopSeconds);
+      return;
+    }
+
     this.base = Math.min(this.base + GAME_SPEED.rampPerSecond * dt, GAME_SPEED.max);
 
     if (this.penalty < 1) {
@@ -44,5 +56,10 @@ export class GameSpeed {
   /** Temporarily slow down after a collision. */
   applyHit(): void {
     this.penalty = Math.min(this.penalty, GAME_SPEED.hitMultiplier);
+  }
+
+  /** Begin coasting to a complete stop (wipeout). */
+  stop(): void {
+    this.stopping = true;
   }
 }

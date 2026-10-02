@@ -6,11 +6,16 @@ const TEXTURE_KEY = 'rock-placeholder';
 const WIDTH = 22;
 const HEIGHT = 16;
 
+export const ROCK = {
+  damage: 1,
+  jumpable: true,
+} as const;
+
 /** A rock sticking out of the water. Stationary, so it approaches at full speed. */
 export class Rock extends Obstacle {
   constructor(scene: Phaser.Scene, x: number, y: number) {
     Rock.ensureTexture(scene);
-    super(scene, x, y, TEXTURE_KEY, 1);
+    super(scene, x, y, { kind: 'rock', texture: TEXTURE_KEY, approachFactor: 1, ...ROCK });
   }
 
   private static ensureTexture(scene: Phaser.Scene): void {
