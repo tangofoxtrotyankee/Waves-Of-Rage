@@ -47,6 +47,9 @@ export const RIVAL = {
   /** Sideways speed given when wiped out. */
   wipeoutSpeed: 140,
   wipeoutSeconds: 1.1,
+  /** Simple ramp hop: how long they are up and how much bigger they are drawn at the peak. */
+  airSeconds: 0.9,
+  airScaleBoost: 0.3,
 } as const;
 
 export type RivalState = 'surfing' | 'checking' | 'stunned' | 'wipedOut';
@@ -69,6 +72,7 @@ export class RivalSurfer extends Obstacle {
   private checkCooldown = 0;
   private checkDirection = 1;
   private wipeoutTimer = 0;
+  private airTimer = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     RivalSurfer.ensureTextures(scene);
@@ -110,7 +114,19 @@ export class RivalSurfer extends Obstacle {
 
   /** Rivals only hurt the player while actually shoulder-checking. */
   override get isDangerous(): boolean {
-    return this.currentState === 'checking';
+    return this.currentState === 'checking' && !this.isAirborne;
+  }
+
+  get isAirborne(): boolean {
+    return this.airTimer > 0;
+  }
+
+  /** Hop off a ramp: briefly airborne, lands automatically, no tricks. */
+  launch(): boolean {
+    if (this.isAirborne || !this.isAlive) return false;
+    this.airTimer = RIVAL.airSeconds;
+    if (this.currentState === 'checking') this.currentState = 'surfing';
+    return true;
   }
 
   // --- combat ----------------------------------------------------------
@@ -174,6 +190,7 @@ export class RivalSurfer extends Obstacle {
   protected override onUpdate(dt: number, ctx: HazardContext): void {
     this.knockedTimer = Math.max(0, this.knockedTimer - dt);
     this.checkCooldown = Math.max(0, this.checkCooldown - dt);
+    this.airTimer = Math.max(0, this.airTimer - dt);
 
     switch (this.currentState) {
       case 'wipedOut':
@@ -200,7 +217,7 @@ export class RivalSurfer extends Obstacle {
 
       case 'surfing':
         this.cruise(dt, ctx);
-        this.maybeStartCheck(ctx);
+        if (!this.isAirborne && !ctx.playerInBigAir) this.maybeStartCheck(ctx);
         break;
     }
 
@@ -243,6 +260,15 @@ export class RivalSurfer extends Obstacle {
     this.checkCooldown = RIVAL.checkCooldownSeconds;
     this.setFlipX(this.checkDirection < 0);
     this.flash(0xff8c42);
+  }
+
+  /** Perspective as usual, plus a size bump while hopping off a ramp. */
+  protected override applyPerspective(): void {
+    super.applyPerspective();
+    if (this.airTimer > 0) {
+      const t = 1 - this.airTimer / RIVAL.airSeconds;
+      this.setScale(this.scaleX * (1 + RIVAL.airScaleBoost * 4 * t * (1 - t)));
+    }
   }
 
   private flash(color: number): void {

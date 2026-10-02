@@ -7,11 +7,12 @@ a 16-bit, Mega Drive-era arcade style inspired by the energy and presentation
 of games such as *Streets of Rage* and *Road Rash*, but it is an original surfing
 game with original assets and gameplay.
 
-> **Status:** a complete placeholder arcade run with combat. Title screen,
-> surf down the wave, jump rocks, dodge sharks, punch and barge rival
-> surfers off their boards (or into rocks and sharks) for combo-multiplied
-> points, lose health, wipe out, see your results, restart. No finished art
-> or audio yet.
+> **Status:** feature-complete placeholder prototype, now in the playtesting
+> and balancing phase. Title screen, surf down the wave, jump rocks, dodge
+> sharks, punch and barge rival surfers off their boards (or into rocks and
+> sharks) for combo-multiplied points, hit wave ramps for big air, spin and
+> grab for trick points, land clean or wipe out, lose health, see your
+> results, restart. No finished art or audio yet.
 
 ## Tech stack
 
@@ -74,6 +75,8 @@ builds.
 | Move down towards the foreground    | Down arrow / S  |
 | Jump (clears rocks only)            | Space           |
 | Attack (punch on the facing side)   | X / J           |
+| Grab (while in big air)             | X / J           |
+| Spin left / right (in big air)      | Left / A, Right / D |
 | Shoulder barge (while moving L/R)   | Shift           |
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
@@ -99,6 +102,13 @@ in `src/ui/DebugHud.ts` and is easy to delete later.
   into a rock or shark wipes out immediately for 750 points.
 - Knockouts within 4 seconds of each other build a combo multiplier (up to
   x5) that applies to knockout points only, never to distance.
+- Cyan wave ramps appear from 12 seconds in. Ride over one (or jump onto
+  it) for big air: higher and longer than a jump, and nothing in the water
+  can touch you. While airborne, left/right spin the board and X/J grabs.
+  Land within 50 degrees of upright and the trick is scored (air 100,
+  180/360/540 spin 250/500/750, grab 250, landing 250, no combo
+  multiplier). Land badly and you wipe out for 1 health. Ramps are
+  optional; hazards are kept clear of them when they spawn.
 - Score grows with distance plus bonuses. Distance is shown separately.
 - Speed ramps up over time, spawn gaps shrink gradually, and sharks only
   appear after you have survived for a while (see `DIFFICULTY` in
@@ -154,11 +164,12 @@ Waves-Of-Rage/
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
     │   └── GameOverScene.ts# WIPEOUT screen with results, restart and title prompts
     ├── entities/
-    │   ├── Player.ts       # The surfer: movement, facing, jump, punch, barge, hit, wipeout
+    │   ├── Player.ts       # The surfer: movement, facing, jump, big air, spin/grab, landing, punch, barge, hit
     │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
     │   ├── Rock.ts         # Stationary, jumpable, 1 damage, knocks out rivals
-    │   ├── RivalSurfer.ts  # Enemy: health, drift/seek AI, shoulder check, stun, knockout
-    │   └── Shark.ts        # Swims at you, lunges sideways, 2 damage, knocks out rivals
+    │   ├── RivalSurfer.ts  # Enemy: health, drift/seek AI, shoulder check, stun, knockout, ramp hop
+    │   ├── Shark.ts        # Swims at you, lunges sideways, 2 damage, knocks out rivals
+    │   └── WaveRamp.ts     # Harmless launcher: big air for the player, a hop for rivals
     ├── systems/
     │   ├── Combat.ts       # Resolves punches/barges vs rivals and rivals vs hazards
     │   ├── Combo.ts        # Knockout combo multiplier with a timed window
@@ -201,6 +212,11 @@ Waves-Of-Rage/
    hazards flagged `knocksOutRivals`. It reports hits and knockouts back to
    `GameScene`, which applies `Combo`, adds score, pops floating text and
    nudges the camera.
+   Ramps are checked in `GameScene.checkRamps()`: overlapping one calls
+   `player.launch()` (big air) or `rival.launch()` (a short hop). When the
+   player's big air ends, `Player` judges the landing against
+   `GAMEPLAY.landingToleranceDegrees` and queues a `LandingResult` that
+   `GameScene.resolveLanding()` turns into trick points or crash damage.
 9. When health reaches zero `GameScene` stops spawning, tells `GameSpeed`
    to coast to a halt, plays the wipeout on the player and then starts
    `GameOverScene` with the run's distance and score.
@@ -220,7 +236,9 @@ Waves-Of-Rage/
   numbers so the resolution can be changed in one place.
 - **Tune the game** through the exported config objects at the top of each
   module: `PLAYER_MOVEMENT`, `PLAYER_JUMP`, `PLAYER_ATTACK`, `PLAYER_BARGE`,
-  `PLAYER_HIT` and `PLAYER_BOUNDS` in `Player.ts`, `ROCK` / `RIVAL` / `SHARK`
+  `PLAYER_BIG_AIR`, `PLAYER_HIT` and `PLAYER_BOUNDS` in `Player.ts`, ramp
+  spacing in `RAMP_SPAWN` and the ramp unlock time in `DIFFICULTY`, trick
+  points and landing tolerance in `GAMEPLAY`, `ROCK` / `RIVAL` / `SHARK`
   in their entity files (rival health, AI timings and check cooldown live
   in `RIVAL`), knockout and combo values in `GAMEPLAY`,
   `GAME_SPEED` in `GameSpeed.ts`, `SPAWN` in `ObstacleSpawner.ts`,
@@ -259,10 +277,20 @@ The approved concept artwork and the written visual direction live in
 [`docs/art-direction/`](docs/art-direction/). All future assets should follow
 it. Gameplay graphics are still placeholders.
 
-## Roadmap (not started)
+## Playtesting, testing and deployment
 
-Weapons and special moves, tricks, near-miss bonuses, pickups, menus, audio,
-touch and gamepad controls, and the full 16-bit art pass.
+- [docs/PLAYTESTING.md](docs/PLAYTESTING.md): how to play, what to look for,
+  and which values to tune during the balancing phase.
+- [docs/TESTING.md](docs/TESTING.md): type checks, the build, and the
+  automated browser test (`npm test`).
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): deploying the static build to
+  Railway, GitHub Pages, itch.io or any static host.
+
+## Roadmap
+
+Feature work is paused for a playtest and balance pass. After that: the
+first proper pixel-art pass, sound and music, menus/settings/gamepad, and
+deployment for wider testing.
 
 ## License
 

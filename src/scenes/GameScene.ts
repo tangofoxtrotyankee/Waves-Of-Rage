@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 
 import type { Obstacle } from '../entities/Obstacle';
 import { Player } from '../entities/Player';
-import type { RivalSurfer } from '../entities/RivalSurfer';
+import { RivalSurfer } from '../entities/RivalSurfer';
 import { GAME_WIDTH, SceneKeys } from '../game/constants';
 import { GAMEPLAY } from '../game/gameplay';
 import { Controls } from '../input/Controls';
@@ -92,9 +92,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.ocean.update(delta, speed);
-    this.spawner.update(delta, speed, this.elapsedSeconds, { playerX: this.player.x, playerY: this.player.y });
+    this.spawner.update(delta, speed, this.elapsedSeconds, {
+      playerX: this.player.x,
+      playerY: this.player.y,
+      playerInBigAir: this.player.isBigAir,
+    });
     this.player.update(this.controls, delta);
     if (!this.gameOver) {
+      this.checkRamps();
+      this.resolveLanding();
       this.combat.update(this.player, this.spawner.active);
       this.checkCollisions();
     }
@@ -116,6 +122,7 @@ export class GameScene extends Phaser.Scene {
       secondsToNextSpawn: this.spawner.secondsUntilNext(speed),
       comboMultiplier: this.combo.multiplier,
       comboSecondsRemaining: this.combo.secondsRemaining,
+      rampsSpawned: this.spawner.rampsSpawned,
     });
   }
 
@@ -140,6 +147,54 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(KNOCKOUT_SHAKE.durationMs, KNOCKOUT_SHAKE.intensity);
   }
 
+  // --- ramps, air and landings -----------------------------------------
+
+  /** Riding over a ramp launches the player (and rivals) into the air. */
+  private checkRamps(): void {
+    const ramps = this.spawner.active.filter((o) => o.kind === 'ramp');
+    if (ramps.length === 0) return;
+
+    const playerBox = this.player.hitBox;
+    const rivals = this.spawner.active.filter((o): o is RivalSurfer => o instanceof RivalSurfer && o.isAlive);
+
+    for (const ramp of ramps) {
+      const rampBox = ramp.hitBox;
+      if (!this.player.isBigAir && Phaser.Geom.Rectangle.Overlaps(playerBox, rampBox)) {
+        this.player.launch();
+      }
+      for (const rival of rivals) {
+        if (!rival.isAirborne && Phaser.Geom.Rectangle.Overlaps(rival.hitBox, rampBox)) rival.launch();
+      }
+    }
+  }
+
+  /** Score a clean landing or punish a crash. */
+  private resolveLanding(): void {
+    const landing = this.player.consumeLanding();
+    if (!landing) return;
+
+    const px = this.player.x;
+    const py = this.player.y - 44;
+
+    if (!landing.clean) {
+      this.player.crashLand();
+      spawnFloatingText(this, px, py, 'WIPEOUT', '#ff4d6d');
+      this.cameras.main.shake(KNOCKOUT_SHAKE.durationMs, KNOCKOUT_SHAKE.intensity);
+      this.applyDamage(1, px);
+      return;
+    }
+
+    const points = GameScene.trickPoints(landing.rotation, landing.grabbed);
+    this.score += points;
+    spawnFloatingText(this, px, py, `${landing.trickName} +${points}`, '#7ff6ff');
+  }
+
+  static trickPoints(rotation: number, grabbed: boolean): number {
+    const { trick } = GAMEPLAY;
+    const spin = rotation >= 540 ? trick.rotation540 : rotation >= 360 ? trick.rotation360 : rotation >= 180 ? trick.rotation180 : 0;
+    return trick.air + spin + (grabbed ? trick.grab : 0) + trick.landing;
+  }
+
   // --- player damage ---------------------------------------------------
 
   private checkCollisions(): void {
@@ -148,7 +203,9 @@ export class GameScene extends Phaser.Scene {
     for (const obstacle of this.spawner.active) {
       if (!Phaser.Geom.Rectangle.Overlaps(playerBox, obstacle.hitBox)) continue;
 
-      if (obstacle.jumpable && this.player.isJumping) {
+      if (obstacle.kind === 'ramp') continue;
+
+      if (obstacle.jumpable && this.player.isAirborne) {
         if (!obstacle.cleared) {
           obstacle.cleared = true;
           this.score += GAMEPLAY.jumpClearBonus;
@@ -156,6 +213,9 @@ export class GameScene extends Phaser.Scene {
         }
         continue;
       }
+
+      // Nothing on the water can reach a player launched off a ramp.
+      if (this.player.isBigAir) continue;
 
       if (obstacle.isDangerous && !this.player.isInvulnerable) {
         this.takeHit(obstacle);
@@ -165,8 +225,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private takeHit(obstacle: Obstacle): void {
-    this.health = Math.max(0, this.health - obstacle.damage);
-    this.player.hit(obstacle.x);
+    this.applyDamage(obstacle.damage, obstacle.x);
+  }
+
+  /** Shared damage path for hazards and crash landings. */
+  private applyDamage(amount: number, fromX: number): void {
+    this.health = Math.max(0, this.health - amount);
+    this.player.hit(fromX);
     this.gameSpeed.applyHit();
 
     if (this.health === 0) this.wipeOut();

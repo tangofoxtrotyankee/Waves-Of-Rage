@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import type { Obstacle } from '../entities/Obstacle';
 import type { Player } from '../entities/Player';
 import { RivalSurfer } from '../entities/RivalSurfer';
+import { GAMEPLAY } from '../game/gameplay';
 
 export interface DebugInfo {
   player: Player;
@@ -14,6 +15,7 @@ export interface DebugInfo {
   secondsToNextSpawn: number;
   comboMultiplier: number;
   comboSecondsRemaining: number;
+  rampsSpawned: number;
 }
 
 /**
@@ -67,6 +69,8 @@ export class DebugHud {
       `state: ${player.playerState}  facing: ${player.facing > 0 ? 'R' : 'L'}  health: ${info.health}`,
       `score: ${info.score.toFixed(0)}  combo: x${info.comboMultiplier} (${info.comboSecondsRemaining.toFixed(1)}s)`,
       `attack cd: ${player.attackCooldown.toFixed(2)}  barge cd: ${player.bargeCooldown.toFixed(2)}`,
+      `air: ${player.aerialState}  spin: ${player.spinDegrees.toFixed(0)}  trick: ${player.currentTrickName || '-'}  tol: ${GAMEPLAY.landingToleranceDegrees}`,
+      `ramps: ${info.rampsSpawned} spawned, ${info.obstacles.filter((o) => o.kind === 'ramp').length} on screen`,
       `x: ${player.x.toFixed(1)}  y: ${player.y.toFixed(1)}  air: ${player.airHeight.toFixed(0)}`,
       `vx: ${player.vx.toFixed(0)}  vy: ${player.vy.toFixed(0)}  speed: ${info.gameSpeed.toFixed(0)}  t: ${info.elapsedSeconds.toFixed(1)}s`,
       `hazards: ${info.obstacles.length} ${hazards}`,
@@ -91,7 +95,7 @@ export class DebugHud {
     }
 
     for (const o of info.obstacles) {
-      g.lineStyle(1, o.isDangerous ? 0xff4d6d : 0x7ff6ff, 0.9);
+      g.lineStyle(1, o.kind === 'ramp' ? 0xffffff : o.isDangerous ? 0xff4d6d : 0x7ff6ff, 0.9);
       g.strokeRectShape(o.hitBox);
     }
   }

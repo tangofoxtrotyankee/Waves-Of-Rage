@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { GAME_HEIGHT, GAME_WIDTH } from '../game/constants';
+import { GAMEPLAY } from '../game/gameplay';
 import type { Controls } from '../input/Controls';
 import { perspectiveScale } from '../systems/Perspective';
 
@@ -32,6 +33,18 @@ export const PLAYER_JUMP = {
   height: 26,
   /** Total airtime in seconds. */
   durationSeconds: 0.6,
+} as const;
+
+/** Big air from a wave ramp: higher, longer, and the only time tricks are possible. */
+export const PLAYER_BIG_AIR = {
+  height: 48,
+  durationSeconds: 1.35,
+  /** Spin speed while holding left/right, degrees per second. 540 takes about 1.1 s. */
+  rotationSpeed: 480,
+  /** Fraction of normal horizontal speed available while in big air. */
+  driftFactor: 0.35,
+  /** Seconds of recovery (no control) after a crash landing. */
+  crashRecoverySeconds: 0.5,
 } as const;
 
 /** Basic punch: a short hitbox on the facing side. */
@@ -87,9 +100,23 @@ export const PLAYER_BOUNDS = {
   maxY: GAME_HEIGHT,
 } as const;
 
-export type PlayerState = 'surfing' | 'jumping' | 'attacking' | 'barging' | 'hit' | 'wipedOut';
+export type PlayerState = 'surfing' | 'jumping' | 'bigAir' | 'attacking' | 'barging' | 'hit' | 'wipedOut';
 
 export type Facing = -1 | 1;
+
+export type AerialState = 'none' | 'jump' | 'bigAir';
+
+/** Result of touching down from big air, consumed by GameScene for scoring/damage. */
+export interface LandingResult {
+  clean: boolean;
+  /** Full half-turns completed: 0, 180, 360, 540... */
+  rotation: number;
+  grabbed: boolean;
+  /** Degrees away from upright at touchdown. */
+  deviation: number;
+  /** Display name, e.g. "360 GRAB" or "AIR". */
+  trickName: string;
+}
 
 /**
  * The player's surfer.
@@ -115,8 +142,15 @@ export class Player extends Phaser.GameObjects.Container {
   private invulnerableUntil = 0;
   private blinkTween?: Phaser.Tweens.Tween;
 
-  /** Jump progress from 0 (take-off) to 1 (landed); -1 when on the wave. */
+  private readonly trickLabel: Phaser.GameObjects.Text;
+
+  /** Air progress from 0 (take-off) to 1 (landed); -1 when on the wave. */
   private jumpProgress = -1;
+  private aerial: AerialState = 'none';
+  private spin = 0;
+  private grabbed = false;
+  private crashTimer = 0;
+  private pendingLanding: LandingResult | null = null;
   private wipedOut = false;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -126,7 +160,11 @@ export class Player extends Phaser.GameObjects.Container {
     this.shadow = scene.add.ellipse(0, -2, SPRITE_WIDTH, 6, 0x000000, 0.35).setVisible(false);
     this.sprite = scene.add.image(0, 0, TEXTURE_KEY).setOrigin(0.5, 1);
     this.fist = scene.add.rectangle(0, -22, 8, 6, 0xffe066).setVisible(false);
-    this.add([this.shadow, this.sprite, this.fist]);
+    this.trickLabel = scene.add
+      .text(0, -SPRITE_HEIGHT - 6, '', { fontFamily: 'monospace', fontSize: '8px', color: '#7ff6ff', stroke: '#1a0b2e', strokeThickness: 2 })
+      .setOrigin(0.5, 1)
+      .setVisible(false);
+    this.add([this.shadow, this.sprite, this.fist, this.trickLabel]);
 
     this.applyPerspective();
     scene.add.existing(this);
@@ -139,8 +177,37 @@ export class Player extends Phaser.GameObjects.Container {
     if (this.isInvulnerable) return 'hit';
     if (this.isBarging) return 'barging';
     if (this.isAttacking) return 'attacking';
+    if (this.isBigAir) return 'bigAir';
     if (this.isJumping) return 'jumping';
     return 'surfing';
+  }
+
+  get aerialState(): AerialState {
+    return this.aerial;
+  }
+
+  /** Launched from a ramp: tricks possible, nothing on the water can touch you. */
+  get isBigAir(): boolean {
+    return this.aerial === 'bigAir';
+  }
+
+  /** Any kind of air (normal jump or big air). */
+  get isAirborne(): boolean {
+    return this.jumpProgress >= 0;
+  }
+
+  /** Sprite rotation in degrees, accumulated over the current big air. */
+  get spinDegrees(): number {
+    return this.spin;
+  }
+
+  get isGrabbing(): boolean {
+    return this.grabbed;
+  }
+
+  /** Name of the trick in progress ("", "180", "360 GRAB"...). */
+  get currentTrickName(): string {
+    return this.isBigAir ? Player.trickName(Player.rotationTier(this.spin), this.grabbed) : '';
   }
 
   get facing(): Facing {
@@ -224,7 +291,7 @@ export class Player extends Phaser.GameObjects.Container {
 
   /** Throw a punch if allowed. Returns true if an attack started. */
   attack(): boolean {
-    if (this.wipedOut || this.isAttacking || this.isBarging || this.attackCooldownTimer > 0) return false;
+    if (this.wipedOut || this.isBigAir || this.isAttacking || this.isBarging || this.attackCooldownTimer > 0) return false;
     this.attackTimer = PLAYER_ATTACK.durationSeconds;
     this.attackCooldownTimer = PLAYER_ATTACK.durationSeconds + PLAYER_ATTACK.cooldownSeconds;
     this.fist.setPosition(this.facingDirection * (SPRITE_WIDTH / 2 + 6), -20).setVisible(true);
@@ -234,7 +301,7 @@ export class Player extends Phaser.GameObjects.Container {
 
   /** Shoulder barge in `direction` if allowed. Returns true if it started. */
   barge(direction: Facing): boolean {
-    if (this.wipedOut || this.isJumping || this.isBarging || this.bargeCooldownTimer > 0) return false;
+    if (this.wipedOut || this.isAirborne || this.isBarging || this.bargeCooldownTimer > 0 || this.crashTimer > 0) return false;
     this.facingDirection = direction;
     this.sprite.setFlipX(direction < 0);
     this.bargeTimer = PLAYER_BARGE.durationSeconds;
@@ -248,10 +315,52 @@ export class Player extends Phaser.GameObjects.Container {
 
   /** Start a jump if on the wave. Returns true if a jump started. */
   jump(): boolean {
-    if (this.isJumping || this.wipedOut) return false;
+    if (this.isAirborne || this.wipedOut || this.crashTimer > 0) return false;
     this.jumpProgress = 0;
+    this.aerial = 'jump';
     this.shadow.setVisible(true);
     return true;
+  }
+
+  /**
+   * Launch into big air from a ramp. Works from the wave or mid normal-jump
+   * (forgiving: no frame-perfect input needed). Returns true if launched.
+   */
+  launch(): boolean {
+    if (this.isBigAir || this.wipedOut || this.crashTimer > 0) return false;
+    this.jumpProgress = 0;
+    this.aerial = 'bigAir';
+    this.spin = 0;
+    this.grabbed = false;
+    this.attackTimer = 0;
+    this.bargeTimer = 0;
+    this.fist.setVisible(false);
+    this.shadow.setVisible(true);
+    this.trickLabel.setVisible(true).setText('AIR');
+    return true;
+  }
+
+  /** Grab the board during big air. */
+  grab(): boolean {
+    if (!this.isBigAir || this.grabbed) return false;
+    this.grabbed = true;
+    this.fist.setPosition(0, -8).setVisible(true);
+    return true;
+  }
+
+  /** The landing result from the last big air, once; null if none is pending. */
+  consumeLanding(): LandingResult | null {
+    const result = this.pendingLanding;
+    this.pendingLanding = null;
+    return result;
+  }
+
+  /** Bad landing: lose control briefly and reset the sprite. The scene applies damage. */
+  crashLand(): void {
+    this.crashTimer = PLAYER_BIG_AIR.crashRecoverySeconds;
+    this.velocityX = 0;
+    this.velocityY = 0;
+    this.sprite.setAngle(0);
   }
 
   /**
@@ -293,6 +402,7 @@ export class Player extends Phaser.GameObjects.Container {
     this.blinkTween?.stop();
     this.setAlpha(1);
     this.fist.setVisible(false);
+    this.trickLabel.setVisible(false);
     this.attackTimer = 0;
     this.bargeTimer = 0;
     this.sprite.setTint(0xff3b3b);
@@ -310,26 +420,49 @@ export class Player extends Phaser.GameObjects.Container {
       return;
     }
 
+    if (this.crashTimer > 0) {
+      // Recovering from a crash landing: no input, just drift to a stop.
+      this.crashTimer = Math.max(0, this.crashTimer - dt);
+      controls.consumeJump();
+      controls.consumeAttack();
+      controls.consumeBarge();
+      this.updateCombatTimers(dt);
+      this.applyPerspective();
+      return;
+    }
+
     const axisX = controls.axisX;
-    if (axisX !== 0 && !this.isBarging) {
+    const bigAir = this.isBigAir;
+
+    if (axisX !== 0 && !this.isBarging && !bigAir) {
       this.facingDirection = axisX > 0 ? 1 : -1;
       this.sprite.setFlipX(this.facingDirection < 0);
     }
 
     if (controls.consumeJump()) this.jump();
-    if (controls.consumeAttack()) this.attack();
+    if (controls.consumeAttack()) {
+      if (bigAir) this.grab();
+      else this.attack();
+    }
     if (controls.consumeBarge() && axisX !== 0) this.barge(axisX > 0 ? 1 : -1);
+
+    // In big air left/right spin the board instead of steering (with a little drift).
+    if (bigAir && axisX !== 0) {
+      this.spin += axisX * PLAYER_BIG_AIR.rotationSpeed * dt;
+      this.sprite.setAngle(this.spin);
+    }
 
     this.updateJump(dt);
     this.updateCombatTimers(dt);
 
     // During a barge the dash owns horizontal movement.
     if (!this.isBarging) {
+      const driftFactor = bigAir ? PLAYER_BIG_AIR.driftFactor : 1;
       this.velocityX = Player.integrateAxis(
         this.velocityX,
         axisX,
-        PLAYER_MOVEMENT.maxSpeedX,
-        PLAYER_MOVEMENT.accelerationX,
+        PLAYER_MOVEMENT.maxSpeedX * driftFactor,
+        PLAYER_MOVEMENT.accelerationX * driftFactor,
         PLAYER_MOVEMENT.decelerationX,
         dt,
       );
@@ -376,21 +509,56 @@ export class Player extends Phaser.GameObjects.Container {
     }
   }
 
-  /** Lift the sprite along a parabola, then land cleanly back at zero. */
+  /** Lift the sprite along a parabola, then land back at zero (judging big-air landings). */
   private updateJump(dt: number): void {
-    if (!this.isJumping) return;
+    if (!this.isAirborne) return;
 
-    this.jumpProgress += dt / PLAYER_JUMP.durationSeconds;
+    const spec = this.isBigAir ? PLAYER_BIG_AIR : PLAYER_JUMP;
+    this.jumpProgress += dt / spec.durationSeconds;
+
+    if (this.isBigAir) this.trickLabel.setText(this.currentTrickName || 'AIR');
+
     if (this.jumpProgress >= 1) {
+      const wasBigAir = this.isBigAir;
       this.jumpProgress = -1;
+      this.aerial = 'none';
       this.sprite.y = 0;
       this.shadow.setVisible(false);
+      this.trickLabel.setVisible(false);
+      if (wasBigAir) this.judgeLanding();
       return;
     }
 
     const t = this.jumpProgress;
-    const lift = PLAYER_JUMP.height * 4 * t * (1 - t);
+    const lift = spec.height * 4 * t * (1 - t);
     this.sprite.y = -Math.round(lift);
+  }
+
+  /** Compare the final spin to upright and queue a LandingResult for the scene. */
+  private judgeLanding(): void {
+    const normalised = ((this.spin % 360) + 360) % 360;
+    const deviation = Math.min(normalised, 360 - normalised);
+    const clean = deviation <= GAMEPLAY.landingToleranceDegrees;
+    const rotation = Player.rotationTier(this.spin);
+
+    this.pendingLanding = { clean, rotation, grabbed: this.grabbed, deviation, trickName: Player.trickName(rotation, this.grabbed) };
+
+    this.spin = 0;
+    this.grabbed = false;
+    this.fist.setVisible(false);
+    this.sprite.setAngle(0);
+  }
+
+  /** Completed half-turns, as a degree count: 0, 180, 360, 540... */
+  static rotationTier(spinDegrees: number): number {
+    return Math.floor(Math.abs(spinDegrees) / 180) * 180;
+  }
+
+  static trickName(rotation: number, grabbed: boolean): string {
+    const parts: string[] = [];
+    if (rotation > 0) parts.push(String(rotation));
+    if (grabbed) parts.push('GRAB');
+    return parts.length ? parts.join(' ') : 'AIR';
   }
 
   /** Subtle size change with depth, and draw order by Y so nearer things are on top. */

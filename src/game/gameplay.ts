@@ -20,6 +20,17 @@ export const GAMEPLAY = {
   comboMax: 5,
   /** Seconds the wipeout plays out before the game-over screen appears. */
   wipeoutSeconds: 1.4,
+  /** Trick scoring. Flat values, no combo multiplier. */
+  trick: {
+    air: 100,
+    rotation180: 250,
+    rotation360: 500,
+    rotation540: 750,
+    grab: 250,
+    landing: 250,
+  },
+  /** A landing counts as clean when the sprite is within this many degrees of upright. */
+  landingToleranceDegrees: 50,
 } as const;
 
 /**
@@ -35,4 +46,6 @@ export const DIFFICULTY = {
   spawnGapMultiplierMin: 0.6,
   /** ...linearly over this many seconds of survival. */
   spawnRampSeconds: 90,
+  /** Wave ramps only appear after this long. */
+  rampAfterSeconds: 12,
 } as const;
