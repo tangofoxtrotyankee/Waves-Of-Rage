@@ -77,7 +77,7 @@ Use this after any change to movement, combat or scoring:
    title.
 9. F1: debug readout and hitbox outlines toggle on and off.
 10. Console: no errors in the browser console throughout.
-11. Touch (open `?touch=1` on desktop, or a real phone): overlay buttons
-    show; a tap on the water starts the game and jumps; d-pad steers; HIT
-    punches; BARGE while holding a direction dashes; in portrait the
-    buttons sit under the canvas, in landscape over its lower corners.
+11. Touch (open `?touch=1` on desktop, or a real phone): a tap starts the
+    game and jumps; dragging anywhere (including the black band below the
+    canvas in portrait) moves the surfer; in big air a sideways drag spins
+    and a tap grabs; on game over a tap restarts and TITLE goes back.

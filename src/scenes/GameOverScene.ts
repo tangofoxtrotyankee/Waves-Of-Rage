@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
 import { Hud } from '../ui/Hud';
-import { touchState } from '../input/TouchControls';
+import { consumeTap, touchState } from '../input/TouchControls';
 import { pixelText } from '../ui/PixelText';
 
 export interface GameOverData {
@@ -15,11 +15,16 @@ const INPUT_DELAY_MS = 600;
 
 /** Wipeout screen: shows the run's results and offers restart or title. */
 export class GameOverScene extends Phaser.Scene {
+  private acceptTaps = false;
+  private titleChosen = false;
+
   constructor() {
     super(SceneKeys.GameOver);
   }
 
   create(data: GameOverData): void {
+    this.acceptTaps = false;
+    this.titleChosen = false;
     const cx = GAME_WIDTH / 2;
 
     this.add.image(0, 0, AssetKeys.Sky).setOrigin(0);
@@ -45,9 +50,15 @@ export class GameOverScene extends Phaser.Scene {
       title.setInteractive({ useHandCursor: true }).once('pointerdown', (pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
         event.stopPropagation();
         void pointer;
+        this.titleChosen = true;
         this.scene.start(SceneKeys.Title);
       });
-      this.input.once('pointerdown', () => this.scene.start(SceneKeys.Game));
+      if (!touchState.enabled) this.input.once('pointerdown', () => this.scene.start(SceneKeys.Game));
+      this.acceptTaps = true;
     });
+  }
+
+  override update(): void {
+    if (this.acceptTaps && !this.titleChosen && touchState.enabled && consumeTap()) this.scene.start(SceneKeys.Game);
   }
 }

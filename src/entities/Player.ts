@@ -39,6 +39,8 @@ export const PLAYER_BIG_AIR = {
   durationSeconds: 1.35,
   /** Spin speed while holding left/right, degrees per second. 540 takes about 1.1 s. */
   rotationSpeed: 480,
+  /** Touch: degrees of spin per game pixel of sideways drag. */
+  dragSpinDegreesPerPixel: 6,
   /** Fraction of normal horizontal speed available while in big air. */
   driftFactor: 0.35,
   /** Seconds of recovery (no control) after a crash landing. */
@@ -151,6 +153,8 @@ export class Player extends Phaser.GameObjects.Container {
   private crashTimer = 0;
   private pendingLanding: LandingResult | null = null;
   private wipedOut = false;
+  /** Sideways finger movement this frame (game px); drives facing and the lean frame on touch. */
+  private touchMoveX = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
@@ -434,23 +438,44 @@ export class Player extends Phaser.GameObjects.Container {
 
     const axisX = controls.axisX;
     const bigAir = this.isBigAir;
+    const drag = controls.consumeDrag();
 
     if (axisX !== 0 && !this.isBarging && !bigAir) {
       this.facingDirection = axisX > 0 ? 1 : -1;
       this.sprite.setFlipX(this.facingDirection < 0);
     }
 
-    if (controls.consumeJump()) this.jump();
+    // A tap (Space on touch) jumps on the wave and grabs in big air.
+    if (controls.consumeJump()) {
+      if (bigAir && controls.isTouch) this.grab();
+      else this.jump();
+    }
     if (controls.consumeAttack()) {
       if (bigAir) this.grab();
       else this.attack();
     }
     if (controls.consumeBarge() && axisX !== 0) this.barge(axisX > 0 ? 1 : -1);
 
-    // In big air left/right spin the board instead of steering (with a little drift).
-    if (bigAir && axisX !== 0) {
-      this.spin += axisX * PLAYER_BIG_AIR.rotationSpeed * dt;
-      this.sprite.setAngle(this.spin);
+    // In big air left/right (or a sideways drag) spin the board instead of steering.
+    if (bigAir) {
+      const spinDelta = axisX * PLAYER_BIG_AIR.rotationSpeed * dt + drag.x * PLAYER_BIG_AIR.dragSpinDegreesPerPixel;
+      if (spinDelta !== 0) {
+        this.spin += spinDelta;
+        this.sprite.setAngle(this.spin);
+      }
+    }
+
+    // Touch steering: the surfer follows the finger's movement directly and
+    // stops where the finger stops (no velocity, so no carried momentum).
+    this.touchMoveX = 0;
+    if (!bigAir && !this.isBarging && (drag.x !== 0 || drag.y !== 0)) {
+      this.x = Phaser.Math.Clamp(this.x + drag.x, PLAYER_BOUNDS.minX, PLAYER_BOUNDS.maxX);
+      this.y = Phaser.Math.Clamp(this.y + drag.y, PLAYER_BOUNDS.minY, PLAYER_BOUNDS.maxY);
+      this.touchMoveX = drag.x;
+      if (Math.abs(drag.x) > 0.5) {
+        this.facingDirection = drag.x > 0 ? 1 : -1;
+        this.sprite.setFlipX(this.facingDirection < 0);
+      }
     }
 
     this.updateJump(dt);
@@ -503,8 +528,8 @@ export class Player extends Phaser.GameObjects.Container {
       this.sprite.setFrame(SurferFrame.Punch).setFlipX(facingLeft);
     } else if (this.isAirborne) {
       this.sprite.setFrame(SurferFrame.Jump).setFlipX(facingLeft);
-    } else if (axisX !== 0) {
-      this.sprite.setFrame(SurferFrame.Lean).setFlipX(axisX > 0);
+    } else if (axisX !== 0 || Math.abs(this.touchMoveX) > 0.5) {
+      this.sprite.setFrame(SurferFrame.Lean).setFlipX((axisX || Math.sign(this.touchMoveX)) > 0);
     } else {
       this.sprite.setFrame(SurferFrame.Surf).setFlipX(facingLeft);
     }

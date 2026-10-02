@@ -82,14 +82,15 @@ builds.
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
 
-**Touch (phones and tablets):** on-screen controls appear automatically. A
-tap anywhere on the water acts like Space (start, jump, surf again). The
-d-pad on the left steers (and spins in big air); HIT punches or grabs; BARGE
-shoulder-barges while a direction is held. On the game-over screen, tap
-TITLE to go back. Works in portrait (controls sit in the black band under
-the canvas) and landscape (controls overlay the edges). The first tap tries
-to go fullscreen and lock landscape where the browser allows it. Add
-`?touch=1` to the URL to see the touch layout on a desktop.
+**Touch (phones and tablets):** the whole screen is the control surface.
+Drag anywhere to steer (the surfer follows your finger's movement, so your
+thumb can rest in the black band below the canvas), tap to jump. In big air,
+drag sideways to spin and tap to grab. Taps also start the game and restart
+after a wipeout; tap TITLE on the game-over screen to go back. There is no
+punching or barging on touch: the mobile game is pure avoidance (dodge rocks,
+sharks and rivals, jump rocks, ride ramps for tricks). Works in portrait and
+landscape; the first tap tries to go fullscreen and lock landscape where the
+browser allows it. Add `?touch=1` to the URL to try it on a desktop.
 
 Both movement schemes work at the same time. Movement accelerates while a key
 is held and decelerates to a stop when released. You cannot jump again until
@@ -195,7 +196,7 @@ Waves-Of-Rage/
     │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed
     ├── input/
     │   ├── Controls.ts     # Arrow keys + WASD + touch merged into one -1/0/1 axis pair
-    │   └── TouchControls.ts# DOM d-pad / HIT / BARGE overlay, tap = Space, fullscreen helper
+    │   └── TouchControls.ts# Drag-to-steer / tap-to-jump touch surface, fullscreen helper
     └── ui/
         ├── Hud.ts          # DISTANCE counter
         └── DebugHud.ts     # F1-toggled developer readout
