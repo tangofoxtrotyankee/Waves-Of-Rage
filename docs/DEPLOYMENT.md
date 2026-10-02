@@ -93,7 +93,11 @@ sub-path works without changing `base`.
 - `window.game` is not present in the production build (it is a dev-only
   debug handle; check the browser console).
 
-## Not yet handled
+## Mobile
 
-Mobile layout and touch controls, orientation lock, analytics and
-leaderboards are out of scope for now.
+Touch controls and both orientations are supported out of the box. On
+Android Chrome the first tap enters fullscreen and locks landscape; iOS
+Safari ignores both requests (the page still works, with the browser bars
+visible). For a home-screen app feel on iOS, users can "Add to Home Screen";
+the page sets the relevant meta tags. Analytics and leaderboards remain out
+of scope.

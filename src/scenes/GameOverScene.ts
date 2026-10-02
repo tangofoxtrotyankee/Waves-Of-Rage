@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
 import { Hud } from '../ui/Hud';
+import { touchState } from '../input/TouchControls';
 import { pixelText } from '../ui/PixelText';
 
 export interface GameOverData {
@@ -29,16 +30,24 @@ export class GameOverScene extends Phaser.Scene {
     pixelText(this, cx, 76, `DISTANCE ${Hud.pad(data.distanceUnits ?? 0, 5)}`, 0x7ff6ff).setOrigin(0.5);
     pixelText(this, cx, 90, `SCORE ${Hud.pad(data.score ?? 0, 6)}`, 0xffd166).setOrigin(0.5);
 
-    const prompt = pixelText(this, cx, 130, 'PRESS SPACE TO SURF AGAIN', 0xffffff).setOrigin(0.5);
-    pixelText(this, cx, 146, 'ESC FOR TITLE', 0xbbbbbb).setOrigin(0.5);
+    const again = touchState.enabled ? 'TAP TO SURF AGAIN' : 'PRESS SPACE TO SURF AGAIN';
+    const prompt = pixelText(this, cx, 130, again, 0xffffff).setOrigin(0.5);
+    const title = pixelText(this, cx, 146, touchState.enabled ? 'TITLE' : 'ESC FOR TITLE', 0xbbbbbb).setOrigin(0.5);
 
     this.tweens.add({ targets: prompt, alpha: 0.15, duration: 500, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
 
     this.time.delayedCall(INPUT_DELAY_MS, () => {
       const keyboard = this.input.keyboard;
-      if (!keyboard) return;
-      keyboard.once('keydown-SPACE', () => this.scene.start(SceneKeys.Game));
-      keyboard.once('keydown-ESC', () => this.scene.start(SceneKeys.Title));
+      keyboard?.once('keydown-SPACE', () => this.scene.start(SceneKeys.Game));
+      keyboard?.once('keydown-ESC', () => this.scene.start(SceneKeys.Title));
+
+      // Tap the TITLE line for the title screen, anywhere else to surf again.
+      title.setInteractive({ useHandCursor: true }).once('pointerdown', (pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        void pointer;
+        this.scene.start(SceneKeys.Title);
+      });
+      this.input.once('pointerdown', () => this.scene.start(SceneKeys.Game));
     });
   }
 }

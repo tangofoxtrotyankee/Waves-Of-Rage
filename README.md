@@ -82,6 +82,15 @@ builds.
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
 
+**Touch (phones and tablets):** on-screen controls appear automatically. A
+tap anywhere on the water acts like Space (start, jump, surf again). The
+d-pad on the left steers (and spins in big air); HIT punches or grabs; BARGE
+shoulder-barges while a direction is held. On the game-over screen, tap
+TITLE to go back. Works in portrait (controls sit in the black band under
+the canvas) and landscape (controls overlay the edges). The first tap tries
+to go fullscreen and lock landscape where the browser allows it. Add
+`?touch=1` to the URL to see the touch layout on a desktop.
+
 Both movement schemes work at the same time. Movement accelerates while a key
 is held and decelerates to a stop when released. You cannot jump again until
 you have landed. The surfer faces the way they last moved; punches and barges
@@ -185,7 +194,8 @@ Waves-Of-Rage/
     │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
     │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed
     ├── input/
-    │   └── Controls.ts     # Arrow keys + WASD merged into one -1/0/1 axis pair
+    │   ├── Controls.ts     # Arrow keys + WASD + touch merged into one -1/0/1 axis pair
+    │   └── TouchControls.ts# DOM d-pad / HIT / BARGE overlay, tap = Space, fullscreen helper
     └── ui/
         ├── Hud.ts          # DISTANCE counter
         └── DebugHud.ts     # F1-toggled developer readout
@@ -315,9 +325,8 @@ to change.
 
 ## Roadmap
 
-Feature work is paused for a playtest and balance pass. After that: the
-first proper pixel-art pass, sound and music, menus/settings/gamepad, and
-deployment for wider testing.
+Feature work is paused for a playtest and balance pass. After that: sound
+and music, menus/settings/gamepad, and deployment for wider testing.
 
 ## License
 

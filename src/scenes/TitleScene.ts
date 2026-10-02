@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
+import { requestImmersiveMode, touchState } from '../input/TouchControls';
 import { pixelText } from '../ui/PixelText';
 
 /**
@@ -19,7 +20,8 @@ export class TitleScene extends Phaser.Scene {
     const fit = Math.min(GAME_WIDTH / art.width, GAME_HEIGHT / art.height);
     art.setScale(fit);
 
-    const prompt = pixelText(this, GAME_WIDTH / 2, GAME_HEIGHT - 6, 'PRESS SPACE', 0x7ff6ff).setOrigin(0.5);
+    const promptText = touchState.enabled ? 'TAP TO START' : 'PRESS SPACE';
+    const prompt = pixelText(this, GAME_WIDTH / 2, GAME_HEIGHT - 6, promptText, 0x7ff6ff).setOrigin(0.5);
 
     this.tweens.add({
       targets: prompt,
@@ -35,6 +37,12 @@ export class TitleScene extends Phaser.Scene {
       keyboard.once('keydown-SPACE', () => this.startGame());
       keyboard.once('keydown-ENTER', () => this.startGame());
     }
+
+    // A tap (or click) on the canvas also starts; on phones try to go fullscreen in landscape.
+    this.input.once('pointerdown', () => {
+      if (touchState.enabled) void requestImmersiveMode();
+      this.startGame();
+    });
   }
 
   private startGame(): void {

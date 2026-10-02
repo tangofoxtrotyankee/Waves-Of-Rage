@@ -77,6 +77,9 @@ export class GameScene extends Phaser.Scene {
       keyboard.addCapture('F1'); // stop the browser opening its help page
       keyboard.on('keydown-F1', () => this.debugHud.toggle());
     }
+
+    // Tapping the water acts like Space (the on-screen buttons sit outside the canvas' hit path).
+    this.input.on('pointerdown', () => this.controls.requestJump());
   }
 
   override update(_time: number, delta: number): void {
