@@ -143,7 +143,7 @@ export class GameScene extends Phaser.Scene {
     this.score += points;
 
     const label = multiplier > 1 ? `+${points} x${multiplier}` : `+${points}`;
-    spawnFloatingText(this, rival.x, rival.y - rival.displayHeight, label, environmental ? '#7ff6ff' : '#ffd166');
+    spawnFloatingText(this, rival.x, rival.y - rival.displayHeight, label, environmental ? 0x7ff6ff : 0xffd166);
     this.cameras.main.shake(KNOCKOUT_SHAKE.durationMs, KNOCKOUT_SHAKE.intensity);
   }
 
@@ -178,7 +178,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!landing.clean) {
       this.player.crashLand();
-      spawnFloatingText(this, px, py, 'WIPEOUT', '#ff4d6d');
+      spawnFloatingText(this, px, py, 'WIPEOUT', 0xff4d6d);
       this.cameras.main.shake(KNOCKOUT_SHAKE.durationMs, KNOCKOUT_SHAKE.intensity);
       this.applyDamage(1, px);
       return;
@@ -186,7 +186,7 @@ export class GameScene extends Phaser.Scene {
 
     const points = GameScene.trickPoints(landing.rotation, landing.grabbed);
     this.score += points;
-    spawnFloatingText(this, px, py, `${landing.trickName} +${points}`, '#7ff6ff');
+    spawnFloatingText(this, px, py, `${landing.trickName} +${points}`, 0x7ff6ff);
   }
 
   static trickPoints(rotation: number, grabbed: boolean): number {

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
+import { pixelText } from '../ui/PixelText';
 
 /**
  * Title screen. Uses the concept artwork as a temporary background (the logo
@@ -18,15 +19,7 @@ export class TitleScene extends Phaser.Scene {
     const fit = Math.min(GAME_WIDTH / art.width, GAME_HEIGHT / art.height);
     art.setScale(fit);
 
-    const prompt = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 6, 'PRESS SPACE', {
-        fontFamily: 'monospace',
-        fontSize: '8px',
-        color: '#7ff6ff',
-        stroke: '#1a0b2e',
-        strokeThickness: 3,
-      })
-      .setOrigin(0.5);
+    const prompt = pixelText(this, GAME_WIDTH / 2, GAME_HEIGHT - 6, 'PRESS SPACE', 0x7ff6ff).setOrigin(0.5);
 
     this.tweens.add({
       targets: prompt,

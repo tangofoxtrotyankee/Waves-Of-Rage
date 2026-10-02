@@ -1,11 +1,9 @@
 import Phaser from 'phaser';
 
-import { GAME_HEIGHT, GAME_WIDTH } from '../game/constants';
+import { Animations, AssetKeys, GAME_HEIGHT, GAME_WIDTH, SurferFrame } from '../game/constants';
 import { GAMEPLAY } from '../game/gameplay';
 import type { Controls } from '../input/Controls';
 import { perspectiveScale } from '../systems/Perspective';
-
-const TEXTURE_KEY = 'player-placeholder';
 
 /** Placeholder sprite size, sized for a future 32x40 / 32x48 pixel-art surfer. */
 const SPRITE_WIDTH = 24;
@@ -127,8 +125,9 @@ export interface LandingResult {
  * with acceleration and deceleration; no physics engine is involved.
  */
 export class Player extends Phaser.GameObjects.Container {
-  private readonly sprite: Phaser.GameObjects.Image;
+  private readonly sprite: Phaser.GameObjects.Sprite;
   private readonly shadow: Phaser.GameObjects.Ellipse;
+  private readonly spray: Phaser.GameObjects.Sprite;
   private readonly fist: Phaser.GameObjects.Rectangle;
 
   private facingDirection: Facing = 1;
@@ -154,17 +153,18 @@ export class Player extends Phaser.GameObjects.Container {
   private wipedOut = false;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    Player.ensureTexture(scene);
     super(scene, x, y);
 
     this.shadow = scene.add.ellipse(0, -2, SPRITE_WIDTH, 6, 0x000000, 0.35).setVisible(false);
-    this.sprite = scene.add.image(0, 0, TEXTURE_KEY).setOrigin(0.5, 1);
+    this.spray = scene.add.sprite(0, 2, AssetKeys.Spray).setOrigin(0.5, 1);
+    this.spray.play(Animations.Spray);
+    this.sprite = scene.add.sprite(0, 0, AssetKeys.Player, SurferFrame.Surf).setOrigin(0.5, 1);
     this.fist = scene.add.rectangle(0, -22, 8, 6, 0xffe066).setVisible(false);
     this.trickLabel = scene.add
       .text(0, -SPRITE_HEIGHT - 6, '', { fontFamily: 'monospace', fontSize: '8px', color: '#7ff6ff', stroke: '#1a0b2e', strokeThickness: 2 })
       .setOrigin(0.5, 1)
       .setVisible(false);
-    this.add([this.shadow, this.sprite, this.fist, this.trickLabel]);
+    this.add([this.shadow, this.spray, this.sprite, this.fist, this.trickLabel]);
 
     this.applyPerspective();
     scene.add.existing(this);
@@ -294,7 +294,6 @@ export class Player extends Phaser.GameObjects.Container {
     if (this.wipedOut || this.isBigAir || this.isAttacking || this.isBarging || this.attackCooldownTimer > 0) return false;
     this.attackTimer = PLAYER_ATTACK.durationSeconds;
     this.attackCooldownTimer = PLAYER_ATTACK.durationSeconds + PLAYER_ATTACK.cooldownSeconds;
-    this.fist.setPosition(this.facingDirection * (SPRITE_WIDTH / 2 + 6), -20).setVisible(true);
     this.sprite.setTint(0xfff3b0);
     return true;
   }
@@ -405,7 +404,7 @@ export class Player extends Phaser.GameObjects.Container {
     this.trickLabel.setVisible(false);
     this.attackTimer = 0;
     this.bargeTimer = 0;
-    this.sprite.setTint(0xff3b3b);
+    this.sprite.setTint(0xff3b3b).setFrame(SurferFrame.Hurt);
     this.scene.tweens.add({ targets: this.sprite, angle: 90, y: 6, duration: 500, ease: 'Back.easeIn' });
   }
 
@@ -416,6 +415,7 @@ export class Player extends Phaser.GameObjects.Container {
     const dt = delta / 1000;
 
     if (this.wipedOut) {
+      this.spray.setVisible(false);
       this.applyPerspective();
       return;
     }
@@ -428,6 +428,7 @@ export class Player extends Phaser.GameObjects.Container {
       controls.consumeBarge();
       this.updateCombatTimers(dt);
       this.applyPerspective();
+      this.pickFrame(0);
       return;
     }
 
@@ -485,6 +486,28 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.setPosition(nextX, nextY);
     this.applyPerspective();
+    this.pickFrame(axisX);
+  }
+
+  /** Choose the sprite frame and flip from the current state. */
+  private pickFrame(axisX: number): void {
+    const facingLeft = this.facingDirection < 0;
+    this.spray.setVisible(!this.isAirborne && !this.wipedOut);
+
+    if (this.isInvulnerable) {
+      this.sprite.setFrame(SurferFrame.Hurt).setFlipX(facingLeft);
+    } else if (this.isBarging) {
+      // The lean frame leans left; flip it to lean the way we are dashing.
+      this.sprite.setFrame(SurferFrame.Lean).setFlipX(!facingLeft);
+    } else if (this.isAttacking) {
+      this.sprite.setFrame(SurferFrame.Punch).setFlipX(facingLeft);
+    } else if (this.isAirborne) {
+      this.sprite.setFrame(SurferFrame.Jump).setFlipX(facingLeft);
+    } else if (axisX !== 0) {
+      this.sprite.setFrame(SurferFrame.Lean).setFlipX(axisX > 0);
+    } else {
+      this.sprite.setFrame(SurferFrame.Surf).setFlipX(facingLeft);
+    }
   }
 
   /** Count down attack / barge durations and cooldowns, clearing their visuals. */
@@ -591,37 +614,4 @@ export class Player extends Phaser.GameObjects.Container {
     return velocity - Math.sign(velocity) * step;
   }
 
-  /** Draw the placeholder surfer (board + body) into a texture once. */
-  private static ensureTexture(scene: Phaser.Scene): void {
-    if (scene.textures.exists(TEXTURE_KEY)) return;
-
-    const g = scene.make.graphics({ x: 0, y: 0 }, false);
-
-    // Surfboard
-    g.fillStyle(0xffb703);
-    g.fillRect(1, 24, 22, 6);
-    g.fillStyle(0xe76f51);
-    g.fillRect(3, 26, 18, 2);
-
-    // Legs
-    g.fillStyle(0x264653);
-    g.fillRect(7, 16, 4, 8);
-    g.fillRect(13, 16, 4, 8);
-
-    // Torso
-    g.fillStyle(0x2a9d8f);
-    g.fillRect(7, 6, 10, 10);
-
-    // Arms
-    g.fillStyle(0xf4a261);
-    g.fillRect(3, 7, 4, 3);
-    g.fillRect(17, 7, 4, 3);
-
-    // Head
-    g.fillStyle(0xf4a261);
-    g.fillRect(9, 0, 6, 6);
-
-    g.generateTexture(TEXTURE_KEY, SPRITE_WIDTH, SPRITE_HEIGHT);
-    g.destroy();
-  }
 }
