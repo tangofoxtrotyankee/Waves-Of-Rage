@@ -34,6 +34,32 @@ export const PLAYER_JUMP = {
   durationSeconds: 0.6,
 } as const;
 
+/** Basic punch: a short hitbox on the facing side. */
+export const PLAYER_ATTACK = {
+  durationSeconds: 0.18,
+  cooldownSeconds: 0.35,
+  damage: 1,
+  /** Sideways shove given to a rival that is hit. */
+  knockback: 90,
+  /** Hitbox size (pixels, before perspective scale) and how far it reaches past the body. */
+  reach: 16,
+  width: 18,
+  height: 22,
+} as const;
+
+/** Shoulder barge: a dash with a bigger hitbox and far more knockback. */
+export const PLAYER_BARGE = {
+  durationSeconds: 0.22,
+  cooldownSeconds: 0.9,
+  damage: 1,
+  knockback: 230,
+  /** Horizontal speed during the barge. */
+  speed: 260,
+  reach: 12,
+  width: 24,
+  height: 26,
+} as const;
+
 /** What happens when the surfer hits something. */
 export const PLAYER_HIT = {
   /** Sideways shove away from the obstacle, pixels per second. */
@@ -61,7 +87,9 @@ export const PLAYER_BOUNDS = {
   maxY: GAME_HEIGHT,
 } as const;
 
-export type PlayerState = 'surfing' | 'jumping' | 'hit' | 'wipedOut';
+export type PlayerState = 'surfing' | 'jumping' | 'attacking' | 'barging' | 'hit' | 'wipedOut';
+
+export type Facing = -1 | 1;
 
 /**
  * The player's surfer.
@@ -74,6 +102,13 @@ export type PlayerState = 'surfing' | 'jumping' | 'hit' | 'wipedOut';
 export class Player extends Phaser.GameObjects.Container {
   private readonly sprite: Phaser.GameObjects.Image;
   private readonly shadow: Phaser.GameObjects.Ellipse;
+  private readonly fist: Phaser.GameObjects.Rectangle;
+
+  private facingDirection: Facing = 1;
+  private attackTimer = 0;
+  private attackCooldownTimer = 0;
+  private bargeTimer = 0;
+  private bargeCooldownTimer = 0;
 
   private velocityX = 0;
   private velocityY = 0;
@@ -90,7 +125,8 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.shadow = scene.add.ellipse(0, -2, SPRITE_WIDTH, 6, 0x000000, 0.35).setVisible(false);
     this.sprite = scene.add.image(0, 0, TEXTURE_KEY).setOrigin(0.5, 1);
-    this.add([this.shadow, this.sprite]);
+    this.fist = scene.add.rectangle(0, -22, 8, 6, 0xffe066).setVisible(false);
+    this.add([this.shadow, this.sprite, this.fist]);
 
     this.applyPerspective();
     scene.add.existing(this);
@@ -101,8 +137,32 @@ export class Player extends Phaser.GameObjects.Container {
   get playerState(): PlayerState {
     if (this.wipedOut) return 'wipedOut';
     if (this.isInvulnerable) return 'hit';
+    if (this.isBarging) return 'barging';
+    if (this.isAttacking) return 'attacking';
     if (this.isJumping) return 'jumping';
     return 'surfing';
+  }
+
+  get facing(): Facing {
+    return this.facingDirection;
+  }
+
+  get isAttacking(): boolean {
+    return this.attackTimer > 0;
+  }
+
+  get isBarging(): boolean {
+    return this.bargeTimer > 0;
+  }
+
+  /** Seconds until another punch is allowed (0 = ready). */
+  get attackCooldown(): number {
+    return this.attackCooldownTimer;
+  }
+
+  /** Seconds until another barge is allowed (0 = ready). */
+  get bargeCooldown(): number {
+    return this.bargeCooldownTimer;
   }
 
   get isJumping(): boolean {
@@ -145,7 +205,46 @@ export class Player extends Phaser.GameObjects.Container {
     return Phaser.Geom.Rectangle.Inflate(b, -w * HITBOX_INSET, -h * HITBOX_INSET);
   }
 
+  /**
+   * Active offensive hitbox on the facing side, or null when not attacking.
+   * The barge box is used while barging, otherwise the punch box.
+   */
+  get attackHitBox(): Phaser.Geom.Rectangle | null {
+    const spec = this.isBarging ? PLAYER_BARGE : this.isAttacking ? PLAYER_ATTACK : null;
+    if (!spec) return null;
+    const s = this.scaleX;
+    const w = spec.width * s;
+    const h = spec.height * s;
+    const centreX = this.x + this.facingDirection * (SPRITE_WIDTH / 2 + spec.reach - spec.width / 2) * s;
+    const bottom = this.y - 4 * s;
+    return new Phaser.Geom.Rectangle(centreX - w / 2, bottom - h, w, h);
+  }
+
   // --- actions -------------------------------------------------------------
+
+  /** Throw a punch if allowed. Returns true if an attack started. */
+  attack(): boolean {
+    if (this.wipedOut || this.isAttacking || this.isBarging || this.attackCooldownTimer > 0) return false;
+    this.attackTimer = PLAYER_ATTACK.durationSeconds;
+    this.attackCooldownTimer = PLAYER_ATTACK.durationSeconds + PLAYER_ATTACK.cooldownSeconds;
+    this.fist.setPosition(this.facingDirection * (SPRITE_WIDTH / 2 + 6), -20).setVisible(true);
+    this.sprite.setTint(0xfff3b0);
+    return true;
+  }
+
+  /** Shoulder barge in `direction` if allowed. Returns true if it started. */
+  barge(direction: Facing): boolean {
+    if (this.wipedOut || this.isJumping || this.isBarging || this.bargeCooldownTimer > 0) return false;
+    this.facingDirection = direction;
+    this.sprite.setFlipX(direction < 0);
+    this.bargeTimer = PLAYER_BARGE.durationSeconds;
+    this.bargeCooldownTimer = PLAYER_BARGE.durationSeconds + PLAYER_BARGE.cooldownSeconds;
+    this.attackTimer = 0;
+    this.fist.setVisible(false);
+    this.velocityX = direction * PLAYER_BARGE.speed;
+    this.sprite.setTint(0x7ff6ff).setAngle(direction * 18);
+    return true;
+  }
 
   /** Start a jump if on the wave. Returns true if a jump started. */
   jump(): boolean {
@@ -166,7 +265,10 @@ export class Player extends Phaser.GameObjects.Container {
     this.invulnerableUntil = this.scene.time.now + PLAYER_HIT.invulnerableSeconds * 1000;
 
     this.blinkTween?.stop();
-    this.sprite.setTint(0xff3b3b);
+    this.sprite.setTint(0xff3b3b).setAngle(0);
+    this.fist.setVisible(false);
+    this.attackTimer = 0;
+    this.bargeTimer = 0;
     this.setAlpha(1);
     this.scene.time.delayedCall(PLAYER_HIT.flashSeconds * 1000, () => {
       if (this.wipedOut) return;
@@ -190,6 +292,9 @@ export class Player extends Phaser.GameObjects.Container {
     this.velocityY = 0;
     this.blinkTween?.stop();
     this.setAlpha(1);
+    this.fist.setVisible(false);
+    this.attackTimer = 0;
+    this.bargeTimer = 0;
     this.sprite.setTint(0xff3b3b);
     this.scene.tweens.add({ targets: this.sprite, angle: 90, y: 6, duration: 500, ease: 'Back.easeIn' });
   }
@@ -205,17 +310,30 @@ export class Player extends Phaser.GameObjects.Container {
       return;
     }
 
-    if (controls.consumeJump()) this.jump();
-    this.updateJump(dt);
+    const axisX = controls.axisX;
+    if (axisX !== 0 && !this.isBarging) {
+      this.facingDirection = axisX > 0 ? 1 : -1;
+      this.sprite.setFlipX(this.facingDirection < 0);
+    }
 
-    this.velocityX = Player.integrateAxis(
-      this.velocityX,
-      controls.axisX,
-      PLAYER_MOVEMENT.maxSpeedX,
-      PLAYER_MOVEMENT.accelerationX,
-      PLAYER_MOVEMENT.decelerationX,
-      dt,
-    );
+    if (controls.consumeJump()) this.jump();
+    if (controls.consumeAttack()) this.attack();
+    if (controls.consumeBarge() && axisX !== 0) this.barge(axisX > 0 ? 1 : -1);
+
+    this.updateJump(dt);
+    this.updateCombatTimers(dt);
+
+    // During a barge the dash owns horizontal movement.
+    if (!this.isBarging) {
+      this.velocityX = Player.integrateAxis(
+        this.velocityX,
+        axisX,
+        PLAYER_MOVEMENT.maxSpeedX,
+        PLAYER_MOVEMENT.accelerationX,
+        PLAYER_MOVEMENT.decelerationX,
+        dt,
+      );
+    }
     this.velocityY = Player.integrateAxis(
       this.velocityY,
       controls.axisY,
@@ -234,6 +352,28 @@ export class Player extends Phaser.GameObjects.Container {
 
     this.setPosition(nextX, nextY);
     this.applyPerspective();
+  }
+
+  /** Count down attack / barge durations and cooldowns, clearing their visuals. */
+  private updateCombatTimers(dt: number): void {
+    this.attackCooldownTimer = Math.max(0, this.attackCooldownTimer - dt);
+    this.bargeCooldownTimer = Math.max(0, this.bargeCooldownTimer - dt);
+
+    if (this.attackTimer > 0) {
+      this.attackTimer = Math.max(0, this.attackTimer - dt);
+      if (this.attackTimer === 0) {
+        this.fist.setVisible(false);
+        if (!this.isInvulnerable) this.sprite.clearTint();
+      }
+    }
+
+    if (this.bargeTimer > 0) {
+      this.bargeTimer = Math.max(0, this.bargeTimer - dt);
+      if (this.bargeTimer === 0) {
+        this.sprite.setAngle(0);
+        if (!this.isInvulnerable) this.sprite.clearTint();
+      }
+    }
   }
 
   /** Lift the sprite along a parabola, then land cleanly back at zero. */

@@ -11,6 +11,8 @@ export const SHARK = {
   damage: 2,
   /** A shark can't be jumped: it's in the water, not on it, and it'll get you. */
   jumpable: false,
+  /** Knocked rivals that slam into it wipe out. */
+  knocksOutRivals: true,
   /** Swims towards the player, so it closes a little slower than a rock. */
   approachFactor: 0.85,
   /** Seconds between sideways lunges (random within this range). */
@@ -37,6 +39,7 @@ export class Shark extends Obstacle {
       approachFactor: SHARK.approachFactor,
       damage: SHARK.damage,
       jumpable: SHARK.jumpable,
+      knocksOutRivals: SHARK.knocksOutRivals,
     });
     this.targetX = x;
     this.untilNextLunge = Shark.rollInterval();

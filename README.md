@@ -7,9 +7,11 @@ a 16-bit, Mega Drive-era arcade style inspired by the energy and presentation
 of games such as *Streets of Rage* and *Road Rash*, but it is an original surfing
 game with original assets and gameplay.
 
-> **Status:** a complete placeholder arcade run. Title screen, surf down the
-> wave, jump rocks, dodge rival surfers and sharks, lose health, wipe out,
-> see your distance and score, and restart. No finished art or audio yet.
+> **Status:** a complete placeholder arcade run with combat. Title screen,
+> surf down the wave, jump rocks, dodge sharks, punch and barge rival
+> surfers off their boards (or into rocks and sharks) for combo-multiplied
+> points, lose health, wipe out, see your results, restart. No finished art
+> or audio yet.
 
 ## Tech stack
 
@@ -70,24 +72,34 @@ builds.
 | Move right                          | Right arrow / D |
 | Move further up the wave            | Up arrow / W    |
 | Move down towards the foreground    | Down arrow / S  |
-| Jump (clears rocks only)            | Space / X       |
-| Toggle debug readout                | F1              |
+| Jump (clears rocks only)            | Space           |
+| Attack (punch on the facing side)   | X / J           |
+| Shoulder barge (while moving L/R)   | Shift           |
+| Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
 
 Both movement schemes work at the same time. Movement accelerates while a key
 is held and decelerates to a stop when released. You cannot jump again until
-you have landed. The debug readout (off by default) shows player state,
-health, score, position, velocity, air height, game speed, live hazards by
-type and time to the next spawn; it lives in `src/ui/DebugHud.ts` and is easy
-to delete later.
+you have landed. The surfer faces the way they last moved; punches and barges
+go that way. The debug readout (off by default) shows player state, facing,
+health, score, combo, attack and barge cooldowns, position, velocity, air
+height, game speed, hazards and rivals, and outlines every hitbox; it lives
+in `src/ui/DebugHud.ts` and is easy to delete later.
 
 ## How a run works
 
 - You start with 3 health. Rocks and rival surfers take 1, sharks take 2.
 - A hit knocks you sideways, flashes the surfer, cuts speed for a moment and
   grants about a second of immunity.
-- Rocks can be jumped for a bonus. Rival surfers and sharks must be dodged.
-- Score grows with distance plus jump bonuses. Distance is shown separately.
+- Rocks can be jumped for a bonus. Sharks must be dodged.
+- Rival surfers have 2 health. They drift about, sometimes head for your
+  lane, and shoulder-check you when close (on a cooldown). A punch does 1
+  damage with a small shove; a barge does 1 damage with a big shove. At zero
+  health they lose their board and wipe out for 500 points. A rival knocked
+  into a rock or shark wipes out immediately for 750 points.
+- Knockouts within 4 seconds of each other build a combo multiplier (up to
+  x5) that applies to knockout points only, never to distance.
+- Score grows with distance plus bonuses. Distance is shown separately.
 - Speed ramps up over time, spawn gaps shrink gradually, and sharks only
   appear after you have survived for a while (see `DIFFICULTY` in
   `src/game/gameplay.ts`).
@@ -142,12 +154,14 @@ Waves-Of-Rage/
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
     │   └── GameOverScene.ts# WIPEOUT screen with results, restart and title prompts
     ├── entities/
-    │   ├── Player.ts       # The surfer: movement, jump, hit reaction, wipeout, states
-    │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, approach, perspective, hitbox
-    │   ├── Rock.ts         # Stationary, jumpable, 1 damage
-    │   ├── RivalSurfer.ts  # Slower-closing, weaves sideways, 1 damage
-    │   └── Shark.ts        # Swims at you, lunges sideways now and then, 2 damage
+    │   ├── Player.ts       # The surfer: movement, facing, jump, punch, barge, hit, wipeout
+    │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
+    │   ├── Rock.ts         # Stationary, jumpable, 1 damage, knocks out rivals
+    │   ├── RivalSurfer.ts  # Enemy: health, drift/seek AI, shoulder check, stun, knockout
+    │   └── Shark.ts        # Swims at you, lunges sideways, 2 damage, knocks out rivals
     ├── systems/
+    │   ├── Combat.ts       # Resolves punches/barges vs rivals and rivals vs hazards
+    │   ├── Combo.ts        # Knockout combo multiplier with a timed window
     │   ├── GameSpeed.ts    # Ramping forward speed with collision penalty (GAME_SPEED)
     │   ├── ObstacleSpawner.ts # Distance-based spawning with lateral clearance (SPAWN)
     │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
@@ -181,10 +195,16 @@ Waves-Of-Rage/
    damage, jumpable) and optional extra motion. The base class moves them
    down the screen at game speed, applies perspective and destroys them
    off-screen. `ObstacleSpawner` picks the type using `DIFFICULTY`.
-8. When health reaches zero `GameScene` stops spawning, tells `GameSpeed`
+8. `Combat` runs each frame: the player's active attack box (punch or barge,
+   on the facing side) is tested against living rivals, each swing hitting a
+   rival at most once, and rivals still sliding from a hit are tested against
+   hazards flagged `knocksOutRivals`. It reports hits and knockouts back to
+   `GameScene`, which applies `Combo`, adds score, pops floating text and
+   nudges the camera.
+9. When health reaches zero `GameScene` stops spawning, tells `GameSpeed`
    to coast to a halt, plays the wipeout on the player and then starts
    `GameOverScene` with the run's distance and score.
-9. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
+10. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
    and scrolls them as TileSprites at multiples of game speed. Nothing else
    depends on it, so it can be replaced by pixel-art wave tiles later.
 
@@ -199,14 +219,17 @@ Waves-Of-Rage/
 - **Position things** using `GAME_WIDTH` / `GAME_HEIGHT` rather than hard-coded
   numbers so the resolution can be changed in one place.
 - **Tune the game** through the exported config objects at the top of each
-  module: `PLAYER_MOVEMENT`, `PLAYER_JUMP`, `PLAYER_HIT` and `PLAYER_BOUNDS`
-  in `Player.ts`, `ROCK` / `RIVAL` / `SHARK` in their entity files,
+  module: `PLAYER_MOVEMENT`, `PLAYER_JUMP`, `PLAYER_ATTACK`, `PLAYER_BARGE`,
+  `PLAYER_HIT` and `PLAYER_BOUNDS` in `Player.ts`, `ROCK` / `RIVAL` / `SHARK`
+  in their entity files (rival health, AI timings and check cooldown live
+  in `RIVAL`), knockout and combo values in `GAMEPLAY`,
   `GAME_SPEED` in `GameSpeed.ts`, `SPAWN` in `ObstacleSpawner.ts`,
   `GAMEPLAY` and `DIFFICULTY` in `src/game/gameplay.ts`, and
   `OCEAN_SPEED_FACTORS` in `OceanScroller.ts`.
 - **Add a hazard type** by extending `Obstacle` (see `Rock.ts` for the
-  minimal version), giving it a `kind`, `damage` and `jumpable` flag, and
-  adding it to `ObstacleSpawner.pick()`.
+  minimal version), giving it a `kind`, `damage`, `jumpable` and
+  `knocksOutRivals` flag, and adding it to `ObstacleSpawner.pick()`.
+  Hazards that should hurt only sometimes override `isDangerous`.
 - **Add an entity** under `src/entities/`, give it an `update(delta)` method
   and call it from `GameScene.update()`. Visual-only or world-level systems
   go under `src/systems/`.
@@ -238,8 +261,8 @@ it. Gameplay graphics are still placeholders.
 
 ## Roadmap (not started)
 
-Fighting and tricks, near-miss bonuses, menus, audio, touch controls, and the
-full 16-bit art pass.
+Weapons and special moves, tricks, near-miss bonuses, pickups, menus, audio,
+touch and gamepad controls, and the full 16-bit art pass.
 
 ## License
 

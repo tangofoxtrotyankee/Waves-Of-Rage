@@ -9,6 +9,8 @@ const HEIGHT = 16;
 export const ROCK = {
   damage: 1,
   jumpable: true,
+  /** Knocked rivals that slam into it wipe out. */
+  knocksOutRivals: true,
 } as const;
 
 /** A rock sticking out of the water. Stationary, so it approaches at full speed. */

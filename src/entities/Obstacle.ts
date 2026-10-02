@@ -11,6 +11,12 @@ const OFFSCREEN_MARGIN = 32;
 
 export type HazardKind = 'rock' | 'rival' | 'shark';
 
+/** Per-frame world information hazards may react to. */
+export interface HazardContext {
+  playerX: number;
+  playerY: number;
+}
+
 export interface ObstacleConfig {
   kind: HazardKind;
   texture: string;
@@ -20,6 +26,8 @@ export interface ObstacleConfig {
   damage: number;
   /** Whether the player passes safely over it while airborne. */
   jumpable: boolean;
+  /** Whether a rival knocked into this hazard wipes out immediately. */
+  knocksOutRivals: boolean;
 }
 
 /**
@@ -32,6 +40,7 @@ export abstract class Obstacle extends Phaser.GameObjects.Image {
   readonly kind: HazardKind;
   readonly damage: number;
   readonly jumpable: boolean;
+  readonly knocksOutRivals: boolean;
   private readonly approachFactor: number;
 
   /** Set once the player has been credited for clearing this hazard. */
@@ -42,6 +51,7 @@ export abstract class Obstacle extends Phaser.GameObjects.Image {
     this.kind = config.kind;
     this.damage = config.damage;
     this.jumpable = config.jumpable;
+    this.knocksOutRivals = config.knocksOutRivals;
     this.approachFactor = config.approachFactor;
 
     this.setOrigin(0.5, 1);
@@ -49,11 +59,16 @@ export abstract class Obstacle extends Phaser.GameObjects.Image {
     scene.add.existing(this);
   }
 
+  /** Whether touching this hazard hurts the player right now. */
+  get isDangerous(): boolean {
+    return true;
+  }
+
   /** Advance by `delta` ms at the given game speed. Destroys itself off-screen. */
-  update(delta: number, gameSpeed: number): void {
+  update(delta: number, gameSpeed: number, ctx: HazardContext): void {
     const dt = delta / 1000;
     this.y += gameSpeed * this.approachFactor * dt;
-    this.onUpdate(dt);
+    this.onUpdate(dt, ctx);
     this.applyPerspective();
 
     if (this.y - this.displayHeight > GAME_HEIGHT + OFFSCREEN_MARGIN) {
@@ -68,9 +83,9 @@ export abstract class Obstacle extends Phaser.GameObjects.Image {
   }
 
   /** Hook for subclass-specific motion. */
-  protected onUpdate(_dt: number): void {}
+  protected onUpdate(_dt: number, _ctx: HazardContext): void {}
 
-  private applyPerspective(): void {
+  protected applyPerspective(): void {
     this.setScale(perspectiveScale(this.y));
     this.setDepth(this.y);
   }

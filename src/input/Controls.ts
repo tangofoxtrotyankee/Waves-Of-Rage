@@ -5,7 +5,8 @@ import Phaser from 'phaser';
  *
  * Reads both the arrow keys and WASD and exposes them as a single normalised
  * axis so the rest of the game never cares which scheme is being used.
- * Values are -1, 0 or 1 on each axis. Jump is Space or X.
+ * Values are -1, 0 or 1 on each axis. Jump is Space, attack is X or J,
+ * shoulder barge is Shift.
  */
 export class Controls {
   private readonly cursors: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -16,6 +17,8 @@ export class Controls {
     right: Phaser.Input.Keyboard.Key;
   };
   private jumpRequested = false;
+  private attackRequested = false;
+  private bargeRequested = false;
 
   constructor(scene: Phaser.Scene) {
     const keyboard = scene.input.keyboard;
@@ -31,14 +34,16 @@ export class Controls {
       left: keyboard.addKey(KeyCodes.A),
       right: keyboard.addKey(KeyCodes.D),
     };
-    // Jump is latched from the keydown event rather than polled, so even a
+    // Actions are latched from keydown events rather than polled, so even a
     // tap shorter than one frame is never lost. Auto-repeat is ignored.
-    const requestJump = (event: KeyboardEvent) => {
-      if (!event.repeat) this.jumpRequested = true;
+    const latch = (set: () => void) => (event: KeyboardEvent) => {
+      if (!event.repeat) set();
     };
-    keyboard.on('keydown-SPACE', requestJump);
-    keyboard.on('keydown-X', requestJump);
-    keyboard.addCapture(KeyCodes.SPACE); // stop the page scrolling
+    keyboard.on('keydown-SPACE', latch(() => (this.jumpRequested = true)));
+    keyboard.on('keydown-X', latch(() => (this.attackRequested = true)));
+    keyboard.on('keydown-J', latch(() => (this.attackRequested = true)));
+    keyboard.on('keydown-SHIFT', latch(() => (this.bargeRequested = true)));
+    keyboard.addCapture([KeyCodes.SPACE, KeyCodes.SHIFT]); // stop the page scrolling / browser shortcuts
   }
 
   /** -1 = left, 1 = right, 0 = neither (or both). */
@@ -59,6 +64,20 @@ export class Controls {
   consumeJump(): boolean {
     const requested = this.jumpRequested;
     this.jumpRequested = false;
+    return requested;
+  }
+
+  /** True once per attack key press (X or J); reading it clears the request. */
+  consumeAttack(): boolean {
+    const requested = this.attackRequested;
+    this.attackRequested = false;
+    return requested;
+  }
+
+  /** True once per barge key press (Shift); reading it clears the request. */
+  consumeBarge(): boolean {
+    const requested = this.bargeRequested;
+    this.bargeRequested = false;
     return requested;
   }
 }

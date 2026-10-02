@@ -12,6 +12,12 @@ export const GAMEPLAY = {
   scorePerDistanceUnit: 1,
   /** Bonus for clearing a jumpable hazard in mid-air. */
   jumpClearBonus: 50,
+  /** Combat bonuses. Combo multiplier applies to these only, never to distance. */
+  rivalKnockoutScore: 500,
+  environmentalKnockoutScore: 750,
+  /** Seconds after a knockout in which the next one raises the combo. */
+  comboWindowSeconds: 4,
+  comboMax: 5,
   /** Seconds the wipeout plays out before the game-over screen appears. */
   wipeoutSeconds: 1.4,
 } as const;

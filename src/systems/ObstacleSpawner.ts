@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-import { Obstacle } from '../entities/Obstacle';
+import { Obstacle, type HazardContext } from '../entities/Obstacle';
 import { PLAYER_BOUNDS } from '../entities/Player';
 import { RivalSurfer } from '../entities/RivalSurfer';
 import { Rock } from '../entities/Rock';
@@ -71,12 +71,12 @@ export class ObstacleSpawner {
     this.spawning = false;
   }
 
-  update(delta: number, gameSpeed: number, elapsedSeconds: number): void {
+  update(delta: number, gameSpeed: number, elapsedSeconds: number, ctx: HazardContext): void {
     const dt = delta / 1000;
     this.travelledSinceSpawn += gameSpeed * dt;
 
     for (const obstacle of this.active) {
-      obstacle.update(delta, gameSpeed);
+      obstacle.update(delta, gameSpeed, ctx);
     }
 
     if (this.spawning && this.travelledSinceSpawn >= this.nextGap && this.active.length < SPAWN.maxActive) {
