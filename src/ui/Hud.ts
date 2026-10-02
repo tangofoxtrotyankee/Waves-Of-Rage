@@ -6,6 +6,7 @@ import { pixelText } from './PixelText';
 
 export interface HudInfo {
   health: number;
+  maxHealth: number;
   score: number;
   distanceUnits: number;
   /** 1 when no combo is running. */
@@ -40,8 +41,8 @@ export class Hud {
   }
 
   update(info: HudInfo): void {
-    const full = Math.max(0, Math.min(info.health, GAMEPLAY.startHealth));
-    const empty = Math.max(0, GAMEPLAY.startHealth - full);
+    const full = Math.max(0, Math.min(info.health, info.maxHealth));
+    const empty = Math.max(0, info.maxHealth - full);
     this.health.setText('\u2665'.repeat(full) + '\u2661'.repeat(empty));
     this.score.setText(Hud.pad(info.score, 6));
     this.distance.setText(Hud.pad(info.distanceUnits, 5));

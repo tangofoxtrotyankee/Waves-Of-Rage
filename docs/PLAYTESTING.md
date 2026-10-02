@@ -37,6 +37,15 @@ balancing, remember the two audiences: keyboard players fight, touch players
 only avoid. The drag feel is tuned by `TOUCH.sensitivity` in
 `src/input/TouchControls.ts`.
 
+## Difficulty modes
+
+Normal is the tuning described in this guide. Easy and Insanity are scale
+factors on it in `src/game/difficulty.ts` (speed, ramp, spawn density,
+shark and ramp unlock times, starting health). Play each mode a few times:
+Easy should let a new player reach the first ramp; Insanity should kill a
+good player inside a minute or two but never feel random. Each mode has
+its own top 10, so scores are only compared within a mode.
+
 ## The session
 
 Play 10 to 20 full runs. Vary your style: pure dodging, pure fighting,

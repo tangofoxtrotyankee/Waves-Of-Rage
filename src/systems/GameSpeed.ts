@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 
+import { difficultySpec, type DifficultySpec } from '../game/difficulty';
+
 /**
  * Forward-speed tuning, in internal pixels per second. Everything that moves
  * "towards" the player (ocean scroll, obstacles) derives from this value.
@@ -26,14 +28,22 @@ export const GAME_SPEED = {
  * separate factor eases to 0 so everything drifts to a halt.
  */
 export class GameSpeed {
-  private base: number = GAME_SPEED.start;
+  private readonly max: number;
+  private readonly rampPerSecond: number;
+  private base: number;
   private penalty = 1;
   private stopFactor = 1;
   private stopping = false;
 
+  constructor(mode: DifficultySpec = difficultySpec()) {
+    this.base = GAME_SPEED.start * mode.speedScale;
+    this.max = GAME_SPEED.max * mode.speedScale;
+    this.rampPerSecond = GAME_SPEED.rampPerSecond * mode.rampScale;
+  }
+
   /** Current effective speed in pixels per second. */
   get value(): number {
-    const running = Phaser.Math.Clamp(this.base * this.penalty, GAME_SPEED.min, GAME_SPEED.max);
+    const running = Phaser.Math.Clamp(this.base * this.penalty, GAME_SPEED.min, this.max);
     return running * this.stopFactor;
   }
 
@@ -45,7 +55,7 @@ export class GameSpeed {
       return;
     }
 
-    this.base = Math.min(this.base + GAME_SPEED.rampPerSecond * dt, GAME_SPEED.max);
+    this.base = Math.min(this.base + this.rampPerSecond * dt, this.max);
 
     if (this.penalty < 1) {
       const recoveryRate = (1 - GAME_SPEED.hitMultiplier) / GAME_SPEED.hitRecoverySeconds;

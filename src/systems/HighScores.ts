@@ -1,3 +1,4 @@
+import type { DifficultyMode } from '../game/difficulty';
 import { loadJSON, saveJSON } from './Storage';
 
 export interface HighScore {
@@ -16,15 +17,21 @@ export const HIGH_SCORES = {
   defaultName: 'SURFER',
 } as const;
 
-const KEY = 'highscores.v1';
 const LAST_NAME_KEY = 'lastname.v1';
 
-/** Top-N table persisted in local storage, highest score first. */
+/** Storage key for a mode's table; normal keeps the original key so existing tables survive. */
+function keyFor(mode: DifficultyMode): string {
+  return mode === 'normal' ? 'highscores.v1' : `highscores.${mode}.v1`;
+}
+
+/** Per-device top-N table for one difficulty mode, persisted in local storage. */
 export class HighScores {
   private entries: HighScore[];
+  private readonly key: string;
 
-  constructor() {
-    this.entries = HighScores.sanitise(loadJSON<HighScore[]>(KEY, []));
+  constructor(mode: DifficultyMode = 'normal') {
+    this.key = keyFor(mode);
+    this.entries = HighScores.sanitise(loadJSON<HighScore[]>(this.key, []));
   }
 
   get list(): readonly HighScore[] {
@@ -37,9 +44,13 @@ export class HighScores {
 
   /** Would this score make the table? */
   qualifies(score: number): boolean {
+    return HighScores.qualifiesIn(this.entries, score);
+  }
+
+  static qualifiesIn(list: readonly HighScore[], score: number): boolean {
     if (score <= 0) return false;
-    if (this.entries.length < HIGH_SCORES.size) return true;
-    return score > this.entries[this.entries.length - 1].score;
+    if (list.length < HIGH_SCORES.size) return true;
+    return score > list[list.length - 1].score;
   }
 
   /** Insert a run and persist. Returns the 0-based rank, or -1 if it did not qualify. */
@@ -49,7 +60,7 @@ export class HighScores {
     this.entries.push(entry);
     this.entries.sort((a, b) => b.score - a.score || a.date.localeCompare(b.date));
     this.entries = this.entries.slice(0, HIGH_SCORES.size);
-    saveJSON(KEY, this.entries);
+    saveJSON(this.key, this.entries);
     saveJSON(LAST_NAME_KEY, entry.name);
     return this.entries.indexOf(entry);
   }
@@ -69,7 +80,7 @@ export class HighScores {
     return cleaned || HIGH_SCORES.defaultName;
   }
 
-  private static sanitise(raw: unknown): HighScore[] {
+  static sanitise(raw: unknown): HighScore[] {
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((e): e is HighScore => !!e && typeof e === 'object' && typeof (e as HighScore).score === 'number')

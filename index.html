@@ -107,14 +107,23 @@
         padding: 6px 8px;
         outline: none;
       }
+      #name-entry .ne-buttons {
+        display: flex;
+        gap: 10px;
+      }
       #name-entry button {
         font: bold 16px monospace;
-        padding: 8px 28px;
+        padding: 8px 24px;
         color: #1a0b2e;
         background: #7ff6ff;
         border: 0;
         border-radius: 4px;
         letter-spacing: 2px;
+      }
+      #name-entry button.ne-skip {
+        background: transparent;
+        color: #bbb;
+        border: 2px solid #555;
       }
     </style>
   </head>
