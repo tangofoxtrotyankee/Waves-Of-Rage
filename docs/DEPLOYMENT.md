@@ -1,70 +1,60 @@
 # Deployment
 
-Waves of Rage builds to a fully static site: one HTML file, one JavaScript
-bundle and the files under `public/`. It needs no server-side code, so any
-static host works. Asset paths are relative (`base: './'` in
-`vite.config.ts`), so the build also runs from a sub-folder.
+Waves of Rage builds to a static site (`dist/`) plus a tiny Node server
+(`server/index.mjs`, no dependencies) that serves it and hosts the shared,
+cross-device top-10 table at `/api/scores`. The game works without the
+server too (any static host), falling back to a per-device table marked
+OFFLINE. Asset paths are relative (`base: './'` in `vite.config.ts`), so the
+build also runs from a sub-folder.
 
-## Build
+## Build and run
 
 ```bash
 npm ci
 npm run build      # type-checks, then writes dist/
-npm run preview    # optional: serve dist/ locally at http://localhost:4173
+npm start          # serves dist/ + /api/scores on $PORT (default 8787)
 ```
 
-Deploy the contents of `dist/`.
+Environment for the server:
 
-## Railway
+| Variable       | Purpose                                                        | Default   |
+| -------------- | -------------------------------------------------------------- | --------- |
+| `PORT`         | Port to listen on (Railway sets it)                            | `8787`    |
+| `DATABASE_URL` | Postgres connection string; when set, scores are stored there  | unset     |
+| `DATA_DIR`     | Without a database: folder for `scores.json` (use a volume)    | `./data`  |
+| `PGSSL`        | `disable` or `require` to override TLS auto-detection          | auto      |
+| `HOST`         | Bind address                                                   | `0.0.0.0` |
 
-Railway can serve the built site with a tiny static server. Two options:
+## Railway (with the shared high-score table)
 
-### Option A: static server via npm (simplest)
-
-1. Add a start script that serves `dist/`. The `serve` package is a good
-   fit and needs no config:
-
-   ```bash
-   npm install --save-dev serve
-   ```
-
-   In `package.json`:
-
-   ```json
-   "scripts": {
-     "start": "serve -s dist -l ${PORT:-3000}"
-   }
-   ```
-
-2. Create a new Railway project from the GitHub repository.
-3. In the service settings set:
+1. Create (or keep) the Railway service from the GitHub repository.
+2. Service settings:
    - **Build command:** `npm ci && npm run build`
    - **Start command:** `npm start`
-4. Railway injects `PORT`; the start script above binds to it.
-5. Generate a public domain under **Settings → Networking**.
+3. **Scores storage.** With a Railway Postgres linked to the service (its
+   `DATABASE_URL` variable is shared with the app), nothing else is
+   needed: the server creates a `scores` table on first start and keeps
+   the top 10 per difficulty there. Railway's internal
+   `postgres.railway.internal` host is used without TLS; a public proxy
+   URL gets TLS automatically (`PGSSL=disable|require` overrides).
+   Without a database, mount a volume at `/data` and set `DATA_DIR=/data`
+   so `scores.json` survives redeploys.
+4. Generate a public domain under **Settings → Networking**.
+5. Check `https://<your-domain>/api/health` returns
+   `{"ok":true,"store":"postgres",...}` (or `"file"`).
 
-Every push to the connected branch redeploys.
+Inspect or fix scores in SQL: `SELECT * FROM scores ORDER BY mode, score DESC;`
+With the file store, `scores.json` holds one array per difficulty; an older
+file containing a bare array is read as the normal table.
 
-### Option B: Dockerfile with nginx
+Every push to the connected branch redeploys. The server is plain Node
+(`>= 22.12`); no Dockerfile is needed, but one would be a ten-line
+`node:22-alpine` image running `npm ci && npm run build` then `npm start`.
 
-Add a `Dockerfile` at the repository root:
+### Static-only hosting
 
-```dockerfile
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-# Railway sets PORT; make nginx listen on it.
-CMD ["/bin/sh", "-c", "sed -i \"s/listen       80;/listen ${PORT:-80};/\" /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
-```
-
-Railway detects the Dockerfile automatically. This gives proper caching
-headers and gzip out of the box.
+`dist/` still works on any static host (GitHub Pages, itch.io, see below).
+Without the API the game shows a per-device table marked OFFLINE.
 
 ## GitHub Pages
 
@@ -87,7 +77,9 @@ sub-path works without changing `base`.
 ## Checklist before publishing
 
 - `npm run build` passes with no errors.
-- `npm test` passes (see `docs/TESTING.md`).
+- `npm test` passes (see `docs/TESTING.md`), which covers the API too.
+- `/api/health` responds on the deployed domain and `DATA_DIR` points at
+  a volume.
 - Open the preview build in a desktop browser: title loads, Space starts,
   controls respond, no console errors.
 - `window.game` is not present in the production build (it is a dev-only
@@ -95,7 +87,7 @@ sub-path works without changing `base`.
 
 ## Mobile
 
-Touch controls and both orientations are supported out of the box. On
+Touch controls and the portrait field are supported out of the box. On
 Android Chrome the first tap enters fullscreen and locks landscape; iOS
 Safari ignores both requests (the page still works, with the browser bars
 visible). For a home-screen app feel on iOS, users can "Add to Home Screen";

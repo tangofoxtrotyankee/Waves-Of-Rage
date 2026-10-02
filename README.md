@@ -27,7 +27,8 @@ game with original assets and gameplay.
 | Rendering          | `pixelArt: true`, anti-aliasing off, nearest-neighbour upscaling, rounded pixels |
 | Input              | Keyboard (desktop browsers)                         |
 
-No backend, database or additional frameworks are used.
+The only backend is a small Node server (one dependency, `pg`) that serves
+the build and keeps the shared top-10 tables in Postgres or a JSON file.
 
 ## Prerequisites
 
@@ -57,7 +58,9 @@ npm run dev
 ```
 
 Vite starts a dev server (by default at <http://localhost:5173>) with hot module
-replacement. Open the URL in a desktop browser and click the page so it has
+replacement. For the shared high-score table in development, also run
+`npm run serve` in another terminal; Vite proxies `/api` to it. Without it
+the game uses the per-device table. Open the URL in a desktop browser and click the page so it has
 keyboard focus. Edits to anything under `src/` reload automatically.
 
 In development the Phaser instance is exposed as `window.game` for poking at
@@ -70,6 +73,7 @@ builds.
 | Action                              | Keys            |
 | ----------------------------------- | --------------- |
 | Start game (title screen)           | Space / Enter   |
+| Choose difficulty (title screen)    | Left / Right, A / D, or tap the arrows |
 | Move left                           | Left arrow / A  |
 | Move right                          | Right arrow / D |
 | Move further up the wave            | Up arrow / W    |
@@ -80,7 +84,7 @@ builds.
 | Spin left / right (in big air)      | Left / A, Right / D |
 | Shoulder barge (while moving L/R)   | Shift           |
 | Toggle debug readout + hitboxes     | F1              |
-| Game over: surf again / title       | Space / Esc     |
+| Game over: surf again / main menu   | Space / Esc     |
 
 **Touch (phones and tablets):** the game runs as a portrait field (180x320)
 that fills the phone upright: horizon at the top, a long run of water ahead,
@@ -104,7 +108,11 @@ in `src/ui/DebugHud.ts` and is easy to delete later.
 
 ## How a run works
 
-- You start with 3 health. Rocks and rival surfers take 1, sharks take 2.
+- Pick a difficulty on the title screen (remembered between visits):
+  EASY (slower, sparser, sharks late, 4 hearts), NORMAL (the baseline),
+  INSANITY (1.3x speed, fast ramp, dense spawns, sharks from 5 s). Each
+  mode has its own shared top 10. Numbers live in `src/game/difficulty.ts`.
+- You start with 3 health (4 on Easy). Rocks and rival surfers take 1, sharks take 2.
 - A hit knocks you sideways, flashes the surfer, cuts speed for a moment and
   grants about a second of immunity.
 - Rocks can be jumped for a bonus. Sharks must be dodged.
@@ -151,7 +159,9 @@ npm run preview
 | Command             | What it does                                  |
 | ------------------- | --------------------------------------------- |
 | `npm run typecheck` | Runs the TypeScript compiler without emitting |
-| `npm test`          | Browser end-to-end test (see docs/TESTING.md) |
+| `npm test`          | API test + browser end-to-end test (see docs/TESTING.md) |
+| `npm run serve`     | Runs the score API + static server on port 8787 (use beside `npm run dev`) |
+| `npm start`         | Same server, for production (serves `dist/`)   |
 | `npm run art`       | Rebuilds `public/assets/sprites/` from `tools/pixelart/` |
 
 ## Project structure
@@ -168,8 +178,9 @@ Waves-Of-Rage/
 │   └── assets/
 │       ├── title/          #   320x180 crop of the concept art used by the title screen
 │       └── sprites/        #   generated sprite sheets, tiles, sky strip and pixel font
+├── server/                 # Node server: static dist/ + /api/scores (Postgres or JSON file store)
 ├── tools/pixelart/         # Zero-dependency art pipeline (ASCII maps -> PNG), `npm run art`
-├── tests/e2e.mjs           # Playwright end-to-end test, `npm test`
+├── tests/                  # api.mjs (score API) and e2e.mjs (Playwright), `npm test`
 └── src/
     ├── main.ts             # Entry point: creates the single Phaser.Game instance
     ├── vite-env.d.ts       # Vite client type definitions
@@ -194,8 +205,9 @@ Waves-Of-Rage/
     │   ├── Combat.ts       # Resolves punches/barges vs rivals and rivals vs hazards
     │   ├── Combo.ts        # Knockout combo multiplier with a timed window
     │   ├── GameSpeed.ts    # Ramping forward speed with collision penalty (GAME_SPEED)
-    │   ├── HighScores.ts   # Persistent top-10 table (qualifies / add / best)
-    │   ├── Storage.ts      # Guarded localStorage JSON helpers (the persistence layer)
+    │   ├── ScoreService.ts # Shared top-10 via /api/scores with local fallback
+    │   ├── HighScores.ts   # Per-device top-10 table and name/score validation
+    │   ├── Storage.ts      # Guarded localStorage JSON helpers
     │   ├── ObstacleSpawner.ts # Distance-based spawning with lateral clearance (SPAWN)
     │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
     │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed

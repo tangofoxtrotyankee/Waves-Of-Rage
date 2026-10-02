@@ -34,18 +34,13 @@ export const GAMEPLAY = {
 } as const;
 
 /**
- * Difficulty progression. Game speed has its own ramp in GameSpeed.ts;
- * these thresholds control hazard mix and spawn density over run time.
+ * Difficulty progression within a run. The per-mode numbers (speed scale,
+ * spawn density, shark and ramp unlock times, starting health) live in
+ * src/game/difficulty.ts; this is the curve every mode shares.
  */
 export const DIFFICULTY = {
-  /** Sharks only appear once the player has survived this long. */
-  sharkAfterSeconds: 20,
-  /** Share of spawns that are sharks once they are unlocked. */
-  sharkChance: 0.2,
   /** Spawn gaps shrink from 1x to this multiplier... */
   spawnGapMultiplierMin: 0.6,
   /** ...linearly over this many seconds of survival. */
   spawnRampSeconds: 90,
-  /** Wave ramps only appear after this long. */
-  rampAfterSeconds: 12,
 } as const;

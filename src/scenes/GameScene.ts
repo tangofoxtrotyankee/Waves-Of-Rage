@@ -4,6 +4,7 @@ import type { Obstacle } from '../entities/Obstacle';
 import { PLAYER_START, Player } from '../entities/Player';
 import { RivalSurfer } from '../entities/RivalSurfer';
 import { SceneKeys } from '../game/constants';
+import { difficultySpec, getDifficulty } from '../game/difficulty';
 import { GAMEPLAY } from '../game/gameplay';
 import { Controls } from '../input/Controls';
 import { Combat, type KnockoutEvent } from '../systems/Combat';
@@ -39,6 +40,7 @@ export class GameScene extends Phaser.Scene {
   private debugHud!: DebugHud;
 
   private health = 0;
+  private maxHealth = 3;
   private score = 0;
   private distance = 0;
   private elapsedSeconds = 0;
@@ -49,16 +51,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.health = GAMEPLAY.startHealth;
+    const mode = difficultySpec(getDifficulty());
+    this.maxHealth = mode.startHealth;
+    this.health = mode.startHealth;
     this.score = 0;
     this.distance = 0;
     this.elapsedSeconds = 0;
     this.gameOver = false;
 
-    this.gameSpeed = new GameSpeed();
+    this.gameSpeed = new GameSpeed(mode);
     this.combo = new Combo();
     this.ocean = new OceanScroller(this);
-    this.spawner = new ObstacleSpawner(this);
+    this.spawner = new ObstacleSpawner(this, mode);
     this.player = new Player(this, PLAYER_START.x, PLAYER_START.y);
     this.controls = new Controls(this);
     this.combat = new Combat({
@@ -106,6 +110,7 @@ export class GameScene extends Phaser.Scene {
 
     this.hud.update({
       health: this.health,
+      maxHealth: this.maxHealth,
       score: this.score,
       distanceUnits: this.distanceUnits,
       comboMultiplier: this.combo.multiplier,

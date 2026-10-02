@@ -61,4 +61,4 @@ export const SurferFrame = {
  * Characters in the generated pixel font, in sheet order. Must match
  * FONT_CHARS in tools/pixelart/font.mjs. Text is upper-case only.
  */
-export const FONT_CHARS = ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-x:.!/\u2665\u2661';
+export const FONT_CHARS = ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-x:.!/\u2665\u2661<>';

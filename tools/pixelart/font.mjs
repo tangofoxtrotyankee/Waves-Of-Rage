@@ -5,7 +5,7 @@
 import { Canvas } from './png.mjs';
 import { C } from './palette.mjs';
 
-export const FONT_CHARS = ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-x:.!/♥♡';
+export const FONT_CHARS = ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-x:.!/♥♡<>';
 export const CELL = 8;
 export const PER_ROW = 16;
 
@@ -57,6 +57,8 @@ const G = {
   '/': ['00001','00010','00010','00100','01000','01000','10000'],
   '♥': ['01010','11111','11111','11111','01110','00100','00000'],
   '♡': ['01010','10101','10001','10001','01010','00100','00000'],
+  '<': ['00010','00100','01000','10000','01000','00100','00010'],
+  '>': ['01000','00100','00010','00001','00010','00100','01000'],
 };
 
 export function buildFont() {

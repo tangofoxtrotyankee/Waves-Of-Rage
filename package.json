@@ -10,15 +10,21 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/e2e.mjs",
-    "art": "node tools/pixelart/build.mjs"
+    "test": "node tests/api.mjs && node tests/e2e.mjs",
+    "art": "node tools/pixelart/build.mjs",
+    "serve": "node server/index.mjs",
+    "start": "node server/index.mjs"
   },
   "dependencies": {
+    "pg": "^8.23.1",
     "phaser": "^3.90.0"
   },
   "devDependencies": {
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

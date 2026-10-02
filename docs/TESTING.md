@@ -9,9 +9,15 @@ npm run build       # typecheck + production bundle
 
 Both must pass before a commit.
 
-## Automated browser test
+## Automated tests
 
-`npm test` starts a Vite dev server on a spare port, drives the game in
+`npm test` runs two scripts. `tests/api.mjs` starts `server/index.mjs` on a
+spare port with a temporary data directory and checks the score API
+(validation, sorting, capping, per-mode tables, rate limiting, persistence,
+static serving, path traversal). Set `TEST_DATABASE_URL` to a scratch
+Postgres database to also run the same server against the Postgres store
+(the suite creates and trims a `scores` table there). Then `tests/e2e.mjs` starts the API on another spare port, a
+Vite dev server proxying `/api` to it, drives the game in
 headless Chromium with Playwright, and checks the main systems end to end:
 title screen, movement, jumping, ramps and tricks, combat, health, combos,
 game over and restart. It reads game state through the dev-only
@@ -82,5 +88,13 @@ Use this after any change to movement, combat or scoring:
     anywhere moves the surfer; in big air a sideways drag spins and a tap
     grabs; on game over a tap restarts and TITLE goes back.
 12. High scores: a qualifying run shows the name prompt; Space while typing
-    does not restart; after OK the table highlights the entry; reload and
-    the title shows BEST; a non-qualifying run shows no prompt.
+    does not restart; after OK the table highlights the entry; SKIP leaves
+    the table unchanged; reload and the title shows BEST; a non-qualifying
+    run shows no prompt.
+13. Difficulty: Left/Right on the title (or tapping the arrows) cycles
+    EASY / NORMAL / INSANITY and the choice survives a reload; Easy starts
+    with 4 hearts; Insanity is visibly faster; the game-over heading names
+    the mode and each mode keeps its own table. With the
+    server running (`npm run serve` beside `npm run dev`) the heading reads
+    TOP 10 and the entry appears on another device; without it the heading
+    reads TOP 10 OFFLINE.

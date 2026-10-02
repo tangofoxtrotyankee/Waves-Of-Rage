@@ -2,7 +2,9 @@ import Phaser from 'phaser';
 
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
 import { consumeTap, touchState } from '../input/TouchControls';
-import { HighScores } from '../systems/HighScores';
+import { difficultySpec } from '../game/difficulty';
+import type { HighScore } from '../systems/HighScores';
+import { ScoreService } from '../systems/ScoreService';
 import { Hud } from '../ui/Hud';
 import { promptForName } from '../ui/NameEntry';
 import { pixelText } from '../ui/PixelText';
@@ -53,12 +55,14 @@ export class GameOverScene extends Phaser.Scene {
 
     const again = touchState.enabled ? 'TAP TO SURF AGAIN' : 'SPACE TO SURF AGAIN';
     const prompt = pixelText(this, cx, row(landscape ? 0.72 : 0.9), again, 0xffffff).setOrigin(0.5);
-    const title = pixelText(this, cx, row(landscape ? 0.82 : 0.95), touchState.enabled ? 'TITLE' : 'ESC FOR TITLE', 0xbbbbbb).setOrigin(0.5);
+    const title = pixelText(this, cx, row(landscape ? 0.82 : 0.95), touchState.enabled ? 'MAIN MENU' : 'ESC: MAIN MENU', 0xbbbbbb).setOrigin(0.5);
     this.tweens.add({ targets: prompt, alpha: 0.15, duration: 500, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
 
-    const scores = new HighScores();
+    const scores = new ScoreService();
+    const modeLabel = difficultySpec(scores.mode).label;
+    const heading = (online: boolean) => (online ? `TOP 10 ${modeLabel}` : `${modeLabel} OFFLINE`);
     const score = Math.floor(data.score ?? 0);
-    this.renderTable(scores, -1, landscape);
+    this.renderTable(scores.list, -1, landscape, 'LOADING');
 
     const enableInput = () => {
       const keyboard = this.input.keyboard;
@@ -80,26 +84,34 @@ export class GameOverScene extends Phaser.Scene {
       });
     };
 
-    if (scores.qualifies(score)) {
-      // Keyboard off while typing so Space/Esc in the form never restart the game.
-      if (this.input.keyboard) this.input.keyboard.enabled = false;
-      void promptForName().then((name) => {
+    // Keyboard off until the shared table is known (and while typing a name),
+    // so a mashed Space can't skip the name prompt or restart mid-entry.
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+
+    void scores.load().then(async (list) => {
+      if (!this.scene.isActive(SceneKeys.GameOver)) return;
+      this.renderTable(list, -1, landscape, heading(scores.source === 'online'));
+
+      if (scores.qualifies(score)) {
+        const name = await promptForName();
         if (!this.scene.isActive(SceneKeys.GameOver)) return;
-        const rank = scores.add(name, score, data.distanceUnits ?? 0);
-        this.renderTable(scores, rank, landscape);
-        enableInput();
-      });
-    } else {
+        if (name !== null) {
+          // null = the player skipped: the run stays off the table.
+          const result = await scores.submit(name, score, data.distanceUnits ?? 0);
+          if (!this.scene.isActive(SceneKeys.GameOver)) return;
+          this.renderTable(result.list, result.rank, landscape, heading(result.source === 'online'));
+        }
+      }
       enableInput();
-    }
+    });
   }
 
   override update(): void {
     if (this.acceptTaps && !this.titleChosen && touchState.enabled && consumeTap()) this.scene.start(SceneKeys.Game);
   }
 
-  /** Draw (or redraw) the TOP 10 table, highlighting `highlightRank` if >= 0. */
-  private renderTable(scores: HighScores, highlightRank: number, landscape: boolean): void {
+  /** Draw (or redraw) the table, highlighting `highlightRank` if >= 0. */
+  private renderTable(list: readonly HighScore[], highlightRank: number, landscape: boolean, heading: string): void {
     for (const t of this.tableTexts) t.destroy();
     this.tableTexts = [];
 
@@ -108,9 +120,9 @@ export class GameOverScene extends Phaser.Scene {
     const top = landscape ? Math.round(GAME_HEIGHT * 0.08) : Math.round(GAME_HEIGHT * 0.3);
     const lineHeight = landscape ? 12 : 14;
 
-    this.tableTexts.push(pixelText(this, left + width / 2, top, 'TOP 10', 0xffd166).setOrigin(0.5, 0));
+    this.tableTexts.push(pixelText(this, left + width / 2, top, heading, 0xffd166).setOrigin(0.5, 0));
     for (let i = 0; i < 10; i++) {
-      const entry = scores.list[i];
+      const entry = list[i];
       const rank = String(i + 1).padStart(2, ' ');
       const line = entry ? `${rank} ${entry.name.padEnd(8, ' ')}${Hud.pad(entry.score, 6)}` : `${rank} ${'-'.repeat(8)}------`;
       const color = i === highlightRank ? 0x7ff6ff : entry ? 0xffffff : 0x6b6b8a;

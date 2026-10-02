@@ -6,6 +6,7 @@ import { RivalSurfer } from '../entities/RivalSurfer';
 import { Rock } from '../entities/Rock';
 import { Shark } from '../entities/Shark';
 import { WaveRamp } from '../entities/WaveRamp';
+import { difficultySpec, type DifficultySpec } from '../game/difficulty';
 import { DIFFICULTY } from '../game/gameplay';
 import { HORIZON_Y } from './OceanScroller';
 
@@ -55,8 +56,13 @@ export class ObstacleSpawner {
   private nextRampGap: number = RAMP_SPAWN.minGap;
   private lastRampX = Number.NaN;
   private rampCount = 0;
+  private readonly mode: DifficultySpec;
 
-  constructor(private readonly scene: Phaser.Scene) {
+  constructor(
+    private readonly scene: Phaser.Scene,
+    mode: DifficultySpec = difficultySpec(),
+  ) {
+    this.mode = mode;
     this.obstacles = scene.add.group();
     this.nextGap = this.rollGap(0);
     this.nextRampGap = Phaser.Math.Between(RAMP_SPAWN.minGap, RAMP_SPAWN.maxGap);
@@ -67,8 +73,8 @@ export class ObstacleSpawner {
     return this.rampCount;
   }
 
-  static rampsUnlocked(elapsedSeconds: number): boolean {
-    return elapsedSeconds >= DIFFICULTY.rampAfterSeconds;
+  rampsUnlocked(elapsedSeconds: number): boolean {
+    return elapsedSeconds >= this.mode.rampAfterSeconds;
   }
 
   /** Live obstacles (destroyed ones are removed from the group automatically). */
@@ -83,8 +89,8 @@ export class ObstacleSpawner {
   }
 
   /** Whether sharks are currently in the spawn pool. */
-  static sharksUnlocked(elapsedSeconds: number): boolean {
-    return elapsedSeconds >= DIFFICULTY.sharkAfterSeconds;
+  sharksUnlocked(elapsedSeconds: number): boolean {
+    return elapsedSeconds >= this.mode.sharkAfterSeconds;
   }
 
   /** Current multiplier on spawn gaps: 1 at the start, shrinking over time. */
@@ -110,7 +116,7 @@ export class ObstacleSpawner {
 
     if (!this.spawning) return;
 
-    if (ObstacleSpawner.rampsUnlocked(elapsedSeconds) && this.travelledSinceRamp >= this.nextRampGap) {
+    if (this.rampsUnlocked(elapsedSeconds) && this.travelledSinceRamp >= this.nextRampGap) {
       this.spawnRamp();
       this.travelledSinceRamp = 0;
       this.nextRampGap = Phaser.Math.Between(RAMP_SPAWN.minGap, RAMP_SPAWN.maxGap);
@@ -172,7 +178,7 @@ export class ObstacleSpawner {
   }
 
   private pick(elapsedSeconds: number, x: number): Obstacle {
-    if (ObstacleSpawner.sharksUnlocked(elapsedSeconds) && Math.random() < DIFFICULTY.sharkChance) {
+    if (this.sharksUnlocked(elapsedSeconds) && Math.random() < this.mode.sharkChance) {
       return new Shark(this.scene, x, SPAWN.spawnY);
     }
     return Math.random() < SPAWN.rivalChance
@@ -181,7 +187,7 @@ export class ObstacleSpawner {
   }
 
   private rollGap(elapsedSeconds: number): number {
-    return Phaser.Math.Between(SPAWN.minGap, SPAWN.maxGap) * ObstacleSpawner.gapMultiplier(elapsedSeconds);
+    return Phaser.Math.Between(SPAWN.minGap, SPAWN.maxGap) * ObstacleSpawner.gapMultiplier(elapsedSeconds) * this.mode.spawnGapScale;
   }
 
   private rollX(): number {

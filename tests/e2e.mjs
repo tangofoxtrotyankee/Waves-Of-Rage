@@ -6,9 +6,13 @@
  * existing browser binary instead of Playwright's managed one.
  */
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 
 const PORT = Number(process.env.PORT ?? 5199);
+const API_PORT = Number(process.env.API_PORT ?? 8792);
 const URL = `http://127.0.0.1:${PORT}/`;
 
 const results = [];
@@ -29,9 +33,13 @@ async function waitForServer(url, ms) {
   return false;
 }
 
-const server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+// The score API on a spare port with a throwaway data dir; Vite proxies /api to it.
+const dataDir = await mkdtemp(join(tmpdir(), 'wor-e2e-'));
+const api = spawn(process.execPath, ['server/index.mjs'], { env: { ...process.env, PORT: String(API_PORT), DATA_DIR: dataDir, HOST: '127.0.0.1' }, stdio: 'ignore' });
+const server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { env: { ...process.env, API_PORT: String(API_PORT) }, stdio: 'ignore' });
 let browser;
 try {
+  if (!(await waitForServer(`http://127.0.0.1:${API_PORT}/api/health`, 20000))) throw new Error('score API did not start');
   if (!(await waitForServer(URL, 30000))) throw new Error('dev server did not start');
 
   browser = await chromium.launch({
@@ -127,6 +135,9 @@ try {
   const table = await page.evaluate(() => window.game.scene.getScene('GameOverScene').tableTexts.map((t) => t.text));
   check('high score: table lists TESTER at rank 1', table.some((l) => l.startsWith(' 1 TESTER')), table.slice(0, 2).join('|'));
   check('high score: persisted to localStorage', await page.evaluate(() => { const v = JSON.parse(localStorage.getItem('waves-of-rage.highscores.v1') || '[]'); return v.length === 1 && v[0].name === 'TESTER'; }));
+  check('high score: table heading is online (TOP 10 NORMAL)', table[0] === 'TOP 10 NORMAL', table[0]);
+  const shared = await (await fetch(`http://127.0.0.1:${API_PORT}/api/scores`)).json();
+  check('high score: posted to the shared table', shared.scores.length === 1 && shared.scores[0].name === 'TESTER', JSON.stringify(shared.scores));
   await wait(700); await page.keyboard.press('Space'); await wait(500);
   check('Space restarts', (await scenes()).join() === 'GameScene' && (await st()).health === 3);
   await freeze(true); await clearField(); await setHealth(50);
@@ -194,6 +205,8 @@ try {
 } finally {
   await browser?.close();
   server.kill();
+  api.kill();
+  await rm(dataDir, { recursive: true, force: true });
 }
 
 const fails = results.filter((r) => !r).length;
