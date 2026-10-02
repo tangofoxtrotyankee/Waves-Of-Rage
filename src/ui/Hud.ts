@@ -36,7 +36,7 @@ export class Hud {
     pixelText(scene, GAME_WIDTH - 68, 3, 'DIST', LABEL).setOrigin(1, 0).setDepth(1000);
     this.distance = pixelText(scene, GAME_WIDTH - 68, 13, '00000', VALUE).setOrigin(1, 0).setDepth(1000);
 
-    this.combo = pixelText(scene, GAME_WIDTH / 2, 4, '', COMBO).setOrigin(0.5, 0).setDepth(1000).setVisible(false);
+    this.combo = pixelText(scene, GAME_WIDTH / 2, 24, '', COMBO).setOrigin(0.5, 0).setDepth(1000).setVisible(false);
   }
 
   update(info: HudInfo): void {

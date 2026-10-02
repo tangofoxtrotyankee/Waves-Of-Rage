@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 
 import type { Obstacle } from '../entities/Obstacle';
-import { Player } from '../entities/Player';
+import { PLAYER_START, Player } from '../entities/Player';
 import { RivalSurfer } from '../entities/RivalSurfer';
-import { GAME_WIDTH, SceneKeys } from '../game/constants';
+import { SceneKeys } from '../game/constants';
 import { GAMEPLAY } from '../game/gameplay';
 import { Controls } from '../input/Controls';
 import { Combat, type KnockoutEvent } from '../systems/Combat';
@@ -15,10 +15,6 @@ import { DebugHud } from '../ui/DebugHud';
 import { spawnFloatingText } from '../ui/FloatingText';
 import { Hud } from '../ui/Hud';
 import type { GameOverData } from './GameOverScene';
-
-/** Where the surfer starts: horizontally centred, lower-middle of the screen. */
-const PLAYER_START_X = GAME_WIDTH / 2;
-const PLAYER_START_Y = 146;
 
 /** Camera shake on a landed blow: deliberately tiny. */
 const HIT_SHAKE = { durationMs: 60, intensity: 0.004 } as const;
@@ -63,7 +59,7 @@ export class GameScene extends Phaser.Scene {
     this.combo = new Combo();
     this.ocean = new OceanScroller(this);
     this.spawner = new ObstacleSpawner(this);
-    this.player = new Player(this, PLAYER_START_X, PLAYER_START_Y);
+    this.player = new Player(this, PLAYER_START.x, PLAYER_START.y);
     this.controls = new Controls(this);
     this.combat = new Combat({
       onRivalHit: (rival) => this.onRivalHit(rival),

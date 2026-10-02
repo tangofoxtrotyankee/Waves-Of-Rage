@@ -28,7 +28,9 @@ Space.
 
 ## On a phone
 
-Touch play is deliberately simpler: drag to steer, tap to jump, drag
+The field is portrait (180x320): more water ahead, so hazards take longer
+to arrive and there are more of them on screen at once. Touch play is
+deliberately simpler: drag to steer, tap to jump, drag
 sideways in big air to spin, tap in big air to grab. No punching or barging.
 Rivals still shoulder-check you, so they are obstacles to dodge. When
 balancing, remember the two audiences: keyboard players fight, touch players
@@ -91,6 +93,12 @@ Change one thing at a time, play three runs, keep or revert.
   s.health = 50;                       // survive while experimenting
   s.elapsedSeconds = 60;               // jump ahead in the difficulty curve
   ```
+
+## High scores
+
+The top 10 is in the browser's local storage under
+`waves-of-rage.highscores.v1`. To reset it while testing, run
+`localStorage.clear()` in the console or clear site data.
 
 ## Recording findings
 

@@ -90,14 +90,21 @@ const HITBOX_INSET = 0.2;
 
 /**
  * The area the surfer is allowed to occupy (the sprite's bottom-centre, i.e.
- * the board). The top edge keeps the surfer on the lower half of the screen,
- * the bottom edge stops the board going off the foreground.
+ * the board). The top edge keeps the surfer on the lower half of the field
+ * (whichever orientation), the bottom edge stops the board going off the
+ * foreground.
  */
 export const PLAYER_BOUNDS = {
   minX: SPRITE_WIDTH / 2,
   maxX: GAME_WIDTH - SPRITE_WIDTH / 2,
-  minY: 92 + SPRITE_HEIGHT / 2,
+  minY: Math.round(GAME_HEIGHT * 0.51) + SPRITE_HEIGHT / 2,
   maxY: GAME_HEIGHT,
+} as const;
+
+/** Where a run starts: horizontally centred, a little above the bottom edge. */
+export const PLAYER_START = {
+  x: GAME_WIDTH / 2,
+  y: GAME_HEIGHT - 34,
 } as const;
 
 export type PlayerState = 'surfing' | 'jumping' | 'bigAir' | 'attacking' | 'barging' | 'hit' | 'wipedOut';

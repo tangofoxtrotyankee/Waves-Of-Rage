@@ -1,10 +1,17 @@
+import { usePortraitLayout } from './platform';
+
 /**
- * Internal (unscaled) render resolution.
- * All game logic and positioning works in these units; Phaser scales the
- * canvas up to fit the browser window while preserving this aspect ratio.
+ * Internal (unscaled) render resolution, chosen once at boot.
+ *
+ * Desktop plays the 16:9 landscape field (320x180). Touch devices play the
+ * 9:16 portrait field (180x320): same pixel scale, the horizon at the top,
+ * a longer run of water ahead and the surfer near the bottom. All game logic
+ * and positioning works in these units; Phaser scales the canvas up to fit
+ * the browser window while preserving the aspect ratio.
  */
-export const GAME_WIDTH = 320;
-export const GAME_HEIGHT = 180;
+export const IS_PORTRAIT = usePortraitLayout();
+export const GAME_WIDTH = IS_PORTRAIT ? 180 : 320;
+export const GAME_HEIGHT = IS_PORTRAIT ? 320 : 180;
 
 /**
  * Scene keys. Always reference scenes through these constants rather than
