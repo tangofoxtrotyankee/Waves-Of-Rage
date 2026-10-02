@@ -12,5 +12,11 @@ export const GAME_HEIGHT = 180;
  */
 export const SceneKeys = {
   Boot: 'BootScene',
+  Title: 'TitleScene',
   Game: 'GameScene',
+} as const;
+
+/** Keys for assets loaded from public/assets by BootScene. */
+export const AssetKeys = {
+  TitleConcept: 'title-concept',
 } as const;

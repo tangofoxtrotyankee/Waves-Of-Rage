@@ -1,13 +1,12 @@
 import Phaser from 'phaser';
 
-import { SceneKeys } from '../game/constants';
+import { AssetKeys, SceneKeys } from '../game/constants';
 
 /**
  * BootScene is the first scene to run.
  *
- * Its job is to load shared assets (sprites, bitmap fonts, audio, etc.) and
- * then hand over to the main game. Nothing is loaded yet; later steps will
- * add loader calls to preload().
+ * It loads shared assets and then hands over to the title screen. Add new
+ * loader calls to preload() as assets arrive.
  */
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -15,11 +14,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
-    // Asset loading goes here, e.g.
-    // this.load.image('surfer', 'assets/surfer.png');
+    this.load.image(AssetKeys.TitleConcept, 'assets/title/concept-320x180.png');
   }
 
   create(): void {
-    this.scene.start(SceneKeys.Game);
+    this.scene.start(SceneKeys.Title);
   }
 }

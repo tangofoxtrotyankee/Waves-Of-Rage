@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { BootScene } from '../scenes/BootScene';
 import { GameScene } from '../scenes/GameScene';
+import { TitleScene } from '../scenes/TitleScene';
 import { GAME_HEIGHT, GAME_WIDTH } from './constants';
 
 /**
@@ -36,5 +37,5 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   },
 
   // The first scene in this list starts automatically.
-  scene: [BootScene, GameScene],
+  scene: [BootScene, TitleScene, GameScene],
 };

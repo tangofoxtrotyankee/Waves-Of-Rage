@@ -7,9 +7,10 @@ a 16-bit, Mega Drive-era arcade style inspired by the energy and presentation
 of games such as *Streets of Rage* and *Road Rash*, but it is an original surfing
 game with original assets and gameplay.
 
-> **Status:** early movement prototype. A placeholder surfer can be steered
-> around a procedurally scrolling ocean at 320x180. There are no enemies,
-> jumping, scoring, menus, finished art or audio yet.
+> **Status:** first arcade loop. A title screen leads into an endless run
+> down the wave: speed ramps up, distance counts up, and placeholder rocks
+> and rival surfers come at you. Collisions knock you back and slow you
+> down but there is no health or game over yet. No finished art or audio.
 
 ## Tech stack
 
@@ -65,15 +66,17 @@ builds.
 
 | Action                              | Keys            |
 | ----------------------------------- | --------------- |
+| Start game (title screen)           | Space / Enter   |
 | Move left                           | Left arrow / A  |
 | Move right                          | Right arrow / D |
 | Move further up the wave            | Up arrow / W    |
 | Move down towards the foreground    | Down arrow / S  |
+| Toggle debug readout                | F1              |
 
-Both schemes work at the same time. Movement accelerates while a key is held
-and decelerates to a stop when released. A small debug HUD in the top-left
-shows the player's position and velocity; it lives in `src/ui/DebugHud.ts`
-and is easy to delete later.
+Both movement schemes work at the same time. Movement accelerates while a key
+is held and decelerates to a stop when released. The debug readout (off by
+default) shows position, velocity, game speed, live obstacle count and time to
+the next spawn; it lives in `src/ui/DebugHud.ts` and is easy to delete later.
 
 ## Production build
 
@@ -106,8 +109,10 @@ Waves-Of-Rage/
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
-├── public/                 # (create when needed) static files copied verbatim to dist/
-│   └── assets/             #   sprites, bitmap fonts, audio - load with 'assets/...'
+├── docs/
+│   └── art-direction/      # Approved concept art + written visual direction (reference only)
+├── public/                 # Static files copied verbatim to dist/, loaded with 'assets/...'
+│   └── assets/title/       #   320x180 crop of the concept art used by the title screen
 └── src/
     ├── main.ts             # Entry point: creates the single Phaser.Game instance
     ├── vite-env.d.ts       # Vite client type definitions
@@ -115,16 +120,24 @@ Waves-Of-Rage/
     │   ├── config.ts       # Phaser GameConfig (renderer, scale, scene list)
     │   └── constants.ts    # GAME_WIDTH / GAME_HEIGHT and SceneKeys
     ├── scenes/
-    │   ├── BootScene.ts    # First scene: loads shared assets, then starts GameScene
-    │   └── GameScene.ts    # Gameplay scene: wires ocean, player, controls and HUD together
+    │   ├── BootScene.ts    # Loads assets, then starts TitleScene
+    │   ├── TitleScene.ts   # Concept art background + pulsing PRESS SPACE
+    │   └── GameScene.ts    # Core loop: wires systems, entities and HUD together
     ├── entities/
-    │   └── Player.ts       # The surfer: placeholder texture, movement tuning, bounds
+    │   ├── Player.ts       # The surfer: movement tuning, bounds, hit reaction
+    │   ├── Obstacle.ts     # Base class: approaches at game speed, perspective, hitbox
+    │   ├── Rock.ts         # Stationary obstacle
+    │   └── RivalSurfer.ts  # Slower-closing obstacle that weaves sideways
     ├── systems/
-    │   └── OceanScroller.ts# Procedural scrolling ocean (sky band + two tiling layers)
+    │   ├── GameSpeed.ts    # Ramping forward speed with collision penalty (GAME_SPEED)
+    │   ├── ObstacleSpawner.ts # Distance-based spawning with lateral clearance (SPAWN)
+    │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
+    │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed
     ├── input/
     │   └── Controls.ts     # Arrow keys + WASD merged into one -1/0/1 axis pair
     └── ui/
-        └── DebugHud.ts     # Temporary position / velocity readout
+        ├── Hud.ts          # DISTANCE counter
+        └── DebugHud.ts     # F1-toggled developer readout
 ```
 
 ### How the pieces fit together
@@ -133,16 +146,21 @@ Waves-Of-Rage/
 2. `main.ts` creates `new Phaser.Game(gameConfig)`.
 3. `game/config.ts` sets the internal resolution, pixel-art rendering flags,
    responsive scaling and the ordered list of scenes.
-4. `BootScene` runs first. Its `preload()` is where shared assets will be
-   loaded; `create()` starts `GameScene`.
-5. `GameScene` creates an `OceanScroller`, a `Player`, a `Controls` reader and
-   the `DebugHud`, then calls their `update()` methods every frame.
+4. `BootScene` runs first, loads assets in `preload()` and starts
+   `TitleScene`, which starts `GameScene` on Space or Enter.
+5. `GameScene` owns one `GameSpeed`, and every frame: advances it, feeds the
+   resulting speed to the `OceanScroller` and `ObstacleSpawner`, updates the
+   `Player` from `Controls`, checks player/obstacle overlaps, and refreshes
+   the HUDs. Distance travelled is accumulated from game speed.
 6. `Player` integrates its own velocity (acceleration while a key is held,
-   deceleration when released) and clamps itself to `PLAYER_BOUNDS`. Tuning
-   values live in `PLAYER_MOVEMENT` at the top of the file.
-7. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
-   and scrolls them as TileSprites at different speeds. Nothing else depends
-   on it, so it can be replaced by pixel-art wave tiles later.
+   deceleration when released) and clamps itself to `PLAYER_BOUNDS`. On a hit
+   it is shoved away, flashes, blinks and is immune for a short time.
+7. `Obstacle` subclasses only supply a texture, an approach factor and any
+   extra motion. The base class moves them down the screen at game speed,
+   applies the perspective scale and destroys them off-screen.
+8. `OceanScroller` is purely visual. It generates two seamless 64x64 textures
+   and scrolls them as TileSprites at multiples of game speed. Nothing else
+   depends on it, so it can be replaced by pixel-art wave tiles later.
 
 ### Extending the project
 
@@ -154,9 +172,12 @@ Waves-Of-Rage/
   Keep source art at the native 320x180 scale; Phaser upscales it.
 - **Position things** using `GAME_WIDTH` / `GAME_HEIGHT` rather than hard-coded
   numbers so the resolution can be changed in one place.
-- **Tune movement** by editing `PLAYER_MOVEMENT` and `PLAYER_BOUNDS` in
-  `src/entities/Player.ts`, and scroll speeds in `OCEAN_SPEEDS` in
-  `src/systems/OceanScroller.ts`.
+- **Tune the game** through the exported config objects at the top of each
+  module: `PLAYER_MOVEMENT`, `PLAYER_HIT` and `PLAYER_BOUNDS` in `Player.ts`,
+  `GAME_SPEED` in `GameSpeed.ts`, `SPAWN` in `ObstacleSpawner.ts`, and
+  `OCEAN_SPEED_FACTORS` in `OceanScroller.ts`.
+- **Add an obstacle type** by extending `Obstacle` (see `Rock.ts` for the
+  minimal version) and adding it to the spawn choice in `ObstacleSpawner`.
 - **Add an entity** under `src/entities/`, give it an `update(delta)` method
   and call it from `GameScene.update()`. Visual-only or world-level systems
   go under `src/systems/`.
@@ -180,10 +201,16 @@ Waves-Of-Rage/
   canvas texture at internal resolution and upscaled, so it looks blocky but is
   not a true bitmap font. Proper bitmap fonts come with the art pass.
 
+## Art direction
+
+The approved concept artwork and the written visual direction live in
+[`docs/art-direction/`](docs/art-direction/). All future assets should follow
+it. Gameplay graphics are still placeholders.
+
 ## Roadmap (not started)
 
-Jumping, enemies and combat, scoring, HUD, menus, audio, touch controls, and
-the full 16-bit art pass.
+Sharks, jumping, fighting and tricks, health and game over, menus, audio,
+touch controls, and the full 16-bit art pass.
 
 ## License
 

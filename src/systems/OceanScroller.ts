@@ -12,13 +12,13 @@ const FOAM_KEY = 'ocean-foam';
 const TILE_SIZE = 64;
 
 /**
- * Scroll speeds in pixels per second. Positive values move the texture
- * downwards (towards the player), which reads as the surfer travelling
- * forward. The foam layer is faster to give a cheap parallax / depth cue.
+ * Each layer scrolls at a multiple of the current game speed. The water
+ * (far, big swells) moves slower than the foam (near, surface detail) to
+ * give a cheap parallax / depth cue.
  */
-export const OCEAN_SPEEDS = {
-  water: 45,
-  foam: 110,
+export const OCEAN_SPEED_FACTORS = {
+  water: 0.5,
+  foam: 1.2,
 } as const;
 
 /**
@@ -45,14 +45,14 @@ export class OceanScroller {
     this.foam = scene.add.tileSprite(0, HORIZON_Y, GAME_WIDTH, oceanHeight, FOAM_KEY).setOrigin(0);
   }
 
-  /** Advance the scroll by `delta` milliseconds. */
-  update(delta: number): void {
+  /** Advance the scroll by `delta` milliseconds at the given game speed. */
+  update(delta: number, gameSpeed: number): void {
     const dt = delta / 1000;
 
     // Subtracting moves the texture down the screen. Wrapping with the modulo
     // keeps the values small forever; TileSprite tiling handles the looping.
-    this.water.tilePositionY = (this.water.tilePositionY - OCEAN_SPEEDS.water * dt) % TILE_SIZE;
-    this.foam.tilePositionY = (this.foam.tilePositionY - OCEAN_SPEEDS.foam * dt) % TILE_SIZE;
+    this.water.tilePositionY = (this.water.tilePositionY - gameSpeed * OCEAN_SPEED_FACTORS.water * dt) % TILE_SIZE;
+    this.foam.tilePositionY = (this.foam.tilePositionY - gameSpeed * OCEAN_SPEED_FACTORS.foam * dt) % TILE_SIZE;
   }
 
   /** Generate the two tileable placeholder textures once. */

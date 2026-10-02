@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { GAME_HEIGHT, GAME_WIDTH } from '../game/constants';
 import type { Controls } from '../input/Controls';
+import { perspectiveScale } from '../systems/Perspective';
 
 const TEXTURE_KEY = 'player-placeholder';
 
@@ -25,16 +26,31 @@ export const PLAYER_MOVEMENT = {
   decelerationY: 800,
 } as const;
 
+/** What happens when the surfer hits something. */
+export const PLAYER_HIT = {
+  /** Sideways shove away from the obstacle, pixels per second. */
+  knockbackX: 160,
+  /** Push towards the foreground, pixels per second. */
+  knockbackY: 70,
+  /** Seconds of immunity after a hit. */
+  invulnerableSeconds: 1.2,
+  /** Seconds of red tint before the blink phase takes over. */
+  flashSeconds: 0.15,
+} as const;
+
+/** Fraction of the sprite's bounds trimmed from each side for collisions. */
+const HITBOX_INSET = 0.2;
+
 /**
- * The area the surfer is allowed to occupy (centre point of the sprite).
- * The top edge keeps the surfer on the lower half of the screen, the bottom
- * edge stops the board going off the foreground.
+ * The area the surfer is allowed to occupy (the sprite's bottom-centre, i.e.
+ * the board). The top edge keeps the surfer on the lower half of the screen,
+ * the bottom edge stops the board going off the foreground.
  */
 export const PLAYER_BOUNDS = {
   minX: SPRITE_WIDTH / 2,
   maxX: GAME_WIDTH - SPRITE_WIDTH / 2,
-  minY: 92,
-  maxY: GAME_HEIGHT - SPRITE_HEIGHT / 2,
+  minY: 92 + SPRITE_HEIGHT / 2,
+  maxY: GAME_HEIGHT,
 } as const;
 
 /**
@@ -47,11 +63,51 @@ export const PLAYER_BOUNDS = {
 export class Player extends Phaser.GameObjects.Image {
   private velocityX = 0;
   private velocityY = 0;
+  private invulnerableUntil = 0;
+  private blinkTween?: Phaser.Tweens.Tween;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     Player.ensureTexture(scene);
     super(scene, x, y, TEXTURE_KEY);
+    this.setOrigin(0.5, 1);
+    this.applyPerspective();
     scene.add.existing(this);
+  }
+
+  /** True while the post-hit immunity window is active. */
+  get isInvulnerable(): boolean {
+    return this.scene.time.now < this.invulnerableUntil;
+  }
+
+  /** Collision rectangle, slightly smaller than the drawn sprite. */
+  get hitBox(): Phaser.Geom.Rectangle {
+    const b = this.getBounds();
+    return Phaser.Geom.Rectangle.Inflate(b, -b.width * HITBOX_INSET, -b.height * HITBOX_INSET);
+  }
+
+  /**
+   * React to a collision with something at `fromX`: shove away from it, push
+   * towards the foreground, flash red, then blink for the immunity period.
+   */
+  hit(fromX: number): void {
+    const direction = Math.sign(this.x - fromX) || (this.x < GAME_WIDTH / 2 ? 1 : -1);
+    this.velocityX = direction * PLAYER_HIT.knockbackX;
+    this.velocityY = PLAYER_HIT.knockbackY;
+    this.invulnerableUntil = this.scene.time.now + PLAYER_HIT.invulnerableSeconds * 1000;
+
+    this.blinkTween?.stop();
+    this.setTint(0xff3b3b).setAlpha(1);
+    this.scene.time.delayedCall(PLAYER_HIT.flashSeconds * 1000, () => {
+      this.clearTint();
+      this.blinkTween = this.scene.tweens.add({
+        targets: this,
+        alpha: 0.25,
+        duration: 80,
+        yoyo: true,
+        repeat: Math.floor(((PLAYER_HIT.invulnerableSeconds - PLAYER_HIT.flashSeconds) * 1000) / 160),
+        onComplete: () => this.setAlpha(1),
+      });
+    });
   }
 
   /** Current horizontal velocity in pixels per second. */
@@ -93,6 +149,13 @@ export class Player extends Phaser.GameObjects.Image {
     if (nextY !== this.y + this.velocityY * dt) this.velocityY = 0;
 
     this.setPosition(nextX, nextY);
+    this.applyPerspective();
+  }
+
+  /** Subtle size change with depth, and draw order by Y so nearer things are on top. */
+  private applyPerspective(): void {
+    this.setScale(perspectiveScale(this.y));
+    this.setDepth(this.y);
   }
 
   /**
