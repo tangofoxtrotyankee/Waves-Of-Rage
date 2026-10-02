@@ -7,12 +7,13 @@ a 16-bit, Mega Drive-era arcade style inspired by the energy and presentation
 of games such as *Streets of Rage* and *Road Rash*, but it is an original surfing
 game with original assets and gameplay.
 
-> **Status:** feature-complete placeholder prototype, now in the playtesting
-> and balancing phase. Title screen, surf down the wave, jump rocks, dodge
+> **Status:** feature-complete prototype with a first pixel-art pass, now in
+> the playtesting and balancing phase. Title screen, surf down the wave, jump rocks, dodge
 > sharks, punch and barge rival surfers off their boards (or into rocks and
 > sharks) for combo-multiplied points, hit wave ramps for big air, spin and
 > grab for trick points, land clean or wipe out, lose health, see your
-> results, restart. No finished art or audio yet.
+> results, restart. Graphics are a first in-house pixel-art pass (generated
+> from ASCII pixel maps, see below); no audio yet.
 
 ## Tech stack
 
@@ -81,6 +82,15 @@ builds.
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / title       | Space / Esc     |
 
+**Touch (phones and tablets):** on-screen controls appear automatically. A
+tap anywhere on the water acts like Space (start, jump, surf again). The
+d-pad on the left steers (and spins in big air); HIT punches or grabs; BARGE
+shoulder-barges while a direction is held. On the game-over screen, tap
+TITLE to go back. Works in portrait (controls sit in the black band under
+the canvas) and landscape (controls overlay the edges). The first tap tries
+to go fullscreen and lock landscape where the browser allows it. Add
+`?touch=1` to the URL to see the touch layout on a desktop.
+
 Both movement schemes work at the same time. Movement accelerates while a key
 is held and decelerates to a stop when released. You cannot jump again until
 you have landed. The surfer faces the way they last moved; punches and barges
@@ -138,6 +148,8 @@ npm run preview
 | Command             | What it does                                  |
 | ------------------- | --------------------------------------------- |
 | `npm run typecheck` | Runs the TypeScript compiler without emitting |
+| `npm test`          | Browser end-to-end test (see docs/TESTING.md) |
+| `npm run art`       | Rebuilds `public/assets/sprites/` from `tools/pixelart/` |
 
 ## Project structure
 
@@ -150,7 +162,11 @@ Waves-Of-Rage/
 ├── docs/
 │   └── art-direction/      # Approved concept art + written visual direction (reference only)
 ├── public/                 # Static files copied verbatim to dist/, loaded with 'assets/...'
-│   └── assets/title/       #   320x180 crop of the concept art used by the title screen
+│   └── assets/
+│       ├── title/          #   320x180 crop of the concept art used by the title screen
+│       └── sprites/        #   generated sprite sheets, tiles, sky strip and pixel font
+├── tools/pixelart/         # Zero-dependency art pipeline (ASCII maps -> PNG), `npm run art`
+├── tests/e2e.mjs           # Playwright end-to-end test, `npm test`
 └── src/
     ├── main.ts             # Entry point: creates the single Phaser.Game instance
     ├── vite-env.d.ts       # Vite client type definitions
@@ -178,7 +194,8 @@ Waves-Of-Rage/
     │   ├── Perspective.ts  # scale-by-Y helper for the fake depth effect
     │   └── OceanScroller.ts# Procedural scrolling ocean driven by game speed
     ├── input/
-    │   └── Controls.ts     # Arrow keys + WASD merged into one -1/0/1 axis pair
+    │   ├── Controls.ts     # Arrow keys + WASD + touch merged into one -1/0/1 axis pair
+    │   └── TouchControls.ts# DOM d-pad / HIT / BARGE overlay, tap = Space, fullscreen helper
     └── ui/
         ├── Hud.ts          # DISTANCE counter
         └── DebugHud.ts     # F1-toggled developer readout
@@ -271,11 +288,31 @@ Waves-Of-Rage/
   canvas texture at internal resolution and upscaled, so it looks blocky but is
   not a true bitmap font. Proper bitmap fonts come with the art pass.
 
-## Art direction
+## Art direction and pipeline
 
-The approved concept artwork and the written visual direction live in
-[`docs/art-direction/`](docs/art-direction/). All future assets should follow
-it. Gameplay graphics are still placeholders.
+The approved concept artwork, the character sheet and the written visual
+direction live in [`docs/art-direction/`](docs/art-direction/). All assets
+follow them.
+
+In-game art is generated, not hand-painted in an editor: every sprite is an
+ASCII pixel map in `tools/pixelart/sprites.mjs` using the shared palette in
+`tools/pixelart/palette.mjs`; the sky strip, water and foam tiles are painted
+procedurally in `environment.mjs`; the 5x7 pixel font is defined in
+`font.mjs`. `npm run art` rebuilds everything into `public/assets/sprites/`
+and writes `tools/pixelart/preview.png` (4x) for a quick look. The rival
+surfer is the player's maps recoloured.
+
+- Player and rival sheets are 24x32 frames: surf, lean, jump, punch, hurt
+  (rival adds rider-only and board-only for the knock-off). Frames are
+  chosen by state in `Player.pickFrame()` / `RivalSurfer.pickFrame()`.
+- Sharks and the spray wake are small looping animations registered in
+  `BootScene`.
+- HUD and popups use the pixel font through `ui/PixelText.ts` (upper-case
+  only, with a one-pixel drop shadow).
+
+To replace any asset with hand-drawn art, drop a PNG of the same size and
+frame layout into `public/assets/sprites/`; nothing in the game code needs
+to change.
 
 ## Playtesting, testing and deployment
 
@@ -288,9 +325,8 @@ it. Gameplay graphics are still placeholders.
 
 ## Roadmap
 
-Feature work is paused for a playtest and balance pass. After that: the
-first proper pixel-art pass, sound and music, menus/settings/gamepad, and
-deployment for wider testing.
+Feature work is paused for a playtest and balance pass. After that: sound
+and music, menus/settings/gamepad, and deployment for wider testing.
 
 ## License
 

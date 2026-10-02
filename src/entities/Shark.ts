@@ -1,11 +1,8 @@
 import Phaser from 'phaser';
 
+import { Animations, AssetKeys } from '../game/constants';
 import { PLAYER_BOUNDS } from './Player';
 import { Obstacle } from './Obstacle';
-
-const TEXTURE_KEY = 'shark-placeholder';
-const WIDTH = 30;
-const HEIGHT = 18;
 
 export const SHARK = {
   damage: 2,
@@ -32,10 +29,9 @@ export class Shark extends Obstacle {
   private untilNextLunge: number;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    Shark.ensureTexture(scene);
     super(scene, x, y, {
       kind: 'shark',
-      texture: TEXTURE_KEY,
+      texture: AssetKeys.Shark,
       approachFactor: SHARK.approachFactor,
       damage: SHARK.damage,
       jumpable: SHARK.jumpable,
@@ -43,6 +39,7 @@ export class Shark extends Obstacle {
     });
     this.targetX = x;
     this.untilNextLunge = Shark.rollInterval();
+    this.play(Animations.SharkSwim);
   }
 
   protected override onUpdate(dt: number): void {
@@ -67,26 +64,4 @@ export class Shark extends Obstacle {
     return Phaser.Math.FloatBetween(SHARK.lungeIntervalMin, SHARK.lungeIntervalMax);
   }
 
-  private static ensureTexture(scene: Phaser.Scene): void {
-    if (scene.textures.exists(TEXTURE_KEY)) return;
-    const g = scene.make.graphics({ x: 0, y: 0 }, false);
-
-    // Dark grey body low in the water with a tall fin: clearly not a rock or a surfer.
-    g.fillStyle(0x3d405b);
-    g.fillRect(2, 11, 26, 5);
-    g.fillStyle(0x1f2235);
-    g.fillRect(0, 12, 4, 3); // tail
-    // Fin
-    g.fillTriangle(12, 11, 20, 11, 18, 0);
-    g.fillStyle(0x3d405b);
-    g.fillTriangle(13, 11, 19, 11, 17, 3);
-    // Eye and a white splash line
-    g.fillStyle(0xff3b3b);
-    g.fillRect(25, 12, 2, 2);
-    g.fillStyle(0xffffff, 0.9);
-    g.fillRect(0, 16, 30, 2);
-
-    g.generateTexture(TEXTURE_KEY, WIDTH, HEIGHT);
-    g.destroy();
-  }
 }

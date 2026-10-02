@@ -1,13 +1,8 @@
 import Phaser from 'phaser';
 
+import { AssetKeys, SurferFrame } from '../game/constants';
 import { PLAYER_BOUNDS } from './Player';
 import { Obstacle, type HazardContext } from './Obstacle';
-
-const TEXTURE_KEY = 'rival-placeholder';
-const RIDER_KEY = 'rival-rider-placeholder';
-const BOARD_KEY = 'rival-board-placeholder';
-const WIDTH = 24;
-const HEIGHT = 32;
 
 export const RIVAL = {
   health: 2,
@@ -75,10 +70,9 @@ export class RivalSurfer extends Obstacle {
   private airTimer = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    RivalSurfer.ensureTextures(scene);
     super(scene, x, y, {
       kind: 'rival',
-      texture: TEXTURE_KEY,
+      texture: AssetKeys.Rival,
       approachFactor: RIVAL.approachFactor,
       damage: RIVAL.damage,
       jumpable: RIVAL.jumpable,
@@ -164,8 +158,8 @@ export class RivalSurfer extends Obstacle {
     this.clearTint();
 
     // Rider stays on this object (tips over), the board is thrown loose.
-    this.setTexture(RIDER_KEY);
-    const board = this.scene.add.image(this.x, this.y, BOARD_KEY).setOrigin(0.5, 1).setScale(this.scaleX).setDepth(this.depth - 1);
+    this.setFrame(SurferFrame.RiderOnly);
+    const board = this.scene.add.image(this.x, this.y, AssetKeys.Rival, SurferFrame.BoardOnly).setOrigin(0.5, 1).setScale(this.scaleX).setDepth(this.depth - 1);
     this.scene.tweens.add({
       targets: board,
       x: this.x - direction * 28,
@@ -229,6 +223,16 @@ export class RivalSurfer extends Obstacle {
     }
 
     this.x = Phaser.Math.Clamp(this.x, PLAYER_BOUNDS.minX, PLAYER_BOUNDS.maxX);
+    this.pickFrame();
+  }
+
+  /** Choose the sprite frame from the current state. */
+  private pickFrame(): void {
+    if (this.currentState === 'wipedOut') return; // rider-only frame set in wipeOut()
+    if (this.currentState === 'stunned') this.setFrame(SurferFrame.Hurt);
+    else if (this.isAirborne) this.setFrame(SurferFrame.Jump);
+    else if (this.currentState === 'checking' || Math.abs(this.targetX - this.x) > 2) this.setFrame(SurferFrame.Lean);
+    else this.setFrame(SurferFrame.Surf);
   }
 
   /** Drift towards a slowly changing lateral target. */
@@ -244,7 +248,7 @@ export class RivalSurfer extends Obstacle {
     const diff = this.targetX - this.x;
     const step = RIVAL.lateralSpeed * dt;
     this.x += Math.abs(diff) <= step ? diff : Math.sign(diff) * step;
-    if (Math.abs(diff) > 1) this.setFlipX(diff < 0);
+    if (Math.abs(diff) > 1) this.setFlipX(diff > 0);
   }
 
   /** Shoulder-check the player when close enough and off cooldown. */
@@ -258,7 +262,7 @@ export class RivalSurfer extends Obstacle {
     this.checkDirection = Math.sign(dx) || 1;
     this.checkTimer = RIVAL.checkDurationSeconds;
     this.checkCooldown = RIVAL.checkCooldownSeconds;
-    this.setFlipX(this.checkDirection < 0);
+    this.setFlipX(this.checkDirection > 0);
     this.flash(0xff8c42);
   }
 
@@ -278,45 +282,4 @@ export class RivalSurfer extends Obstacle {
     });
   }
 
-  // --- textures --------------------------------------------------------
-
-  private static ensureTextures(scene: Phaser.Scene): void {
-    if (scene.textures.exists(TEXTURE_KEY)) return;
-
-    const drawBoard = (g: Phaser.GameObjects.Graphics, oy: number) => {
-      g.fillStyle(0xf1faee);
-      g.fillRect(1, oy, 22, 6);
-      g.fillStyle(0x457b9d);
-      g.fillRect(3, oy + 2, 18, 2);
-    };
-    const drawRider = (g: Phaser.GameObjects.Graphics) => {
-      g.fillStyle(0x1d3557);
-      g.fillRect(7, 16, 4, 8);
-      g.fillRect(13, 16, 4, 8);
-      g.fillStyle(0xe63946);
-      g.fillRect(7, 6, 10, 10);
-      g.fillStyle(0xd9a066);
-      g.fillRect(3, 7, 4, 3);
-      g.fillRect(17, 7, 4, 3);
-      g.fillRect(9, 0, 6, 6);
-      g.fillStyle(0x3a2a1a);
-      g.fillRect(9, 0, 6, 2);
-    };
-
-    let g = scene.make.graphics({ x: 0, y: 0 }, false);
-    drawBoard(g, 24);
-    drawRider(g);
-    g.generateTexture(TEXTURE_KEY, WIDTH, HEIGHT);
-    g.destroy();
-
-    g = scene.make.graphics({ x: 0, y: 0 }, false);
-    drawRider(g);
-    g.generateTexture(RIDER_KEY, WIDTH, HEIGHT);
-    g.destroy();
-
-    g = scene.make.graphics({ x: 0, y: 0 }, false);
-    drawBoard(g, 0);
-    g.generateTexture(BOARD_KEY, WIDTH, 6);
-    g.destroy();
-  }
 }

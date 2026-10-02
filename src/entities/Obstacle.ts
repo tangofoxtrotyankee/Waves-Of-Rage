@@ -38,7 +38,7 @@ export interface ObstacleConfig {
  * Subclasses provide their config (texture, approach speed, damage, whether
  * a jump clears them) and optionally extra motion via onUpdate().
  */
-export abstract class Obstacle extends Phaser.GameObjects.Image {
+export abstract class Obstacle extends Phaser.GameObjects.Sprite {
   readonly kind: HazardKind;
   readonly damage: number;
   readonly jumpable: boolean;

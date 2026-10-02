@@ -20,4 +20,38 @@ export const SceneKeys = {
 /** Keys for assets loaded from public/assets by BootScene. */
 export const AssetKeys = {
   TitleConcept: 'title-concept',
+  Player: 'player',
+  Rival: 'rival',
+  Rock: 'rock',
+  Shark: 'shark',
+  Ramp: 'ramp',
+  Spray: 'spray',
+  Sky: 'sky',
+  Water: 'water',
+  Foam: 'foam',
+  Font: 'pixel-font',
 } as const;
+
+/** Animation keys registered once in BootScene. */
+export const Animations = {
+  SharkSwim: 'shark-swim',
+  Spray: 'spray',
+} as const;
+
+/** Frame indices in the player / rival sprite sheets (see tools/pixelart/sprites.mjs). */
+export const SurferFrame = {
+  Surf: 0,
+  Lean: 1,
+  Jump: 2,
+  Punch: 3,
+  Hurt: 4,
+  /** Rival sheet only: */
+  RiderOnly: 5,
+  BoardOnly: 6,
+} as const;
+
+/**
+ * Characters in the generated pixel font, in sheet order. Must match
+ * FONT_CHARS in tools/pixelart/font.mjs. Text is upper-case only.
+ */
+export const FONT_CHARS = ' 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-x:.!/\u2665\u2661';

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 
 import { GAME_WIDTH } from '../game/constants';
 import { GAMEPLAY } from '../game/gameplay';
+import { pixelText } from './PixelText';
 
 export interface HudInfo {
   health: number;
@@ -13,41 +14,35 @@ export interface HudInfo {
   comboSecondsRemaining: number;
 }
 
-/** Simple arcade HUD: hearts on the left, score and distance on the right. */
+const LABEL = 0xffd166;
+const VALUE = 0xffffff;
+const HEART = 0xff4d6d;
+const COMBO = 0x7ff6ff;
+
+/** Simple arcade HUD in the pixel font: hearts on the left, score and distance on the right. */
 export class Hud {
-  private readonly health: Phaser.GameObjects.Text;
-  private readonly score: Phaser.GameObjects.Text;
-  private readonly distance: Phaser.GameObjects.Text;
-  private readonly combo: Phaser.GameObjects.Text;
+  private readonly health: Phaser.GameObjects.BitmapText;
+  private readonly score: Phaser.GameObjects.BitmapText;
+  private readonly distance: Phaser.GameObjects.BitmapText;
+  private readonly combo: Phaser.GameObjects.BitmapText;
 
   constructor(scene: Phaser.Scene) {
-    const style: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: 'monospace',
-      fontSize: '8px',
-      color: '#ffffff',
-      stroke: '#1a0b2e',
-      strokeThickness: 2,
-    };
-    const label = { ...style, color: '#ffd166' };
+    pixelText(scene, 4, 3, 'HEALTH', LABEL).setDepth(1000);
+    this.health = pixelText(scene, 4, 13, '', HEART).setDepth(1000);
 
-    scene.add.text(4, 3, 'HEALTH', label).setDepth(1000);
-    this.health = scene.add.text(4, 12, '', { ...style, color: '#ff4d6d' }).setDepth(1000);
+    pixelText(scene, GAME_WIDTH - 4, 3, 'SCORE', LABEL).setOrigin(1, 0).setDepth(1000);
+    this.score = pixelText(scene, GAME_WIDTH - 4, 13, '000000', VALUE).setOrigin(1, 0).setDepth(1000);
 
-    scene.add.text(GAME_WIDTH - 4, 3, 'SCORE', label).setOrigin(1, 0).setDepth(1000);
-    this.score = scene.add.text(GAME_WIDTH - 4, 12, '000000', style).setOrigin(1, 0).setDepth(1000);
+    pixelText(scene, GAME_WIDTH - 68, 3, 'DIST', LABEL).setOrigin(1, 0).setDepth(1000);
+    this.distance = pixelText(scene, GAME_WIDTH - 68, 13, '00000', VALUE).setOrigin(1, 0).setDepth(1000);
 
-    scene.add.text(GAME_WIDTH - 64, 3, 'DIST', label).setOrigin(1, 0).setDepth(1000);
-    this.distance = scene.add.text(GAME_WIDTH - 64, 12, '00000', style).setOrigin(1, 0).setDepth(1000);
-
-    this.combo = scene.add
-      .text(GAME_WIDTH / 2, 4, '', { ...style, fontSize: '10px', color: '#7ff6ff' })
-      .setOrigin(0.5, 0)
-      .setDepth(1000)
-      .setVisible(false);
+    this.combo = pixelText(scene, GAME_WIDTH / 2, 4, '', COMBO).setOrigin(0.5, 0).setDepth(1000).setVisible(false);
   }
 
   update(info: HudInfo): void {
-    this.health.setText('♥'.repeat(Math.max(0, info.health)) + '♡'.repeat(Math.max(0, GAMEPLAY.startHealth - info.health)));
+    const full = Math.max(0, Math.min(info.health, GAMEPLAY.startHealth));
+    const empty = Math.max(0, GAMEPLAY.startHealth - full);
+    this.health.setText('\u2665'.repeat(full) + '\u2661'.repeat(empty));
     this.score.setText(Hud.pad(info.score, 6));
     this.distance.setText(Hud.pad(info.distanceUnits, 5));
 

@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 
-import { GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
+import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
 import { Hud } from '../ui/Hud';
+import { touchState } from '../input/TouchControls';
+import { pixelText } from '../ui/PixelText';
 
 export interface GameOverData {
   distanceUnits: number;
@@ -18,31 +20,34 @@ export class GameOverScene extends Phaser.Scene {
   }
 
   create(data: GameOverData): void {
-    const base: Phaser.Types.GameObjects.Text.TextStyle = {
-      fontFamily: 'monospace',
-      color: '#ffffff',
-      stroke: '#1a0b2e',
-      strokeThickness: 3,
-      align: 'center',
-    };
     const cx = GAME_WIDTH / 2;
 
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a0b2e, 0.8).setOrigin(0);
+    this.add.image(0, 0, AssetKeys.Sky).setOrigin(0);
+    this.add.tileSprite(0, 40, GAME_WIDTH, GAME_HEIGHT - 40, AssetKeys.Water).setOrigin(0);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a0b2e, 0.75).setOrigin(0);
 
-    this.add.text(cx, 38, 'WIPEOUT', { ...base, fontSize: '24px', color: '#ff4d6d' }).setOrigin(0.5);
-    this.add.text(cx, 74, `DISTANCE  ${Hud.pad(data.distanceUnits ?? 0, 5)}`, { ...base, fontSize: '10px', color: '#7ff6ff' }).setOrigin(0.5);
-    this.add.text(cx, 90, `SCORE  ${Hud.pad(data.score ?? 0, 6)}`, { ...base, fontSize: '10px', color: '#ffd166' }).setOrigin(0.5);
+    pixelText(this, cx, 40, 'WIPEOUT', 0xff4d6d, 3).setOrigin(0.5);
+    pixelText(this, cx, 76, `DISTANCE ${Hud.pad(data.distanceUnits ?? 0, 5)}`, 0x7ff6ff).setOrigin(0.5);
+    pixelText(this, cx, 90, `SCORE ${Hud.pad(data.score ?? 0, 6)}`, 0xffd166).setOrigin(0.5);
 
-    const prompt = this.add.text(cx, 130, 'PRESS SPACE TO SURF AGAIN', { ...base, fontSize: '8px' }).setOrigin(0.5);
-    this.add.text(cx, 146, 'ESC FOR TITLE', { ...base, fontSize: '8px', color: '#bbbbbb' }).setOrigin(0.5);
+    const again = touchState.enabled ? 'TAP TO SURF AGAIN' : 'PRESS SPACE TO SURF AGAIN';
+    const prompt = pixelText(this, cx, 130, again, 0xffffff).setOrigin(0.5);
+    const title = pixelText(this, cx, 146, touchState.enabled ? 'TITLE' : 'ESC FOR TITLE', 0xbbbbbb).setOrigin(0.5);
 
     this.tweens.add({ targets: prompt, alpha: 0.15, duration: 500, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
 
     this.time.delayedCall(INPUT_DELAY_MS, () => {
       const keyboard = this.input.keyboard;
-      if (!keyboard) return;
-      keyboard.once('keydown-SPACE', () => this.scene.start(SceneKeys.Game));
-      keyboard.once('keydown-ESC', () => this.scene.start(SceneKeys.Title));
+      keyboard?.once('keydown-SPACE', () => this.scene.start(SceneKeys.Game));
+      keyboard?.once('keydown-ESC', () => this.scene.start(SceneKeys.Title));
+
+      // Tap the TITLE line for the title screen, anywhere else to surf again.
+      title.setInteractive({ useHandCursor: true }).once('pointerdown', (pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        void pointer;
+        this.scene.start(SceneKeys.Title);
+      });
+      this.input.once('pointerdown', () => this.scene.start(SceneKeys.Game));
     });
   }
 }
