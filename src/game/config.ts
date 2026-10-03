@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 
+import { BoardmastersScene } from '../scenes/BoardmastersScene';
 import { BootScene } from '../scenes/BootScene';
 import { GameOverScene } from '../scenes/GameOverScene';
 import { GameScene } from '../scenes/GameScene';
@@ -39,5 +40,5 @@ export const gameConfig: Phaser.Types.Core.GameConfig = {
   },
 
   // The first scene in this list starts automatically.
-  scene: [BootScene, TitleScene, GameScene, GameOverScene, PauseScene],
+  scene: [BootScene, TitleScene, GameScene, GameOverScene, PauseScene, BoardmastersScene],
 };

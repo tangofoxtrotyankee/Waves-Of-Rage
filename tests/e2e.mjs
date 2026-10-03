@@ -87,6 +87,15 @@ try {
 
   // --- title and start ---
   check('title scene loads', (await scenes()).join() === 'TitleScene');
+
+  // --- game select: Down moves the cursor to Boardmasters, Space opens its title card, Escape comes back ---
+  const selectedGame = () => ev(() => window.game.scene.getScene('TitleScene').selectedGame);
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Space'); await wait(500);
+  check('Down + Space opens Boardmasters', (await scenes()).join() === 'BoardmastersScene');
+  await wait(600); await page.keyboard.press('Escape'); await wait(500);
+  check('Escape returns to the title with Boardmasters selected', (await scenes()).join() === 'TitleScene' && (await selectedGame()) === 'boardmasters');
+  await page.keyboard.press('ArrowUp'); await wait(100);
+  check('Up moves the cursor back to Waves of Rage', (await selectedGame()) === 'waves');
   await page.keyboard.press('Space'); await wait(500);
   check('Space starts the game', (await scenes()).join() === 'GameScene');
   await freeze(true); await clearField(); await setHealth(50);

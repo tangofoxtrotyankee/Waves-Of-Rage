@@ -73,6 +73,7 @@ builds.
 | Action                              | Keys            |
 | ----------------------------------- | --------------- |
 | Start game (title screen)           | Space / Enter   |
+| Choose game (title screen)          | Up / Down, W / S, or tap the row |
 | Choose difficulty (title screen)    | Left / Right, A / D, or tap the arrows |
 | Move left                           | Left arrow / A  |
 | Move right                          | Right arrow / D |
@@ -109,6 +110,8 @@ in `src/ui/DebugHud.ts` and is easy to delete later.
 
 ## How a run works
 
+- Pick a game on the title screen with Up/Down (W/S) or by tapping a row:
+  WAVES OF RAGE (this game) or WOR 2: BOARDMASTERS (the sequel, see below).
 - Pick a difficulty on the title screen (remembered between visits):
   EASY (slower, sparser, sharks late, 4 hearts), NORMAL (the baseline),
   INSANITY (1.3x speed, fast ramp, dense spawns, sharks from 5 s). Each
@@ -180,10 +183,13 @@ Waves-Of-Rage/
 ├── tsconfig.json
 ├── vite.config.ts
 ├── docs/
-│   └── art-direction/      # Approved concept art + written visual direction (reference only)
+│   ├── art-direction/      # Approved concept art + written visual direction (reference only)
+│   │   └── boardmasters/   #   the sequel's title concept, gameplay mockup and hazards sheet
+│   └── boardmasters/       # Waves of Rage 2: Boardmasters architecture proposal
 ├── public/                 # Static files copied verbatim to dist/, loaded with 'assets/...'
 │   └── assets/
 │       ├── title/          #   320x180 crop of the concept art used by the title screen
+│       ├── boardmasters/   #   crops of the sequel's title concept for its title card
 │       └── sprites/        #   generated sprite sheets, tiles, sky strip and pixel font
 ├── server/                 # Node server: static dist/ + /api/scores (Postgres or JSON file store)
 ├── tools/pixelart/         # Zero-dependency art pipeline (ASCII maps -> PNG), `npm run art`
@@ -195,13 +201,15 @@ Waves-Of-Rage/
     │   ├── config.ts       # Phaser GameConfig (renderer, scale, scene list)
     │   ├── constants.ts    # GAME_WIDTH / GAME_HEIGHT (orientation-dependent), SceneKeys, AssetKeys
     │   ├── platform.ts     # Touch / portrait detection, evaluated once at boot
+│   │   ├── games.ts        # The games on the title screen (Waves of Rage, Boardmasters) and the cursor
     │   └── gameplay.ts     # GAMEPLAY (health, scoring) and DIFFICULTY thresholds
     ├── scenes/
     │   ├── BootScene.ts    # Loads assets, then starts TitleScene
-    │   ├── TitleScene.ts   # Concept art background + pulsing PRESS SPACE
+    │   ├── TitleScene.ts   # Concept art, game list, difficulty selector, pulsing PRESS SPACE
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
     │   ├── GameOverScene.ts# WIPEOUT screen: results, top-10 table, name prompt, restart/title
-    │   └── PauseScene.ts   # Pause popover: RESUME / RESTART / MAIN MENU
+    │   ├── PauseScene.ts   # Pause popover: RESUME / RESTART / MAIN MENU
+│   │   └── BoardmastersScene.ts # Waves of Rage 2 title card; the sequel starts here (Esc / tap: back)
     ├── entities/
     │   ├── Player.ts       # The surfer: movement, facing, jump, big air, spin/grab, landing, punch, barge, hit
     │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
@@ -235,7 +243,8 @@ Waves-Of-Rage/
 3. `game/config.ts` sets the internal resolution, pixel-art rendering flags,
    responsive scaling and the ordered list of scenes.
 4. `BootScene` runs first, loads assets in `preload()` and starts
-   `TitleScene`, which starts `GameScene` on Space or Enter.
+   `TitleScene`, which starts the selected game on Space or Enter:
+   `GameScene`, or `BoardmastersScene` for the sequel (see `game/games.ts`).
 5. `GameScene` owns one `GameSpeed`, and every frame: advances it, feeds the
    resulting speed to the `OceanScroller` and `ObstacleSpawner`, updates the
    `Player` from `Controls`, checks player/obstacle overlaps, and refreshes
@@ -352,6 +361,19 @@ to change.
   automated browser test (`npm test`).
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): deploying the static build to
   Railway, GitHub Pages, itch.io or any static host.
+
+## Waves of Rage 2: Boardmasters
+
+The sequel is a separate game sharing this repository, hosting and visual
+identity: a 3D forward-scrolling arcade surf racer/brawler seen from behind
+the surfer, styled like 1995-1998 PlayStation 3D with this game's Mega Drive
+presentation around it. It is at the concept stage. The title screen's
+second entry opens its title card, built from the approved concept art, and
+reports whether the browser has WebGL 2. The reference art is in
+[`docs/art-direction/boardmasters/`](docs/art-direction/boardmasters/) and
+the proposed engine and architecture for the first playable prototype are in
+[`docs/boardmasters/ARCHITECTURE.md`](docs/boardmasters/ARCHITECTURE.md),
+awaiting agreement before any engine code is written.
 
 ## Roadmap
 

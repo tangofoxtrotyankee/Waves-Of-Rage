@@ -19,8 +19,8 @@ Postgres database to also run the same server against the Postgres store
 (the suite creates and trims a `scores` table there). Then `tests/e2e.mjs` starts the API on another spare port, a
 Vite dev server proxying `/api` to it, drives the game in
 headless Chromium with Playwright, and checks the main systems end to end:
-title screen, movement, jumping, ramps and tricks, combat, health, combos,
-game over and restart. It reads game state through the dev-only
+title screen, game selection, movement, jumping, ramps and tricks, combat,
+health, combos, game over and restart. It reads game state through the dev-only
 `window.game` handle, so it runs against the dev server, not the production
 bundle.
 
@@ -98,3 +98,9 @@ Use this after any change to movement, combat or scoring:
     server running (`npm run serve` beside `npm run dev`) the heading reads
     TOP 10 and the entry appears on another device; without it the heading
     reads TOP 10 OFFLINE.
+14. Game list: Up/Down (or W/S, or tapping a row) moves the cursor between
+    WAVES OF RAGE and WOR 2: BOARDMASTERS; with the sequel selected the
+    difficulty row reads PROTOTYPE and Space opens its title card (logo,
+    status lines, `WEBGL2 OK`); Esc, Space, a click or a tap returns to the
+    title with the cursor still on the sequel. In portrait (`?touch=1`) the
+    card shows the whole poster with the status panel over its painted menu.
