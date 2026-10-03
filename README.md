@@ -8,7 +8,8 @@ of games such as *Streets of Rage* and *Road Rash*, but it is an original surfin
 game with original assets and gameplay.
 
 > **Status:** feature-complete prototype with a first pixel-art pass, now in
-> the playtesting and balancing phase. Title screen, surf down the wave, jump rocks, dodge
+> the playtesting and balancing phase. The 3D sequel, Waves of Rage 2:
+> Boardmasters, has its first playable prototype (see below). Title screen, surf down the wave, jump rocks, dodge
 > sharks, punch and barge rival surfers off their boards (or into rocks and
 > sharks) for combo-multiplied points, hit wave ramps for big air, spin and
 > grab for trick points, land clean or wipe out, lose health, see your
@@ -26,6 +27,7 @@ game with original assets and gameplay.
 | Scaling            | `Phaser.Scale.FIT` + `CENTER_BOTH` (aspect ratio preserved, letterboxed) |
 | Rendering          | `pixelArt: true`, anti-aliasing off, nearest-neighbour upscaling, rounded pixels |
 | Input              | Keyboard (desktop browsers)                         |
+| Sequel (WOR 2)     | [Three.js](https://threejs.org/) on its own page, `boardmasters.html` (see below) |
 
 The only backend is a small Node server (one dependency, `pg`) that serves
 the build and keeps the shared top-10 tables in Postgres or a JSON file.
@@ -73,7 +75,7 @@ builds.
 | Action                              | Keys            |
 | ----------------------------------- | --------------- |
 | Start game (title screen)           | Space / Enter   |
-| Choose game (title screen)          | Up / Down, W / S, or tap the row |
+| Choose game (title screen)          | Up / Down, W / S; click or tap a button to start it |
 | Choose difficulty (title screen)    | Left / Right, A / D, or tap the arrows |
 | Move left                           | Left arrow / A  |
 | Move right                          | Right arrow / D |
@@ -110,8 +112,9 @@ in `src/ui/DebugHud.ts` and is easy to delete later.
 
 ## How a run works
 
-- Pick a game on the title screen with Up/Down (W/S) or by tapping a row:
-  WAVES OF RAGE (this game) or WOR 2: BOARDMASTERS (the sequel, see below).
+- Pick a game on the title screen: WAVES OF RAGE (this game) or WOR 2:
+  BOARDMASTERS (the sequel, see below). Up/Down move the cursor and Space
+  starts; clicking or tapping a button starts that game directly.
 - Pick a difficulty on the title screen (remembered between visits):
   EASY (slower, sparser, sharks late, 4 hearts), NORMAL (the baseline),
   INSANITY (1.3x speed, fast ramp, dense spawns, sharks from 5 s). Each
@@ -169,7 +172,7 @@ npm run preview
 | Command             | What it does                                  |
 | ------------------- | --------------------------------------------- |
 | `npm run typecheck` | Runs the TypeScript compiler without emitting |
-| `npm test`          | API test + browser end-to-end test (see docs/TESTING.md) |
+| `npm test`          | All suites through `tests/run-all.mjs`: API test + browser tests for both games (see docs/TESTING.md) |
 | `npm run serve`     | Runs the score API + static server on port 8787 (use beside `npm run dev`) |
 | `npm start`         | Same server, for production (serves `dist/`)   |
 | `npm run art`       | Rebuilds `public/assets/sprites/` from `tools/pixelart/` |
@@ -179,21 +182,22 @@ npm run preview
 ```
 Waves-Of-Rage/
 ├── index.html              # HTML shell; hosts the <div id="game"> Phaser mounts into
+├── boardmasters.html       # Waves of Rage 2 page: two canvases (Three.js + 2D HUD), see src/boardmasters
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts
 ├── docs/
 │   ├── art-direction/      # Approved concept art + written visual direction (reference only)
-│   │   └── boardmasters/   #   the sequel's title concept, gameplay mockup and hazards sheet
-│   └── boardmasters/       # Waves of Rage 2: Boardmasters architecture proposal
+│   │   └── boardmasters/   #   the sequel's title concept, gameplay mockup, hazards sheet, character line-up
+│   └── boardmasters/       # Waves of Rage 2: Boardmasters architecture and roadmap
 ├── public/                 # Static files copied verbatim to dist/, loaded with 'assets/...'
 │   └── assets/
 │       ├── title/          #   320x180 crop of the concept art used by the title screen
-│       ├── boardmasters/   #   crops of the sequel's title concept for its title card
+│       ├── boardmasters/   #   the sequel's logo, drawn on its title screen
 │       └── sprites/        #   generated sprite sheets, tiles, sky strip and pixel font
 ├── server/                 # Node server: static dist/ + /api/scores (Postgres or JSON file store)
 ├── tools/pixelart/         # Zero-dependency art pipeline (ASCII maps -> PNG), `npm run art`
-├── tests/                  # api.mjs (score API) and e2e.mjs (Playwright), `npm test`
+├── tests/                  # run-all.mjs runs api.mjs (score API), e2e.mjs and boardmasters-e2e.mjs (Playwright)
 └── src/
     ├── main.ts             # Entry point: creates the single Phaser.Game instance
     ├── vite-env.d.ts       # Vite client type definitions
@@ -201,15 +205,14 @@ Waves-Of-Rage/
     │   ├── config.ts       # Phaser GameConfig (renderer, scale, scene list)
     │   ├── constants.ts    # GAME_WIDTH / GAME_HEIGHT (orientation-dependent), SceneKeys, AssetKeys
     │   ├── platform.ts     # Touch / portrait detection, evaluated once at boot
-│   │   ├── games.ts        # The games on the title screen (Waves of Rage, Boardmasters) and the cursor
+│   │   ├── games.ts        # The title menu's games (a scene here, or the sequel's page) and the cursor
     │   └── gameplay.ts     # GAMEPLAY (health, scoring) and DIFFICULTY thresholds
     ├── scenes/
     │   ├── BootScene.ts    # Loads assets, then starts TitleScene
-    │   ├── TitleScene.ts   # Concept art, game list, difficulty selector, pulsing PRESS SPACE
+    │   ├── TitleScene.ts   # Concept art, the game menu (two buttons), difficulty selector, prompt
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
     │   ├── GameOverScene.ts# WIPEOUT screen: results, top-10 table, name prompt, restart/title
-    │   ├── PauseScene.ts   # Pause popover: RESUME / RESTART / MAIN MENU
-│   │   └── BoardmastersScene.ts # Waves of Rage 2 title card; the sequel starts here (Esc / tap: back)
+    │   └── PauseScene.ts   # Pause popover: RESUME / RESTART / MAIN MENU
     ├── entities/
     │   ├── Player.ts       # The surfer: movement, facing, jump, big air, spin/grab, landing, punch, barge, hit
     │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
@@ -234,6 +237,34 @@ Waves-Of-Rage/
     └── ui/
         ├── Hud.ts          # DISTANCE counter
         └── DebugHud.ts     # F1-toggled developer readout
+    └── boardmasters/       # Waves of Rage 2: Boardmasters (Three.js), nothing here imports Phaser
+        ├── main.ts         # Entry for boardmasters.html: renderer, HUD, input, run, loop; dev handle window.bm
+        ├── engine/
+        │   ├── three.ts    # Imports Three with colour management off (colours are written as given)
+        │   ├── Renderer.ts # WebGL canvas + HUD canvas at 426x240 (240x426 upright), nearest-neighbour FIT scaling
+        │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud light, fog, 5-bit banding
+        │   ├── Textures.ts # 16/32 px textures painted at runtime (water, boards, skull buoy, chequered flag)
+        │   ├── Hud2D.ts    # Pixel-font text and images on the HUD canvas (reuses sprites/font.png)
+        │   ├── Input.ts    # Keyboard + touch (stick, taps, on-screen buttons, several fingers) into one InputState
+        │   ├── TouchButtons.ts # CARVE < >, HIT and BRG layout, drawn by the HUD and hit-tested by Input
+        │   ├── immersive.ts # Fullscreen + orientation lock for phones
+        │   ├── Loop.ts     # Fixed 60 Hz step, render per frame
+        │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
+        ├── world/
+        │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
+        │   ├── Course.ts   # Course data (Sunset Bay) and the seeded layout of ramps, troughs and buoys
+        │   └── Sky.ts      # Sunset dome, sun disc, island silhouettes
+        ├── entities/
+        │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
+        │   ├── Surfer.ts   # The player's rider (input -> control)
+        │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
+        │   ├── Buoy.ts     # Skull buoy hazard (smashable in RAGE)
+        │   ├── FinishLine.ts # Posts and chequered banner
+        │   └── Spray.ts    # Spray as one instanced mesh
+        └── game/
+            ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
+            ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
+            └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera, HUD
 ```
 
 ### How the pieces fit together
@@ -243,8 +274,8 @@ Waves-Of-Rage/
 3. `game/config.ts` sets the internal resolution, pixel-art rendering flags,
    responsive scaling and the ordered list of scenes.
 4. `BootScene` runs first, loads assets in `preload()` and starts
-   `TitleScene`, which starts the selected game on Space or Enter:
-   `GameScene`, or `BoardmastersScene` for the sequel (see `game/games.ts`).
+   `TitleScene`, whose menu starts `GameScene` or navigates to the sequel's
+   page (see `game/games.ts`).
 5. `GameScene` owns one `GameSpeed`, and every frame: advances it, feeds the
    resulting speed to the `OceanScroller` and `ObstacleSpawner`, updates the
    `Player` from `Controls`, checks player/obstacle overlaps, and refreshes
@@ -367,13 +398,45 @@ to change.
 The sequel is a separate game sharing this repository, hosting and visual
 identity: a 3D forward-scrolling arcade surf racer/brawler seen from behind
 the surfer, styled like 1995-1998 PlayStation 3D with this game's Mega Drive
-presentation around it. It is at the concept stage. The title screen's
-second entry opens its title card, built from the approved concept art, and
-reports whether the browser has WebGL 2. The reference art is in
+presentation around it. It has its first playable prototype, reached from the
+title screen's second menu entry or directly at `boardmasters.html`
+(`/boardmasters` on the production server).
+
+**What is in the prototype.** Sunset Bay, a 1,200 m course on a swell that
+is real terrain: you climb faces, drop into troughs and launch off crests
+when you are going fast enough, and steep-backed ramps and slowing troughs
+are laid out along the way. Seven rivals ride their own lanes, steer round
+the skull buoys, keep pace with you, and the strong ones shoulder-check you
+when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
+(Shift) knock rivals about and, after two hits, out of the race for 500
+points; knockouts within four seconds of each other multiply up to x5, and a
+rival shoved into a buoy or off the course is out for 750. In the air,
+Left/Right spin and X grabs: land within 50 degrees of upright and the air,
+the spin (180 to 720) and the grab score, with a clean-landing bonus; land
+badly and you crash for a heart. A skull buoy costs a heart too; three and
+you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
+faster for eight seconds, one hit knocks out, buoys smash for points and
+the sea turns hot pink. A chequered banner marks the finish. The title
+screen picks the character (seven, with SPEED / TURN / POWER / RAGE bars
+that scale the physics and colour the rig); the choice is remembered.
+
+**Controls.** Left/Right or A/D carve, Up/W pumps for speed, Down/S brakes
+and tightens the carve, Space jumps (also from a crest, for more height),
+X or J punches (grabs in the air), Shift barges, Esc pauses (M on the pause
+panel for the main menu). On the title, Left/Right change character. On
+phones: hold a finger and move it sideways to carve or use the CARVE
+buttons, tap to jump, HIT and BRG are the buttons bottom-right, the pause
+button is top-centre and MENU is the top-left corner. The first tap asks
+for fullscreen and locks the phone upright where the browser allows it.
+
+**Where things are.** The code lives in `src/boardmasters/` (see the tree
+above), imports nothing from Phaser and shares only the platform detection,
+the pixel font sheet and the palette with this game. Tuning is in
+`src/boardmasters/game/constants.ts`; characters, their stats and colours in
+`characters.ts`; course data in `world/Course.ts`. The reference art is in
 [`docs/art-direction/boardmasters/`](docs/art-direction/boardmasters/) and
-the proposed engine and architecture for the first playable prototype are in
-[`docs/boardmasters/ARCHITECTURE.md`](docs/boardmasters/ARCHITECTURE.md),
-awaiting agreement before any engine code is written.
+the architecture, with how the next features plug in, is in
+[`docs/boardmasters/ARCHITECTURE.md`](docs/boardmasters/ARCHITECTURE.md).
 
 ## Roadmap
 

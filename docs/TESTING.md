@@ -11,7 +11,8 @@ Both must pass before a commit.
 
 ## Automated tests
 
-`npm test` runs two scripts. `tests/api.mjs` starts `server/index.mjs` on a
+`npm test` runs `tests/run-all.mjs`, which runs three suites in turn and
+fails if any did (so one red suite never hides the others). `tests/api.mjs` starts `server/index.mjs` on a
 spare port with a temporary data directory and checks the score API
 (validation, sorting, capping, per-mode tables, rate limiting, persistence,
 static serving, path traversal). Set `TEST_DATABASE_URL` to a scratch
@@ -22,7 +23,21 @@ headless Chromium with Playwright, and checks the main systems end to end:
 title screen, game selection, movement, jumping, ramps and tricks, combat,
 health, combos, game over and restart. It reads game state through the dev-only
 `window.game` handle, so it runs against the dev server, not the production
-bundle.
+bundle. It ends with a touch-mode page (`?touch=1`) that taps with a
+held press, the way a finger does, to cover the two title-screen bugs fixed
+in the game menu: tapping a menu entry must start it, and MAIN MENU from the
+pause popover must not start a new run. Finally `tests/boardmasters-e2e.mjs`
+opens `boardmasters.html` on another spare port and drives the sequel's
+prototype through its states via the dev-only `window.bm` handle: title and
+attract mode, start, forward travel, carving, pumping, braking, jumping and
+landing, the rival, buoys, ramps and finish, a wipeout, restart, the finish,
+and Escape back to the main menu, with no console errors, plus character
+select, the field of eight, punch and barge knockouts, a clean 360 and a
+crashed 180, RAGE, pause, the follow camera and terrain, and a phone-shaped
+page (touch, upright view, tap to start and jump, the HIT and pause
+buttons). Waits are on game state, not the clock, because SwiftShader runs
+the simulation slower than real time. Both browser suites spawn Vite's own
+script so killing it really stops the server.
 
 ### Setup (once)
 
@@ -37,6 +52,9 @@ the test at it instead of installing one:
 ```bash
 CHROMIUM_PATH=/path/to/chrome npm test
 ```
+
+(Playwright pins a Chromium revision; when a preinstalled browser is a
+different revision, `CHROMIUM_PATH` is the way to use it.)
 
 ### Run
 
@@ -60,7 +78,48 @@ The test uses a few deliberate hooks that exist for debugging and testing:
 
 Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 
-## Manual test script
+## Manual test script (Waves of Rage 2)
+
+1. Title: the logo and course name show over the attract-mode surfer; Space
+   (tap on touch) starts; Esc (MENU corner on touch) returns to the main
+   menu page.
+2. Riding: the surfer sits on the drawn water at all times; the camera stays
+   behind at waist height and never goes under a wave; Left/Right carve
+   with a visible lean, Up gains speed (bar), Down brakes.
+3. Air: Space jumps; riding fast over a crest or any ramp launches without
+   pressing anything; a landing after half a second shows `AIR +100`, after
+   a second `BIG AIR +250`; the shadow shrinks while airborne.
+4. Hazards: hitting a skull buoy flashes the surfer, shows `OUCH!` and costs
+   a heart; the third hit shows `WIPEOUT` and the results panel after a
+   moment; touching the rival shows `BUMP` and pushes both apart.
+5. Finish: crossing the chequered banner shows `FINISH!` with the place and
+   the bonus; Space restarts from the start line with three hearts.
+6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
+   `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
+   knockouts within four seconds show `X2`; Shift shoves a rival hard and
+   costs you a little speed; a rival shoved into a buoy shows
+   `INTO THE BUOY +750`; strong rivals shove you (`SHOVED!`) when alongside.
+7. Tricks: in the air Left/Right spin and X grabs; a clean 360 shows
+   `360 +...`, a half spin shows `WIPEOUT -1` and a tumble.
+8. RAGE: the meter fills with tricks and knockouts; full, `RAGE!` shows,
+   the sea turns pink, you ride faster, one hit knocks out and buoys show
+   `SMASH +100`; it drains over eight seconds.
+9. Character select: Left/Right on the title cycle the seven riders with
+   their stat bars; the rig changes; the choice survives a reload.
+10. Pause: Esc (the top-centre button on touch) shows PAUSED; Space (tap)
+    resumes; M (MENU corner) returns to the main menu with the sequel's
+    entry highlighted.
+11. Look: `bm.look.snap = false` in the console stops the polygon jitter,
+    `bm.look.affine = false` straightens the water texture, `bm.look.quantize
+    = false` removes the banding, `bm.look.dither = false` the dither;
+    `?res=320` is blockier.
+12. Touch (`?touch=1`, or a phone): the field is upright; a held finger
+    moved sideways carves, the CARVE buttons carve, a tap jumps, HIT and BRG
+    attack, the top-centre button pauses, MENU works; the first tap goes
+    fullscreen where allowed.
+13. Console: no errors throughout, on either page.
+
+## Manual test script (Waves of Rage)
 
 Use this after any change to movement, combat or scoring:
 
@@ -98,9 +157,9 @@ Use this after any change to movement, combat or scoring:
     server running (`npm run serve` beside `npm run dev`) the heading reads
     TOP 10 and the entry appears on another device; without it the heading
     reads TOP 10 OFFLINE.
-14. Game list: Up/Down (or W/S, or tapping a row) moves the cursor between
-    WAVES OF RAGE and WOR 2: BOARDMASTERS; with the sequel selected the
-    difficulty row reads PROTOTYPE and Space opens its title card (logo,
-    status lines, `WEBGL2 OK`); Esc, Space, a click or a tap returns to the
-    title with the cursor still on the sequel. In portrait (`?touch=1`) the
-    card shows the whole poster with the status panel over its painted menu.
+14. Game menu: Up/Down (or W/S) move the cursor between the WAVES OF RAGE
+    and WOR 2: BOARDMASTERS buttons; Space starts the highlighted one;
+    clicking or tapping a button starts that game at once (the Boardmasters
+    button opens `boardmasters.html`); Left/Right still change the
+    difficulty under WAVES OF RAGE. On touch, MAIN MENU from the pause
+    popover returns to the title and nothing starts by itself.

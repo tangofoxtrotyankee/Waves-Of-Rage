@@ -23,8 +23,6 @@ export const SceneKeys = {
   Game: 'GameScene',
   GameOver: 'GameOverScene',
   Pause: 'PauseScene',
-  /** Waves of Rage 2: Boardmasters title card (src/scenes/BoardmastersScene.ts). */
-  Boardmasters: 'BoardmastersScene',
 } as const;
 
 /** Keys for assets loaded from public/assets by BootScene. */
@@ -41,10 +39,6 @@ export const AssetKeys = {
   Water: 'water',
   Foam: 'foam',
   Font: 'pixel-font',
-  /** Waves of Rage 2 title art, cropped from docs/art-direction/boardmasters/title-concept.webp. */
-  BmLogo: 'bm-logo',
-  BmHero: 'bm-hero',
-  BmTitlePortrait: 'bm-title-portrait',
 } as const;
 
 /** Animation keys registered once in BootScene. */

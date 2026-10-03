@@ -29,12 +29,6 @@ export class BootScene extends Phaser.Scene {
     this.load.image(AssetKeys.Water, `${sprites}/water.png`);
     this.load.image(AssetKeys.Foam, `${sprites}/foam.png`);
     this.load.image(AssetKeys.Font, `${sprites}/font.png`);
-
-    // Waves of Rage 2: Boardmasters title card (see docs/art-direction/boardmasters).
-    const bm = 'assets/boardmasters';
-    this.load.image(AssetKeys.BmLogo, `${bm}/logo-220x110.png`);
-    this.load.image(AssetKeys.BmHero, `${bm}/hero-100x180.png`);
-    this.load.image(AssetKeys.BmTitlePortrait, `${bm}/title-portrait-180x320.png`);
   }
 
   create(): void {

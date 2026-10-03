@@ -38,3 +38,17 @@ export function usePortraitLayout(): boolean {
   if (params.get('landscape') === '1') return false;
   return isTouchDevice();
 }
+
+/**
+ * The testing overrides in force (`touch`, `portrait`, `landscape`), as a
+ * query string to carry across a navigation between the two games' pages,
+ * so `?touch=1` on the title still applies in the sequel and on the way back.
+ */
+export function platformOverrideQuery(): string {
+  const carried = new URLSearchParams();
+  for (const key of ['touch', 'portrait', 'landscape']) {
+    const value = params.get(key);
+    if (value !== null) carried.set(key, value);
+  }
+  return carried.toString();
+}

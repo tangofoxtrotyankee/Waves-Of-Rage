@@ -1,8 +1,10 @@
 # Deployment
 
-Waves of Rage builds to a static site (`dist/`) plus a tiny Node server
-(`server/index.mjs`, no dependencies) that serves it and hosts the shared,
-cross-device top-10 table at `/api/scores`. The game works without the
+Waves of Rage builds to a static site (`dist/`, two pages: `index.html` for
+the original game and `boardmasters.html` for Waves of Rage 2, each with its
+own bundle) plus a tiny Node server (`server/index.mjs`, no dependencies)
+that serves it, maps `/boardmasters` to the sequel's page, and hosts the
+shared, cross-device top-10 table at `/api/scores`. The game works without the
 server too (any static host), falling back to a per-device table marked
 OFFLINE. Asset paths are relative (`base: './'` in `vite.config.ts`), so the
 build also runs from a sub-folder.

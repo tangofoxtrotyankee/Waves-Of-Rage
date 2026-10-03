@@ -1,10 +1,11 @@
-# Waves of Rage 2: Boardmasters, technical architecture proposal
+# Waves of Rage 2: Boardmasters, technical architecture
 
-**Status: proposal.** Nothing below is built. The only sequel code in the
-repository is the title card reached from the main menu
-(`src/scenes/BoardmastersScene.ts`), which also reports whether the browser
-has WebGL 2. The rendering approach needs agreeing before the prototype is
-written; the decisions are listed at the end.
+**Status: built as proposed; first playable prototype in the repository.**
+The go-ahead was given on the recommendations below (Three.js, a second
+Vite page in this repository, 426x240, keyboard first with basic touch,
+code-built placeholder meshes). Sections 2 to 9 describe what now exists in
+`src/boardmasters/`; where the build departs from the proposal it says so.
+Section 10 is the roadmap for what comes next.
 
 The brief: a 3D forward-scrolling arcade surf racer/brawler seen from a
 chase camera, looking like 1995-1998 PlayStation / Saturn 3D with the
@@ -69,17 +70,21 @@ as in the original game, are the simplest thing.
 ```
 index.html            -> src/main.ts              Waves of Rage (Phaser, unchanged)
 boardmasters.html     -> src/boardmasters/main.ts Waves of Rage 2 (Three.js)
-src/shared/           Storage.ts, platform.ts, pixel-font metrics, palette (moved from src/)
 ```
+
+As built: nothing was moved into a `src/shared/` folder yet. The sequel
+imports `src/game/platform.ts` (touch and portrait detection) and the
+`FONT_CHARS` constant from `src/game/constants.ts` directly, and loads the
+same `public/assets/sprites/font.png`. Moving those into `src/shared/` is a
+mechanical change for when a third consumer appears.
 
 - `vite.config.ts` gains `build.rollupOptions.input` with both pages. Vite
   builds two bundles; Phaser is only in the first, Three only in the second.
-- The main menu's "WOR 2: BOARDMASTERS" entry navigates to
-  `./boardmasters.html` (today it opens the title card scene; the card
-  moves to the new page). The sequel's own menu links back to `./`.
-- `server/index.mjs` needs nothing: it already serves any file in `dist/`.
-  A three-line route mapping `/boardmasters` to `boardmasters.html` gives a
-  clean URL.
+- The main menu's "WOR 2: BOARDMASTERS" button navigates to
+  `./boardmasters.html` (`GameEntry.url` in `src/game/games.ts`). The
+  sequel's title screen and results link back to `./`.
+- `server/index.mjs` serves any file in `dist/`; one line maps
+  `/boardmasters` to `boardmasters.html` for a clean URL.
 - Shared high scores later: `/api/scores?mode=bm-sunset-bay`; add the modes
   to `cleanMode()` in `server/scores.mjs`, one table per course.
 
@@ -184,8 +189,27 @@ src/shared/                       Storage.ts, platform.ts, font metrics, palette
 tests/boardmasters-e2e.mjs        Playwright, same style as tests/e2e.mjs
 ```
 
-About 1,500 lines of TypeScript and 100 lines of GLSL for the ten-point
-prototype. New dependencies: `three` and `@types/three`, nothing else.
+As built: about 1,700 lines of TypeScript and 90 lines of GLSL. New
+dependencies: `three` (runtime) and `@types/three` (dev), nothing else. The
+sequel's bundle is about 145 kB gzipped; the original game's is unchanged.
+Additions to the plan: `engine/Textures.ts` (runtime-painted 16/32 px
+textures), `engine/TouchButtons.ts` and `engine/immersive.ts`,
+`entities/FinishLine.ts` and `entities/Spray.ts` (one instanced mesh),
+`game/characters.ts` (the seven characters' stats and colours plus the
+rival surfers), an attract mode on the title (the surfer rides on its own
+behind the logo), and a `?character=` switch.
+
+Built since the ten-point prototype, in the same modules: a character
+select on the title (`Run.selectCharacter`, `Rider.setSpec` rebuilds the
+rig), a field of seven rivals with lanes, buoy avoidance and shoulder
+checks (`Rival.think`), HIT and BARGE with knockouts, combos and
+environmental knockouts (`Run.resolveAttacks`, `resolveHazards`, the
+`COMBAT` table), spins and grabs with landing judgement (`Rider`, the
+`TRICKS` table, `Run.resolveLanding`), the RAGE meter and mode (`RAGE`
+table, `Run.startRage`), a pause state, the mockup's touch buttons, and
+the review's fixes (steering direction, step-rate independent launches,
+the sky's elevation ramp shared with the fog, ordered dither, the ocean
+sampled once per frame from a height grid with coarse outer columns).
 
 ## 8. Mobile
 
@@ -210,19 +234,28 @@ the surfer's `z` increases; Left and Right change `x`; Space sets
 `airborne` then clears it; the rival and the buoy exist; the HUD text
 updates. `npm test` runs the API test and both browser tests.
 
-## 10. What is deliberately not in the prototype, and where it plugs in
+## 10. Roadmap: what comes next, and where it plugs in
 
-| Later feature | Plugs into |
-| ------------- | ---------- |
-| Racing: eight surfers, positions, finish line, POS HUD | `Run.ts` (ranking by `z`), `Course.ts` (finish), `Hud2D.ts` |
-| Tricks and multiplier | `Surfer.ts` airborne state and landing result; floating text in `Hud2D.ts` |
-| Combat: HIT, BARGE, GRAB, board attacks, environmental knockouts | new `game/Combat.ts`, ported from the original's `systems/Combat.ts` logic |
-| Sharks, boats, jet skis, pier pilings, rocks, gates, pickups | entities on the course feature list, same interface as `Buoy.ts` |
-| Barrels, whitewater, shortcuts, the chasing wave | features in `Ocean.ts` |
-| RAGE mode | `Run.ts` state plus `PS1Material` uniforms for the look change |
-| Six courses | `Course.ts` data files |
-| Characters | a stats table (SPEED, TURN, POWER, RAGE per the line-up sheet) consumed by `Surfer.ts`; the prototype's surfer states are named after the sheet's animation set (idle, carve left/right, accelerate, jump, air trick, hit, barge, wipeout) so animations slot in later |
-| Audio | an `engine/Audio.ts` wrapper; nothing in the prototype depends on it |
+Three designs were drawn up and judged for this codebase (data-driven,
+systems-first, player-first); the player-first order won, with the
+data-driven tables grafted in. The order below makes the one course fun
+before multiplying content. Sizes are rough line counts.
+
+| Step | What | Where it plugs in | Size |
+| ---- | ---- | ----------------- | ---- |
+| 1. Combat depth | Move `Run.resolveAttacks` and the rival half of `resolveHazards` into `game/Combat.ts`; an `ATTACKS` table (`hit`, `barge`, `grab`: damage, shove, ranges, cooldown, pose) replaces the per-attack fields in `Rider`; GRAB holds a rival for 0.3 s then throws it (the existing shoved-into-hazard path finishes it); rivals punch back, and a heart is lost only on a would-be knockout | `Rider.ts`, `Run.ts`, `constants.ts`, `Input.ts` (`attackHeld`) | ~220 |
+| 2. Tricks and multiplier | `game/Tricks.ts` with a trick table (`id`, `name`, `points`, `match`) and a pure `scoreLanding(landing)`; one multiplier (1 to 8) fed by clean landings and knockouts, reset by damage, applied to both; a held hard carve floats `+250 CARVE` | `Run.resolveLanding`, HUD | ~80 |
+| 3. RAGE as a choice | A full meter waits for the player (R, or tapping the bar); the pink tint becomes `RAGE.fog` / `RAGE.horizon` plus a water tint uniform; rivals steer away from a raging player | `Run.ts`, `PS1Material.ts`, `Rival.think` | ~50 |
+| 4. Hazard interface and rival personality | `entities/Hazard.ts` (`x`, `z`, extents, `lethalToShoved`, `update`, `onPlayer`); `Buoy` implements it and `Run.hazards` replaces `buoys`; `RIVALS` rows gain an `ai` block (lane amplitude and frequency, catch-up, aggression) replacing the constants in `Rival.think`; `Run.standings()` for the results | `entities/`, `characters.ts`, `Run.ts` | ~150 |
+| 5. Characters | A `BOARDS` table (the eight boards from the sheet) referenced by `RiderSpec.board`; unlockables gated by `bm.unlocks` in storage (finish, knockouts, score); title and results drawing pulled out of `drawHud` into `game/Screens.ts`; TURN also scales `maxHeading` so it is felt | `characters.ts`, `Rider.setSpec`, `Run.ts` | ~150 |
+| 6. Pickups | `entities/Pickup.ts` implementing `Hazard` (`coin`, `health`, `speed`); `buildCourse` places them, in arcs over ramp apexes | `Course.ts`, `Run.ts` | ~80 |
+| 7. Courses and hazards | `CourseSpec` gains swell, palette, storm and a hazard mix; `Ocean.setSwell`, `Sky.setPalette`; new hazards `Piling`, `Reef`, `Shark` (lunge ported from the original's `Shark.ts`), `Boat`, `JetSki extends Rival`; `?course=`; `bm-*` score modes in `server/scores.mjs` | `world/`, `entities/`, `main.ts`, server | ~350 |
+
+Deliberately deferred: an entity/component split (a third contact rule
+would justify it; today `Rider` and the `Hazard` interface cover the
+cases), audio (an `engine/Audio.ts` wrapper, nothing depends on it),
+and modelled meshes (the box rigs are placeholders; glTF rigs slot into
+`Rider.setSpec`).
 
 ## 11. Risks
 
