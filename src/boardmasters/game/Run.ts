@@ -1,3 +1,4 @@
+import { platformOverrideQuery } from '../../game/platform';
 import { saveJSON } from '../../systems/Storage';
 import type { Hud2D } from '../engine/Hud2D';
 import { requestImmersiveMode } from '../engine/immersive';
@@ -219,7 +220,8 @@ export class Run {
   }
 
   private mainMenu(): void {
-    window.location.href = './?game=boardmasters';
+    const overrides = platformOverrideQuery(); // keep ?touch=1 and the orientation overrides across the pages
+    window.location.href = `./?game=boardmasters${overrides ? `&${overrides}` : ''}`;
   }
 
   private tappedMenu(input: InputState): boolean {

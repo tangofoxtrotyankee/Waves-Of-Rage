@@ -284,6 +284,15 @@ try {
   await tapAt(120, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));
+  // The way back keeps the overrides too (opened with ?touch=1 here to prove it).
+  const back = await phone.newPage();
+  await back.goto(`${URL}?touch=1&portrait=1`);
+  await back.waitForFunction(() => window.bm && window.bm.run, null, { timeout: 30000 });
+  await back.evaluate(() => { window.bm.run.state = 'title'; });
+  await back.keyboard.press('Escape'); await back.waitForTimeout(1500);
+  const backUrl = new globalThis.URL(back.url());
+  check('phone: MENU returns to the main menu with the sequel selected and the overrides kept', backUrl.pathname === '/' && backUrl.searchParams.get('game') === 'boardmasters' && backUrl.searchParams.get('touch') === '1' && backUrl.searchParams.get('portrait') === '1', back.url());
+  await back.close();
   await phone.close();
 } catch (err) {
   console.error('TEST CRASHED:', err);

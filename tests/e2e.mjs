@@ -231,7 +231,8 @@ try {
   check('touch: MAIN MENU returns to the title and stays there', rightAfter === 'TitleScene' && (await tScenes()) === 'TitleScene', `right after=${rightAfter}, later=${await tScenes()}`);
   await touchPage.waitForTimeout(400);
   await tap(buttons[1].x, buttons[1].y); await touchPage.waitForTimeout(1500);
-  check('touch: tapping WOR 2: BOARDMASTERS opens its page', new globalThis.URL(touchPage.url()).pathname === '/boardmasters.html', touchPage.url());
+  const sequelUrl = new globalThis.URL(touchPage.url());
+  check('touch: tapping WOR 2: BOARDMASTERS opens its page, keeping ?touch=1', sequelUrl.pathname === '/boardmasters.html' && sequelUrl.searchParams.get('touch') === '1', touchPage.url());
   await touchPage.close();
 } catch (err) {
   console.error('TEST CRASHED:', err);

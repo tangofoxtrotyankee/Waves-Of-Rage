@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { AssetKeys, GAME_HEIGHT, GAME_WIDTH, SceneKeys } from '../game/constants';
 import { DIFFICULTY_MODES, DIFFICULTY_ORDER, getDifficulty, setDifficulty, type DifficultyMode } from '../game/difficulty';
 import { GAME_ORDER, GAMES, getSelectedGame, setSelectedGame, type GameId } from '../game/games';
+import { platformOverrideQuery } from '../game/platform';
 import { consumeTap, requestImmersiveMode, touchState } from '../input/TouchControls';
 import { ScoreService } from '../systems/ScoreService';
 import { Hud } from '../ui/Hud';
@@ -167,7 +168,8 @@ export class TitleScene extends Phaser.Scene {
     setSelectedGame(id);
     const entry = GAMES[id];
     if (entry.url) {
-      window.location.href = entry.url;
+      const overrides = platformOverrideQuery(); // keep ?touch=1 and the orientation overrides across the pages
+      window.location.href = overrides ? `${entry.url}?${overrides}` : entry.url;
       return;
     }
     if (touchState.enabled) void requestImmersiveMode();
