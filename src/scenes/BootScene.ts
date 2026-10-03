@@ -24,6 +24,7 @@ export class BootScene extends Phaser.Scene {
     this.load.spritesheet(AssetKeys.Spray, `${sprites}/spray.png`, { frameWidth: 24, frameHeight: 8 });
     this.load.image(AssetKeys.Rock, `${sprites}/rock.png`);
     this.load.image(AssetKeys.Ramp, `${sprites}/ramp.png`);
+    this.load.image(AssetKeys.Boat, `${sprites}/boat.png`);
     this.load.image(AssetKeys.Sky, `${sprites}/sky.png`);
     this.load.image(AssetKeys.Water, `${sprites}/water.png`);
     this.load.image(AssetKeys.Foam, `${sprites}/foam.png`);

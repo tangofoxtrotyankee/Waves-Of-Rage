@@ -76,6 +76,7 @@ export class GameOverScene extends Phaser.Scene {
           event.stopPropagation();
           void pointer;
           this.titleChosen = true;
+          consumeTap();
           this.scene.start(SceneKeys.Title);
         });
         if (!touchState.enabled) this.input.once('pointerdown', () => this.scene.start(SceneKeys.Game));

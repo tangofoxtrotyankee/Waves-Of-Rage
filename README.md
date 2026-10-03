@@ -83,6 +83,7 @@ builds.
 | Grab (while in big air)             | X / J           |
 | Spin left / right (in big air)      | Left / A, Right / D |
 | Shoulder barge (while moving L/R)   | Shift           |
+| Pause (RESUME / RESTART / MAIN MENU) | Esc or P, or the top-right button |
 | Toggle debug readout + hitboxes     | F1              |
 | Game over: surf again / main menu   | Space / Esc     |
 
@@ -112,10 +113,16 @@ in `src/ui/DebugHud.ts` and is easy to delete later.
   EASY (slower, sparser, sharks late, 4 hearts), NORMAL (the baseline),
   INSANITY (1.3x speed, fast ramp, dense spawns, sharks from 5 s). Each
   mode has its own shared top 10. Numbers live in `src/game/difficulty.ts`.
-- You start with 3 health (4 on Easy). Rocks and rival surfers take 1, sharks take 2.
+- You start with 3 health (4 on Easy). Rocks, rival surfers and the lifeguard
+  boat take 1, sharks take 2.
 - A hit knocks you sideways, flashes the surfer, cuts speed for a moment and
   grants about a second of immunity.
 - Rocks can be jumped for a bonus. Sharks must be dodged.
+- From 15 seconds in, a lifeguard boat crosses the water sideways now and
+  then, from either edge. It cannot be jumped and it holds its line, so
+  steer around it (rivals it meets wipe out).
+- The pause button in the top-right corner (Esc or P on a keyboard) opens a
+  popover with RESUME, RESTART and MAIN MENU.
 - Rival surfers have 2 health. They drift about, sometimes head for your
   lane, and shoulder-check you when close (on a cooldown). A punch does 1
   damage with a small shove; a barge does 1 damage with a big shove. At zero
@@ -193,13 +200,15 @@ Waves-Of-Rage/
     │   ├── BootScene.ts    # Loads assets, then starts TitleScene
     │   ├── TitleScene.ts   # Concept art background + pulsing PRESS SPACE
     │   ├── GameScene.ts    # Core loop: wires systems, entities and HUD, tracks health/score
-    │   └── GameOverScene.ts# WIPEOUT screen: results, top-10 table, name prompt, restart/title
+    │   ├── GameOverScene.ts# WIPEOUT screen: results, top-10 table, name prompt, restart/title
+    │   └── PauseScene.ts   # Pause popover: RESUME / RESTART / MAIN MENU
     ├── entities/
     │   ├── Player.ts       # The surfer: movement, facing, jump, big air, spin/grab, landing, punch, barge, hit
     │   ├── Obstacle.ts     # Base class: kind, damage, jumpable, knocksOutRivals, hitbox
     │   ├── Rock.ts         # Stationary, jumpable, 1 damage, knocks out rivals
     │   ├── RivalSurfer.ts  # Enemy: health, drift/seek AI, shoulder check, stun, knockout, ramp hop
     │   ├── Shark.ts        # Swims at you, lunges sideways, 2 damage, knocks out rivals
+    │   ├── LifeguardBoat.ts# Crosses the field sideways either way, 1 damage, not jumpable
     │   └── WaveRamp.ts     # Harmless launcher: big air for the player, a hop for rivals
     ├── systems/
     │   ├── Combat.ts       # Resolves punches/barges vs rivals and rivals vs hazards

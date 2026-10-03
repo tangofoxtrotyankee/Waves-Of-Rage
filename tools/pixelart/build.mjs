@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { Canvas, fromRows, recolorRows, sheet } from './png.mjs';
 import { LEGEND } from './palette.mjs';
-import { PLAYER, PLAYER_FRAME_NAMES, RIVAL_RECOLOR, ROCK, SHARK, RAMP, SPRAY, riderOnly, boardOnly } from './sprites.mjs';
+import { PLAYER, PLAYER_FRAME_NAMES, RIVAL_RECOLOR, ROCK, SHARK, RAMP, BOAT, SPRAY, riderOnly, boardOnly } from './sprites.mjs';
 import { buildSky, buildWaterTile, buildFoamTile } from './environment.mjs';
 import { buildFont } from './font.mjs';
 
@@ -38,6 +38,7 @@ save('rival', sheet([
 save('rock', fromRows(ROCK, LEGEND));
 save('shark', sheet([fromRows(SHARK, LEGEND), fromRows(SHARK.map((r, i) => (i === 0 ? '.'.repeat(r.length) : SHARK[i - 1])), LEGEND)]));
 save('ramp', fromRows(RAMP, LEGEND));
+save('boat', fromRows(BOAT, LEGEND));
 save('spray', sheet(SPRAY.map((f) => fromRows(f, LEGEND))));
 save('sky', buildSky());
 save('water', buildWaterTile());

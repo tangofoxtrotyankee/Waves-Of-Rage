@@ -223,6 +223,28 @@ export const RAMP = [
   'ffwwffffwwwfffwwwffffwwwf.....',
 ];
 
+/** Lifeguard boat, 40x18, facing right (flipped in-game for the other way). */
+export const BOAT = [
+  '..................xx....................',
+  '..................xwx...................',
+  '..................xwwx..................',
+  '..................xxxx..................',
+  '..................kk....................',
+  '............kkkkkkkkkkkkk...............',
+  '............kwwwwwwwwwwwk...............',
+  '............kwkkwwwwkkwwk...............',
+  '............kwwwwwwwwwwwk...............',
+  '.kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk..',
+  'kwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwk.',
+  'kwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwk',
+  'kxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxk',
+  '.kwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwk..',
+  '..kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk...',
+  'ffwwffwwwffffwwwfffwwwwffffwwwffwwwfffff',
+  '.fff..fff...ffff..ffff...fff...ffff..ff.',
+  '...ff.....ff....ff.....ff....ff.....ff..',
+];
+
 /** Spray behind the board: three frames, 24x8. */
 export const SPRAY = [
   [

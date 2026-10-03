@@ -3,10 +3,11 @@ import Phaser from 'phaser';
 import type { Obstacle } from '../entities/Obstacle';
 import { PLAYER_START, Player } from '../entities/Player';
 import { RivalSurfer } from '../entities/RivalSurfer';
-import { SceneKeys } from '../game/constants';
+import { GAME_WIDTH, SceneKeys } from '../game/constants';
 import { difficultySpec, getDifficulty } from '../game/difficulty';
 import { GAMEPLAY } from '../game/gameplay';
 import { Controls } from '../input/Controls';
+import { consumeTap } from '../input/TouchControls';
 import { Combat, type KnockoutEvent } from '../systems/Combat';
 import { Combo } from '../systems/Combo';
 import { GameSpeed } from '../systems/GameSpeed';
@@ -80,6 +81,34 @@ export class GameScene extends Phaser.Scene {
 
     // Desktop: a mouse click on the water also jumps (touch taps come through TouchControls).
     if (!this.controls.isTouch) this.input.on('pointerdown', () => this.controls.requestJump());
+
+    this.createPauseButton();
+    keyboard?.on('keydown-ESC', () => this.pause());
+    keyboard?.on('keydown-P', () => this.pause());
+    this.events.on(Phaser.Scenes.Events.RESUME, () => consumeTap());
+  }
+
+  /** Two-bar pause icon in the top-right corner of the HUD. */
+  private createPauseButton(): void {
+    const x = GAME_WIDTH - 9;
+    const y = 9;
+    const icon = this.add.graphics().setDepth(1000);
+    icon.fillStyle(0x1a0b2e, 0.85);
+    icon.fillRect(x - 7, y - 7, 14, 14);
+    icon.fillStyle(0xffd166, 1);
+    icon.fillRect(x - 5, y - 5, 3, 10);
+    icon.fillRect(x + 2, y - 5, 3, 10);
+    const hit = this.add.zone(x, y, 18, 18).setDepth(1001).setInteractive({ useHandCursor: true });
+    hit.on('pointerdown', (_p: Phaser.Input.Pointer, _x: number, _y: number, e: Phaser.Types.Input.EventData) => {
+      e.stopPropagation();
+      this.pause();
+    });
+  }
+
+  private pause(): void {
+    if (this.gameOver || this.scene.isPaused()) return;
+    this.scene.launch(SceneKeys.Pause);
+    this.scene.pause();
   }
 
   override update(_time: number, delta: number): void {
