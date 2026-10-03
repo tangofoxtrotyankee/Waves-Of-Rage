@@ -31,11 +31,11 @@ export class Hud {
     pixelText(scene, 4, 3, 'HEALTH', LABEL).setDepth(1000);
     this.health = pixelText(scene, 4, 13, '', HEART).setDepth(1000);
 
-    pixelText(scene, GAME_WIDTH - 4, 3, 'SCORE', LABEL).setOrigin(1, 0).setDepth(1000);
-    this.score = pixelText(scene, GAME_WIDTH - 4, 13, '000000', VALUE).setOrigin(1, 0).setDepth(1000);
+    pixelText(scene, GAME_WIDTH - 20, 3, 'SCORE', LABEL).setOrigin(1, 0).setDepth(1000);
+    this.score = pixelText(scene, GAME_WIDTH - 20, 13, '000000', VALUE).setOrigin(1, 0).setDepth(1000);
 
-    pixelText(scene, GAME_WIDTH - 68, 3, 'DIST', LABEL).setOrigin(1, 0).setDepth(1000);
-    this.distance = pixelText(scene, GAME_WIDTH - 68, 13, '00000', VALUE).setOrigin(1, 0).setDepth(1000);
+    pixelText(scene, GAME_WIDTH - 80, 3, 'DIST', LABEL).setOrigin(1, 0).setDepth(1000);
+    this.distance = pixelText(scene, GAME_WIDTH - 80, 13, '00000', VALUE).setOrigin(1, 0).setDepth(1000);
 
     this.combo = pixelText(scene, GAME_WIDTH / 2, 24, '', COMBO).setOrigin(0.5, 0).setDepth(1000).setVisible(false);
   }

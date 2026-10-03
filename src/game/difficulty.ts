@@ -16,10 +16,10 @@ export interface DifficultySpec {
   startHealth: number;
 }
 
-/** Normal is the tuning the game shipped with; the others scale it. */
+/** Normal is the baseline (spawn gaps 1.18x the raw SPAWN values: ~15% fewer hazards than the first playtest build); the others scale it. */
 export const DIFFICULTY_MODES: Record<DifficultyMode, DifficultySpec> = {
-  easy: { label: 'EASY', speedScale: 0.8, rampScale: 0.6, spawnGapScale: 1.35, sharkAfterSeconds: 40, sharkChance: 0.12, rampAfterSeconds: 10, startHealth: 4 },
-  normal: { label: 'NORMAL', speedScale: 1, rampScale: 1, spawnGapScale: 1, sharkAfterSeconds: 20, sharkChance: 0.2, rampAfterSeconds: 12, startHealth: 3 },
+  easy: { label: 'EASY', speedScale: 0.8, rampScale: 0.6, spawnGapScale: 1.55, sharkAfterSeconds: 40, sharkChance: 0.12, rampAfterSeconds: 10, startHealth: 4 },
+  normal: { label: 'NORMAL', speedScale: 1, rampScale: 1, spawnGapScale: 1.18, sharkAfterSeconds: 20, sharkChance: 0.2, rampAfterSeconds: 12, startHealth: 3 },
   insanity: { label: 'INSANITY', speedScale: 1.3, rampScale: 1.8, spawnGapScale: 0.65, sharkAfterSeconds: 5, sharkChance: 0.35, rampAfterSeconds: 8, startHealth: 3 },
 };
 

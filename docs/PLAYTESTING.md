@@ -23,6 +23,8 @@ Space.
   knock out, 750 if they hit a rock or shark. Knockouts within 4 s chain a
   combo up to x5.
 - Sharks: from 20 s, 2 damage, lunge sideways, cannot be jumped.
+- Lifeguard boat: from 15 s, crosses sideways from either edge every
+  520-900 world px, 1 damage, cannot be jumped, knocks rivals out.
 - Ramps: from 12 s, launch you into big air. Spin with left/right, grab
   with X/J, land within 50 degrees of upright. Bad landing = 1 damage.
 
@@ -96,7 +98,7 @@ Change one thing at a time, play three runs, keep or revert.
 
   ```js
   const s = game.scene.getScene('GameScene');
-  s.spawner.debugSpawn('shark');       // spawn a kind now
+  s.spawner.debugSpawn('shark');       // spawn a kind now ('rock' | 'rival' | 'shark' | 'ramp' | 'boat')
   s.spawner.debugSpawn('ramp', 160);   // at a given x
   s.gameSpeed.stopFactor = 0;          // freeze the scroll (1 to resume)
   s.health = 50;                       // survive while experimenting

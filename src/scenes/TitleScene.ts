@@ -11,8 +11,12 @@ import { pixelText } from '../ui/PixelText';
  * Title screen. Uses the concept artwork as a temporary background (the logo
  * is part of the artwork) with a pulsing prompt. Space or Enter starts play.
  */
+/** Ignore start input this long after the title opens, so the tap/click that brought us here can't start a game. */
+const START_GRACE_MS = 500;
+
 export class TitleScene extends Phaser.Scene {
   private swallowNextTap = false;
+  private acceptStartAt = 0;
 
   constructor() {
     super(SceneKeys.Title);
@@ -20,6 +24,8 @@ export class TitleScene extends Phaser.Scene {
 
   create(): void {
     this.swallowNextTap = false;
+    this.acceptStartAt = this.time.now + START_GRACE_MS;
+    consumeTap(); // drop any tap left over from the screen that sent us here
     // Sky and water behind the artwork so the portrait field has no black bars.
     this.add.image(GAME_WIDTH / 2, 0, AssetKeys.Sky).setOrigin(0.5, 0);
     this.add.tileSprite(0, 40, GAME_WIDTH, GAME_HEIGHT - 40, AssetKeys.Water).setOrigin(0);
@@ -94,12 +100,16 @@ export class TitleScene extends Phaser.Scene {
 
     // A click on the canvas also starts. On touch, a tap starts (polled in update) and
     // we try to go fullscreen in landscape.
-    if (!touchState.enabled) this.input.once('pointerdown', () => this.startGame());
+    if (!touchState.enabled) {
+      this.input.on('pointerdown', () => {
+        if (this.time.now >= this.acceptStartAt) this.startGame();
+      });
+    }
   }
 
   override update(): void {
     if (touchState.enabled && consumeTap()) {
-      if (this.swallowNextTap) {
+      if (this.swallowNextTap || this.time.now < this.acceptStartAt) {
         this.swallowNextTap = false;
         return;
       }

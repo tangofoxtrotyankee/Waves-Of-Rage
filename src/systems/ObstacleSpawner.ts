@@ -6,8 +6,10 @@ import { RivalSurfer } from '../entities/RivalSurfer';
 import { Rock } from '../entities/Rock';
 import { Shark } from '../entities/Shark';
 import { WaveRamp } from '../entities/WaveRamp';
+import { LifeguardBoat } from '../entities/LifeguardBoat';
 import { difficultySpec, type DifficultySpec } from '../game/difficulty';
 import { DIFFICULTY } from '../game/gameplay';
+import { GAME_HEIGHT } from '../game/constants';
 import { HORIZON_Y } from './OceanScroller';
 
 export const SPAWN = {
@@ -24,6 +26,17 @@ export const SPAWN = {
   spawnY: HORIZON_Y + 6,
   /** Horizontal padding so obstacles never hug the very edge. */
   edgePadding: 10,
+} as const;
+
+export const BOAT_SPAWN = {
+  /** Boats only start crossing after this long. */
+  afterSeconds: 15,
+  /** World pixels travelled between boats (random within this range). */
+  minGap: 520,
+  maxGap: 900,
+  /** Vertical band (fractions of the field height) a boat may cross in: mid-field, above the surfer's lane. */
+  minYFraction: 0.3,
+  maxYFraction: 0.55,
 } as const;
 
 export const RAMP_SPAWN = {
@@ -56,6 +69,8 @@ export class ObstacleSpawner {
   private nextRampGap: number = RAMP_SPAWN.minGap;
   private lastRampX = Number.NaN;
   private rampCount = 0;
+  private travelledSinceBoat = 0;
+  private nextBoatGap: number = BOAT_SPAWN.minGap;
   private readonly mode: DifficultySpec;
 
   constructor(
@@ -66,6 +81,7 @@ export class ObstacleSpawner {
     this.obstacles = scene.add.group();
     this.nextGap = this.rollGap(0);
     this.nextRampGap = Phaser.Math.Between(RAMP_SPAWN.minGap, RAMP_SPAWN.maxGap);
+    this.nextBoatGap = Phaser.Math.Between(BOAT_SPAWN.minGap, BOAT_SPAWN.maxGap);
   }
 
   /** Ramps spawned so far this run (debug readout). */
@@ -109,6 +125,7 @@ export class ObstacleSpawner {
     const travelled = gameSpeed * dt;
     this.travelledSinceSpawn += travelled;
     this.travelledSinceRamp += travelled;
+    this.travelledSinceBoat += travelled;
 
     for (const obstacle of this.active) {
       obstacle.update(delta, gameSpeed, ctx);
@@ -122,6 +139,12 @@ export class ObstacleSpawner {
       this.nextRampGap = Phaser.Math.Between(RAMP_SPAWN.minGap, RAMP_SPAWN.maxGap);
       // Give the player a clear row after the ramp before the next hazard.
       this.travelledSinceSpawn = Math.min(this.travelledSinceSpawn, this.nextGap - RAMP_SPAWN.hazardHoldOff);
+    }
+
+    if (elapsedSeconds >= BOAT_SPAWN.afterSeconds && this.travelledSinceBoat >= this.nextBoatGap * this.mode.spawnGapScale) {
+      this.spawnBoat();
+      this.travelledSinceBoat = 0;
+      this.nextBoatGap = Phaser.Math.Between(BOAT_SPAWN.minGap, BOAT_SPAWN.maxGap);
     }
 
     if (this.travelledSinceSpawn >= this.nextGap && this.hazardCount < SPAWN.maxActive) {
@@ -152,13 +175,22 @@ export class ObstacleSpawner {
         obstacle = new WaveRamp(this.scene, x, y);
         this.rampCount++;
         break;
+      case 'boat':
+        return this.spawnBoat();
     }
     this.obstacles.add(obstacle);
     return obstacle;
   }
 
   private get hazardCount(): number {
-    return this.active.filter((o) => o.kind !== 'ramp').length;
+    return this.active.filter((o) => o.kind !== 'ramp' && o.kind !== 'boat').length;
+  }
+
+  private spawnBoat(): LifeguardBoat {
+    const y = Phaser.Math.Between(Math.round(GAME_HEIGHT * BOAT_SPAWN.minYFraction), Math.round(GAME_HEIGHT * BOAT_SPAWN.maxYFraction));
+    const boat = new LifeguardBoat(this.scene, y, Math.random() < 0.5 ? 1 : -1);
+    this.obstacles.add(boat);
+    return boat;
   }
 
   private spawnRamp(): void {

@@ -9,7 +9,7 @@ const HITBOX_INSET = 0.2;
 /** Once an obstacle is this far below the screen it is destroyed. */
 const OFFSCREEN_MARGIN = 32;
 
-export type HazardKind = 'rock' | 'rival' | 'shark' | 'ramp';
+export type HazardKind = 'rock' | 'rival' | 'shark' | 'ramp' | 'boat';
 
 /** Per-frame world information hazards may react to. */
 export interface HazardContext {

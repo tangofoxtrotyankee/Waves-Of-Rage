@@ -22,6 +22,7 @@ export const SceneKeys = {
   Title: 'TitleScene',
   Game: 'GameScene',
   GameOver: 'GameOverScene',
+  Pause: 'PauseScene',
 } as const;
 
 /** Keys for assets loaded from public/assets by BootScene. */
@@ -32,6 +33,7 @@ export const AssetKeys = {
   Rock: 'rock',
   Shark: 'shark',
   Ramp: 'ramp',
+  Boat: 'boat',
   Spray: 'spray',
   Sky: 'sky',
   Water: 'water',
