@@ -172,7 +172,7 @@ npm run preview
 | Command             | What it does                                  |
 | ------------------- | --------------------------------------------- |
 | `npm run typecheck` | Runs the TypeScript compiler without emitting |
-| `npm test`          | API test + browser end-to-end tests for both games (see docs/TESTING.md) |
+| `npm test`          | All suites through `tests/run-all.mjs`: API test + browser tests for both games (see docs/TESTING.md) |
 | `npm run serve`     | Runs the score API + static server on port 8787 (use beside `npm run dev`) |
 | `npm start`         | Same server, for production (serves `dist/`)   |
 | `npm run art`       | Rebuilds `public/assets/sprites/` from `tools/pixelart/` |
@@ -197,7 +197,7 @@ Waves-Of-Rage/
 │       └── sprites/        #   generated sprite sheets, tiles, sky strip and pixel font
 ├── server/                 # Node server: static dist/ + /api/scores (Postgres or JSON file store)
 ├── tools/pixelart/         # Zero-dependency art pipeline (ASCII maps -> PNG), `npm run art`
-├── tests/                  # api.mjs (score API), e2e.mjs and boardmasters-e2e.mjs (Playwright), `npm test`
+├── tests/                  # run-all.mjs runs api.mjs (score API), e2e.mjs and boardmasters-e2e.mjs (Playwright)
 └── src/
     ├── main.ts             # Entry point: creates the single Phaser.Game instance
     ├── vite-env.d.ts       # Vite client type definitions
@@ -245,7 +245,9 @@ Waves-Of-Rage/
         │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud light, fog, 5-bit banding
         │   ├── Textures.ts # 16/32 px textures painted at runtime (water, boards, skull buoy, chequered flag)
         │   ├── Hud2D.ts    # Pixel-font text and images on the HUD canvas (reuses sprites/font.png)
-        │   ├── Input.ts    # Keyboard + touch (held finger = stick, tap = jump/start) into one InputState
+        │   ├── Input.ts    # Keyboard + touch (stick, taps, on-screen buttons, several fingers) into one InputState
+        │   ├── TouchButtons.ts # CARVE < >, HIT and BRG layout, drawn by the HUD and hit-tested by Input
+        │   ├── immersive.ts # Fullscreen + orientation lock for phones
         │   ├── Loop.ts     # Fixed 60 Hz step, render per frame
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
@@ -253,16 +255,16 @@ Waves-Of-Rage/
         │   ├── Course.ts   # Course data (Sunset Bay) and the seeded layout of ramps, troughs and buoys
         │   └── Sky.ts      # Sunset dome, sun disc, island silhouettes
         ├── entities/
-        │   ├── Rider.ts    # Track-space physics (speed, carve, launch, jump, land) + box-built low-poly rig and poses
+        │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
         │   ├── Surfer.ts   # The player's rider (input -> control)
-        │   ├── Rival.ts    # AI rider on a wavy racing line with rubber-banding
-        │   ├── Buoy.ts     # Skull buoy hazard
+        │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
+        │   ├── Buoy.ts     # Skull buoy hazard (smashable in RAGE)
         │   ├── FinishLine.ts # Posts and chequered banner
-        │   └── Spray.ts    # Pooled spray quads
+        │   └── Spray.ts    # Spray as one instanced mesh
         └── game/
-            ├── constants.ts # Resolution, camera, fog, physics, scoring, palette, LOOK toggles
+            ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
             ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
-            └── Run.ts      # One run: title/playing/wipeout/finished, collisions, score, camera, HUD
+            └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera, HUD
 ```
 
 ### How the pieces fit together
@@ -402,28 +404,30 @@ title screen's second menu entry or directly at `boardmasters.html`
 
 **What is in the prototype.** Sunset Bay, a 1,200 m course on a swell that
 is real terrain: you climb faces, drop into troughs and launch off crests
-when you are going fast enough. Steep-backed ramps and slowing troughs are
-laid out along the course, skull buoys bob in the way (a hit costs a heart,
-three hearts and you wipe out), one rival rides a wavy line beside you and
-bumps you if you touch, and a chequered banner marks the finish. The HUD
-shows hearts, position, distance (metres and percent), score and a speed
-bar; air of half a second or more scores a bonus, big air more. Results show
-distance, place and score; Space surfs again, Esc returns to the main menu.
+when you are going fast enough, and steep-backed ramps and slowing troughs
+are laid out along the way. Seven rivals ride their own lanes, steer round
+the skull buoys, keep pace with you, and the strong ones shoulder-check you
+when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
+(Shift) knock rivals about and, after two hits, out of the race for 500
+points; knockouts within four seconds of each other multiply up to x5, and a
+rival shoved into a buoy or off the course is out for 750. In the air,
+Left/Right spin and X grabs: land within 50 degrees of upright and the air,
+the spin (180 to 720) and the grab score, with a clean-landing bonus; land
+badly and you crash for a heart. A skull buoy costs a heart too; three and
+you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
+faster for eight seconds, one hit knocks out, buoys smash for points and
+the sea turns hot pink. A chequered banner marks the finish. The title
+screen picks the character (seven, with SPEED / TURN / POWER / RAGE bars
+that scale the physics and colour the rig); the choice is remembered.
 
 **Controls.** Left/Right or A/D carve, Up/W pumps for speed, Down/S brakes
 and tightens the carve, Space jumps (also from a crest, for more height),
-Esc goes back. On phones: hold a finger and move it sideways to carve, tap
-to jump; MENU is the top-left corner.
-
-**The look.** Everything renders at 426x240 (240x426 upright on phones) and
-is scaled up with nearest-neighbour sampling. One shader does the period
-artefacts rather than a filter: vertices snap to the pixel grid and jitter,
-textures are affine-mapped and warp, lighting is per vertex, fog closes the
-draw distance to the sunset, and the output is banded to 5 bits per channel.
-Each can be switched live from the dev console (`bm.look.snap`, `.affine`,
-`.quantize`). `?res=320` renders at this game's 320x180 for comparison,
-`?character=kai` (or any id from `src/boardmasters/game/characters.ts`)
-picks another rider.
+X or J punches (grabs in the air), Shift barges, Esc pauses (M on the pause
+panel for the main menu). On the title, Left/Right change character. On
+phones: hold a finger and move it sideways to carve or use the CARVE
+buttons, tap to jump, HIT and BRG are the buttons bottom-right, the pause
+button is top-centre and MENU is the top-left corner. The first tap asks
+for fullscreen and locks the phone upright where the browser allows it.
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
 above), imports nothing from Phaser and shares only the platform detection,

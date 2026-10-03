@@ -11,7 +11,8 @@ Both must pass before a commit.
 
 ## Automated tests
 
-`npm test` runs three scripts. `tests/api.mjs` starts `server/index.mjs` on a
+`npm test` runs `tests/run-all.mjs`, which runs three suites in turn and
+fails if any did (so one red suite never hides the others). `tests/api.mjs` starts `server/index.mjs` on a
 spare port with a temporary data directory and checks the score API
 (validation, sorting, capping, per-mode tables, rate limiting, persistence,
 static serving, path traversal). Set `TEST_DATABASE_URL` to a scratch
@@ -30,8 +31,13 @@ opens `boardmasters.html` on another spare port and drives the sequel's
 prototype through its states via the dev-only `window.bm` handle: title and
 attract mode, start, forward travel, carving, pumping, braking, jumping and
 landing, the rival, buoys, ramps and finish, a wipeout, restart, the finish,
-and Escape back to the main menu, with no console errors. SwiftShader
-provides WebGL 2 in headless Chromium.
+and Escape back to the main menu, with no console errors, plus character
+select, the field of eight, punch and barge knockouts, a clean 360 and a
+crashed 180, RAGE, pause, the follow camera and terrain, and a phone-shaped
+page (touch, upright view, tap to start and jump, the HIT and pause
+buttons). Waits are on game state, not the clock, because SwiftShader runs
+the simulation slower than real time. Both browser suites spawn Vite's own
+script so killing it really stops the server.
 
 ### Setup (once)
 
@@ -88,12 +94,30 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
    moment; touching the rival shows `BUMP` and pushes both apart.
 5. Finish: crossing the chequered banner shows `FINISH!` with the place and
    the bonus; Space restarts from the start line with three hearts.
-6. Look: `bm.look.snap = false` in the console stops the polygon jitter,
-   `bm.look.affine = false` straightens the water texture, `bm.look.quantize
-   = false` removes the banding; `?res=320` is blockier.
-7. Touch (`?touch=1`, or a phone): the field is upright; a held finger moved
-   sideways carves and a tap jumps; the HUD fits; MENU works.
-8. Console: no errors throughout, on either page.
+6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
+   `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
+   knockouts within four seconds show `X2`; Shift shoves a rival hard and
+   costs you a little speed; a rival shoved into a buoy shows
+   `INTO THE BUOY +750`; strong rivals shove you (`SHOVED!`) when alongside.
+7. Tricks: in the air Left/Right spin and X grabs; a clean 360 shows
+   `360 +...`, a half spin shows `WIPEOUT -1` and a tumble.
+8. RAGE: the meter fills with tricks and knockouts; full, `RAGE!` shows,
+   the sea turns pink, you ride faster, one hit knocks out and buoys show
+   `SMASH +100`; it drains over eight seconds.
+9. Character select: Left/Right on the title cycle the seven riders with
+   their stat bars; the rig changes; the choice survives a reload.
+10. Pause: Esc (the top-centre button on touch) shows PAUSED; Space (tap)
+    resumes; M (MENU corner) returns to the main menu with the sequel's
+    entry highlighted.
+11. Look: `bm.look.snap = false` in the console stops the polygon jitter,
+    `bm.look.affine = false` straightens the water texture, `bm.look.quantize
+    = false` removes the banding, `bm.look.dither = false` the dither;
+    `?res=320` is blockier.
+12. Touch (`?touch=1`, or a phone): the field is upright; a held finger
+    moved sideways carves, the CARVE buttons carve, a tap jumps, HIT and BRG
+    attack, the top-centre button pauses, MENU works; the first tap goes
+    fullscreen where allowed.
+13. Console: no errors throughout, on either page.
 
 ## Manual test script (Waves of Rage)
 
