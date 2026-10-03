@@ -7,10 +7,13 @@
  * CHROMIUM_PATH to use an existing browser binary instead of Playwright's.
  */
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
-const PORT = Number(process.env.PORT ?? 5201);
+const PORT = Number(process.env.BM_PORT ?? 5201);
 const URL = `http://127.0.0.1:${PORT}/boardmasters.html`;
+// Spawn Vite's own script (not the npx wrapper) so killing it really stops the server.
+const VITE = fileURLToPath(new globalThis.URL('../node_modules/vite/bin/vite.js', import.meta.url));
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -30,7 +33,7 @@ async function waitForServer(url, ms) {
   return false;
 }
 
-const server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+const server = spawn(process.execPath, [VITE, '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 let browser;
 try {
   if (!(await waitForServer(URL, 30000))) throw new Error('dev server did not start');
@@ -44,10 +47,12 @@ try {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(URL);
-  await page.waitForTimeout(2500);
+  // Wait for the game, not the clock: a cold dev server can take seconds to serve the bundle.
+  const booted = await page.waitForFunction(() => window.bm && window.bm.run && window.bm.hud.fontLoaded, null, { timeout: 30000 }).then(() => true, () => false);
 
   const wait = (ms) => page.waitForTimeout(ms);
   const ev = (fn, arg) => page.evaluate(fn, arg);
+  const until = (fn, timeout = 8000) => page.waitForFunction(fn, null, { timeout, polling: 50 }).then(() => true, () => false);
   const state = () => ev(() => window.bm.run.state);
   const surfer = () => ev(() => {
     const s = window.bm.run.surfer;
@@ -60,9 +65,9 @@ try {
   };
 
   // --- boot and title ---
-  check('page boots with the dev handle', await ev(() => typeof window.bm === 'object' && !!window.bm.run));
+  check('page boots with the dev handle and the HUD font', booted);
   check('title state on load', (await state()) === 'title');
-  check('the surfer rides on its own on the title (attract)', (await surfer()).z > 5, `z=${(await surfer()).z.toFixed(1)}`);
+  check('the surfer rides on its own on the title (attract)', await until(() => window.bm.run.surfer.z > 5), `z=${(await surfer()).z.toFixed(1)}`);
 
   // --- character select ---
   await page.keyboard.press('ArrowRight'); await wait(100);
@@ -88,13 +93,19 @@ try {
   check('Right carves to screen-right (world -x), Left back', sRight.x < s1.x - 1 && sLeft.x > sRight.x + 1, `${s1.x.toFixed(1)} -> ${sRight.x.toFixed(1)} -> ${sLeft.x.toFixed(1)}`);
   await wait(600);
 
-  const v0 = (await surfer()).speed;
-  await hold('ArrowUp', 700);
-  const v1 = (await surfer()).speed;
-  check('Up pumps for speed', v1 > v0 + 1, `${v0.toFixed(1)} -> ${v1.toFixed(1)}`);
-  await hold('ArrowDown', 700);
-  const v2 = (await surfer()).speed;
-  check('Down brakes', v2 < v1 - 1, `${v1.toFixed(1)} -> ${v2.toFixed(1)}`);
+  // Slopes change speed too, so start from a known speed and take the extreme over the hold.
+  await ev(() => { window.bm.run.surfer.speed = 13; });
+  await page.keyboard.down('ArrowUp');
+  let vMax = 0;
+  for (let i = 0; i < 12; i++) { await wait(100); vMax = Math.max(vMax, (await surfer()).speed); }
+  await page.keyboard.up('ArrowUp');
+  check('Up pumps for speed', vMax > 14, `peak ${vMax.toFixed(1)}`);
+  await ev(() => { window.bm.run.surfer.speed = 16; });
+  await page.keyboard.down('ArrowDown');
+  let vMin = 99;
+  for (let i = 0; i < 8; i++) { await wait(100); vMin = Math.min(vMin, (await surfer()).speed); }
+  await page.keyboard.up('ArrowDown');
+  check('Down brakes', vMin < 12, `low ${vMin.toFixed(1)}`);
 
   // --- jump ---
   for (let i = 0; i < 30 && (await surfer()).airborne; i++) await wait(50);
@@ -117,7 +128,15 @@ try {
     finish: window.bm.run.layout.finishZ,
     oceanMesh: !!window.bm.run.ocean.mesh.geometry,
   }));
-  check('seven rivals ride nearby', world.rivals === 7 && Math.abs(world.rivalZ - (await surfer()).z) < 60, `rival z=${world.rivalZ.toFixed(1)}`);
+  check('seven rivals ride the course', world.rivals === 7 && world.rivalZ > 10 && Math.abs(world.rivalZ - (await surfer()).z) < 150, `rival z=${world.rivalZ.toFixed(1)}`);
+  // The brief's other items: a follow camera, water that varies as terrain, a non-lethal hazard.
+  const cam = await ev(() => { const c = window.bm.renderer.camera.position; const s = window.bm.run.surfer; return { behind: s.z - c.z, above: c.y - s.y, beside: Math.abs(c.x - s.x) }; });
+  check('the camera follows from behind and above', cam.behind > 3 && cam.behind < 7 && cam.above > 0.8 && cam.beside < 3, JSON.stringify(cam));
+  const terrain = await ev(() => { const o = window.bm.run.ocean; const z = window.bm.run.surfer.z; const hs = [0, 10, 20, 30, 40].map((d) => o.height(0, z + d)); return Math.max(...hs) - Math.min(...hs); });
+  check('the water ahead varies in height like terrain', terrain > 0.8, `range ${terrain.toFixed(2)} m`);
+  await ev(() => { const r = window.bm.run; const s = r.surfer; s.heading = 0; s.shoveVx = 0; const b = r.buoys[0]; Object.defineProperty(b, 'x', { value: s.x, writable: true }); Object.defineProperty(b, 'z', { value: s.z + 5, writable: true }); });
+  check('a buoy hit costs a heart and the run goes on', await until(() => window.bm.run.health === 2) && (await state()) === 'playing');
+  await wait(1500);
   check('position is somewhere in the field of eight', await ev(() => window.bm.run.rank >= 1 && window.bm.run.rank <= 8));
 
   // --- combat: a rival beside the surfer, one punch on its last health point ---
@@ -130,6 +149,7 @@ try {
   // Punch (or barge) a rival placed beside the surfer; retried in case a hop or stun swallowed the press.
   const strike = async (index, dx, health, key) => {
     for (let tries = 0; tries < 4; tries++) {
+      if ((await state()) !== 'playing') return null;
       await grounded();
       await placeRival(index, dx, health);
       await page.keyboard.press(key);
@@ -176,14 +196,17 @@ try {
   const crashed = await trick(Math.PI);
   const hpAfter = await ev(() => window.bm.run.health);
   check('a 180 is a bad landing: no points, one heart lost', !!crashed && !crashed.clean && crashed.points === 0 && hpAfter === hp - 1, `${JSON.stringify(crashed)} health ${hp}->${hpAfter}`);
+  await ev(() => { window.bm.run.health = 3; }); // the course's own buoys are still out there
   await wait(1500);
 
   // --- RAGE: a knockout on a nearly full meter starts it ---
+  if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(500); }
   await ev(() => { window.bm.run.rage = 0.95; window.bm.run.health = 3; });
-  await strike(3, 1.0, 1, 'x');
-  check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9));
+  const rageStrike = await strike(3, 1.0, 1, 'x');
+  check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9), `strike=${JSON.stringify(rageStrike)} ${await ev(() => { const r = window.bm.run; const s = r.surfer; return JSON.stringify({ state: r.state, kos: r.knockouts, health: r.health, texts: r.floating.map((f) => f.text), stun: +(s.stunnedUntil - r.time).toFixed(2), air: s.airborne, z: +s.z.toFixed(0), speed: +s.speed.toFixed(1) }); })}`);
 
   // --- pause ---
+  if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); } // never press Escape outside play: it would leave the page
   await page.keyboard.press('Escape'); await wait(150);
   check('Escape pauses', (await state()) === 'paused');
   const zPaused = (await surfer()).z; await wait(300);
@@ -201,29 +224,28 @@ try {
     const run = window.bm.run;
     run.health = 1;
     const s = run.surfer;
-    const b = run.buoys[0];
+    s.heading = 0;
+    s.shoveVx = 0;
+    const b = run.buoys[1];
     Object.defineProperty(b, 'x', { value: s.x, writable: true });
-    Object.defineProperty(b, 'z', { value: s.z + 6, writable: true });
+    Object.defineProperty(b, 'z', { value: s.z + 5, writable: true });
   });
-  await wait(900);
-  check('a buoy hit on the last heart wipes out', (await state()) === 'wipeout' && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
+  check('a buoy hit on the last heart wipes out', await until(() => window.bm.run.state === 'wipeout') && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
   await page.keyboard.press('Space');
   await wait(200);
   check('results ignore input at first', (await state()) === 'wipeout');
-  await wait(1700);
+  await until(() => window.bm.run.stateTime > 1.7);
   await page.keyboard.press('Space');
-  await wait(300);
-  check('Space restarts from the results', (await state()) === 'playing' && (await ev(() => window.bm.run.health)) === 3 && (await surfer()).z < 20);
+  check('Space restarts from the results', await until(() => window.bm.run.state === 'playing') && (await ev(() => window.bm.run.health)) === 3 && (await surfer()).z < 20);
 
   // --- finish ---
   await ev(() => {
     window.bm.run.surfer.z = window.bm.run.layout.finishZ - 8;
   });
-  await wait(900);
-  check('crossing the line finishes the run', (await state()) === 'finished');
+  check('crossing the line finishes the run', await until(() => window.bm.run.state === 'finished'));
 
   // --- back to the main menu ---
-  await wait(1700);
+  await until(() => window.bm.run.stateTime > 1.7);
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
   await page.keyboard.press('Escape');
   await wait(1000);

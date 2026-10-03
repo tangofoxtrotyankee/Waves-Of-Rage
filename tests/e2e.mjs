@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const PORT = Number(process.env.PORT ?? 5199);
@@ -36,7 +37,9 @@ async function waitForServer(url, ms) {
 // The score API on a spare port with a throwaway data dir; Vite proxies /api to it.
 const dataDir = await mkdtemp(join(tmpdir(), 'wor-e2e-'));
 const api = spawn(process.execPath, ['server/index.mjs'], { env: { ...process.env, PORT: String(API_PORT), DATA_DIR: dataDir, HOST: '127.0.0.1' }, stdio: 'ignore' });
-const server = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { env: { ...process.env, API_PORT: String(API_PORT) }, stdio: 'ignore' });
+// Spawn Vite's own script (not the npx wrapper) so killing it really stops the server.
+const VITE = fileURLToPath(new globalThis.URL('../node_modules/vite/bin/vite.js', import.meta.url));
+const server = spawn(process.execPath, [VITE, '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { env: { ...process.env, API_PORT: String(API_PORT) }, stdio: 'ignore' });
 let browser;
 try {
   if (!(await waitForServer(`http://127.0.0.1:${API_PORT}/api/health`, 20000))) throw new Error('score API did not start');
@@ -210,7 +213,9 @@ try {
 
   // --- touch: real taps hold for ~100 ms, so their release lands after the next scene has opened ---
   const touchPage = await browser.newPage({ viewport: { width: 390, height: 780 } });
-  await touchPage.goto(`${URL}?touch=1`); await touchPage.waitForTimeout(1500);
+  await touchPage.goto(`${URL}?touch=1`);
+  await touchPage.waitForFunction(() => window.game && window.game.scene.isActive('TitleScene') && window.game.scene.getScene('TitleScene').buttonCentres.length === 2, null, { timeout: 30000 });
+  await touchPage.waitForTimeout(600); // the title's input grace
   const tScenes = () => touchPage.evaluate(() => window.game.scene.getScenes(true).map((s) => s.scene.key).join());
   const box = await touchPage.evaluate(() => { const c = document.querySelector('canvas').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width }; });
   const scale = box.w / 180; // portrait field: 180 game pixels wide
