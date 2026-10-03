@@ -178,7 +178,7 @@ export class Run {
       const side = Math.floor(this.time * 60) % 2 === 0 ? -1 : 1;
       this.spray.emit(s.x - sinH * 0.9 + side * 0.35, s.y + 0.05, s.z - cosH * 0.9, side * (1.2 + Math.random() * 1.2) - sinH * 2, 1.2 + Math.random() * 1.2, -s.speed * 0.1);
     }
-    s.group.visible = this.time >= this.invulnerableUntil || Math.floor(this.time * 12) % 2 === 0;
+    s.group.visible = s.wiped || this.time >= this.invulnerableUntil || Math.floor(this.time * 12) % 2 === 0;
 
     if (!live) return;
     this.distance = s.z;
@@ -196,11 +196,14 @@ export class Run {
     for (const b of this.buoys) {
       if (Math.abs(b.z - s.z) > 4) continue;
       if (this.time >= this.invulnerableUntil && near(s.x, s.z, b.x, b.z, 1.05, 1.1) && s.airHeight(this.ocean) < 1.0) this.hitBuoy(b);
-      for (const r of this.rivals) {
-        if (!r.airborne && near(r.x, r.z, b.x, b.z, 1.05, 1.1)) {
-          r.shoveVx = Math.sign(r.x - b.x || 1) * 5;
-          r.speed *= SCORING.hitSpeedFactor;
-        }
+    }
+    for (const r of this.rivals) {
+      if (r.airborne || this.time < r.stunnedUntil) continue;
+      for (const b of this.buoys) {
+        if (Math.abs(b.z - r.z) > 4 || !near(r.x, r.z, b.x, b.z, 1.05, 1.1)) continue;
+        r.shoveVx = Math.sign(r.x - b.x || 1) * 5;
+        r.speed *= SCORING.hitSpeedFactor;
+        r.stunnedUntil = this.time + 0.4;
       }
     }
     this.bumpCooldown -= dt;
@@ -299,23 +302,23 @@ export class Run {
     }
 
     // In play: hearts, position, distance, score, speed.
-    const hearts = '♥'.repeat(this.health) + '♡'.repeat(SCORING.startHealth - this.health);
-    const pct = Math.min(100, Math.floor((this.distance / this.layout.finishZ) * 100));
+    const hearts = '\u2665'.repeat(this.health) + '\u2661'.repeat(SCORING.startHealth - this.health);
+    const progress = Math.min(1, this.distance / this.layout.finishZ);
     const n = this.rivals.length + 1;
     const s = this.surfer;
     hud.text(6, 5, hearts, red);
     hud.text(W - 6, 5, `SCORE ${pad(this.score, 6)}`, gold, { align: 'right' });
-    if (IS_PORTRAIT) {
-      hud.text(6, 16, `POS ${this.rank}/${n}`, white);
-      hud.text(W - 6, 16, `DIST ${pct}%`, cyan, { align: 'right' });
-    } else {
-      hud.text(6, 16, `POS ${this.rank}/${n}`, white);
-      hud.text(W / 2, 5, `DIST ${pct}%`, cyan, { align: 'center' });
-      hud.text(W / 2, 16, `${pad(this.distance, 4)}M`, cyan, { align: 'center' });
-    }
+    hud.text(6, 16, `POS ${this.rank}/${n}`, white);
+    // Course progress: the distance in metres over a bar to the finish (the font has no % glyph).
+    const distX = IS_PORTRAIT ? W - 6 - 64 : W / 2 - 32;
+    const distY = IS_PORTRAIT ? 16 : 5;
+    hud.text(distX + 64, distY, `DIST ${pad(this.distance, 4)}M`, cyan, { align: 'right' });
+    hud.rect(distX, distY + 10, 64, 4, PALETTE.ui, 0.75);
+    hud.rect(distX, distY + 10, Math.round(64 * progress), 4, PALETTE.cyan);
     const barW = 48;
-    hud.rect(W - 6 - barW, IS_PORTRAIT ? 28 : 17, barW, 5, PALETTE.ui, 0.75);
-    hud.rect(W - 6 - barW, IS_PORTRAIT ? 28 : 17, Math.round((barW * s.speed) / PHYSICS.maxSpeed), 5, s.airborne ? PALETTE.gold : PALETTE.cyan);
+    const barY = IS_PORTRAIT ? 32 : 17;
+    hud.rect(W - 6 - barW, barY, barW, 5, PALETTE.ui, 0.75);
+    hud.rect(W - 6 - barW, barY, Math.round((barW * s.speed) / PHYSICS.maxSpeed), 5, s.airborne ? PALETTE.gold : PALETTE.cyan);
 
     this.floating.forEach((f, i) => {
       const rise = f.age * 14;

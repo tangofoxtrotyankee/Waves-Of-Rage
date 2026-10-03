@@ -52,8 +52,9 @@ export const FOG = {
 
 /** One sun plus ambient; lighting is per-vertex (Gouraud) in the shader. */
 export const LIGHT = {
-  sun: [0.35, 0.8, -0.5] as const,
-  ambient: 0.55,
+  /** From the drawn sun, ahead and high: crests rim-light, riders read by ambient. */
+  sun: [0.35, 0.8, 0.5] as const,
+  ambient: 0.65,
 } as const;
 
 /** The deliberate PlayStation artefacts, each switchable live from the dev console (`bm.look`). */
@@ -64,6 +65,8 @@ export const LOOK = {
   affine: true,
   /** Quantise output to 5 bits per channel (colour banding). */
   quantize: true,
+  /** 4x4 ordered dither before quantising, as the PlayStation's 15-bit framebuffer write did. */
+  dither: true,
 };
 
 /** Rider physics in metres and seconds. Character stats scale some of these (see characters.ts). */
@@ -91,6 +94,8 @@ export const PHYSICS = {
   jumpVelocity: 6.2,
   /** A jump is still allowed this close above the water (skipping over chop). */
   coyoteHeight: 0.15,
+  /** The water must drop away faster than gravity by this much (m/s^2) before the rider leaves it; step-rate independent. */
+  launchAccel: 10,
   /** Rideable water is this wide either side of the centre line; beyond it is whitewater. */
   trackHalfWidth: 11,
   /** Sideways shoves from contact decay at this rate per second. */

@@ -76,5 +76,5 @@ export function statMultipliers(spec: RiderSpec): { speed: number; carve: number
 }
 
 export function characterById(id: string | null | undefined): RiderSpec {
-  return id && id in CHARACTERS ? CHARACTERS[id as CharacterId] : CHARACTERS.sam;
+  return id && Object.hasOwn(CHARACTERS, id) ? CHARACTERS[id as CharacterId] : CHARACTERS.sam;
 }

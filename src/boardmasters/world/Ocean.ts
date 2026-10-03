@@ -17,8 +17,14 @@ export interface OceanFeature {
   height: number;
 }
 
-/** Grid: 1 m cells, 44 across (x from -22 to 22) and 110 along, 12 of them behind the rider. */
-const COLS = 44;
+/**
+ * Grid: 1 m cells across the course (x from -22 to 22), then coarse columns
+ * out to +/-124 m so the water reaches past the fog in every direction, and
+ * 110 rows along, 12 of them behind the rider.
+ */
+const OUTER = [26, 32, 40, 50, 64, 80, 100, 124];
+const COLUMN_X: number[] = [...OUTER.map((x) => -x).reverse(), ...Array.from({ length: 45 }, (_, i) => i - 22), ...OUTER];
+const COLS = COLUMN_X.length - 1;
 const ROWS = 110;
 const BEHIND = 12;
 
@@ -148,7 +154,7 @@ export class Ocean {
     for (let r = 0; r <= ROWS; r++) {
       const z = this.originZ + r;
       for (let c = 0; c <= COLS; c++) {
-        const x = c - COLS / 2;
+        const x = COLUMN_X[c];
         const h = this.height(x, z);
         const s = this.slope(x, z);
         // Normal of the surface y = h(x, z).

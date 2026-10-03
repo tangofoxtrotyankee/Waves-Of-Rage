@@ -78,7 +78,8 @@ try {
   const sRight = await surfer();
   await hold('ArrowLeft', 900);
   const sLeft = await surfer();
-  check('Right carves right, Left carves left', sRight.x > s1.x + 1 && sLeft.x < sRight.x - 1, `${s1.x.toFixed(1)} -> ${sRight.x.toFixed(1)} -> ${sLeft.x.toFixed(1)}`);
+  // The chase camera looks down +z, so screen-right is world -x.
+  check('Right carves to screen-right (world -x), Left back', sRight.x < s1.x - 1 && sLeft.x > sRight.x + 1, `${s1.x.toFixed(1)} -> ${sRight.x.toFixed(1)} -> ${sLeft.x.toFixed(1)}`);
   await wait(600);
 
   const v0 = (await surfer()).speed;
@@ -144,8 +145,13 @@ try {
   await wait(1700);
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
   await page.keyboard.press('Escape');
-  await wait(1500);
-  check('Escape returns to the main menu page', new globalThis.URL(page.url()).pathname === '/' && (await ev(() => !!(window.game && window.game.scene))));
+  await wait(1000);
+  let phaserReady = false; // the original game's bundle takes a moment on a cold dev server
+  for (let i = 0; i < 20 && !phaserReady; i++) {
+    await wait(250);
+    phaserReady = await ev(() => !!(window.game && window.game.scene));
+  }
+  check('Escape returns to the main menu page', new globalThis.URL(page.url()).pathname === '/' && phaserReady);
 
   check('no console or page errors on the sequel page', errorsOnSequelPage.length === 0, errorsOnSequelPage.join(' | '));
 } catch (err) {

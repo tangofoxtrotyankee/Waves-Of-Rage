@@ -35,8 +35,9 @@ interface PoseParams {
 
 const POSES: Record<RiderPose, PoseParams> = {
   idle: { lean: 0.15, roll: 0, crouch: 0, armL: 0.5, armR: 0.5, legBend: 0.1, rigRoll: 0, sink: 0 },
-  carveLeft: { lean: 0.2, roll: 0.45, crouch: 0.1, armL: 0.1, armR: 1.3, legBend: 0.25, rigRoll: 0, sink: 0 },
-  carveRight: { lean: 0.2, roll: -0.45, crouch: 0.1, armL: 1.3, armR: 0.1, legBend: 0.25, rigRoll: 0, sink: 0 },
+  // Rolling the torso by -z leans it towards world +x (screen-left), into a left carve.
+  carveLeft: { lean: 0.2, roll: -0.3, crouch: 0.1, armL: 0.1, armR: 1.3, legBend: 0.25, rigRoll: 0, sink: 0 },
+  carveRight: { lean: 0.2, roll: 0.3, crouch: 0.1, armL: 1.3, armR: 0.1, legBend: 0.25, rigRoll: 0, sink: 0 },
   accelerate: { lean: 0.45, roll: 0, crouch: 0.3, armL: -0.4, armR: -0.4, legBend: 0.45, rigRoll: 0, sink: 0 },
   jump: { lean: -0.1, roll: 0, crouch: 0.2, armL: 2.4, armR: 2.4, legBend: 0.5, rigRoll: 0, sink: 0 },
   airTrick: { lean: -0.3, roll: 0.3, crouch: 0.3, armL: 2.0, armR: -0.8, legBend: 0.6, rigRoll: 0, sink: 0 },
@@ -240,7 +241,7 @@ export class Rider {
         this.y = h + 0.01;
         this.airborne = true;
         this.airTime = 0;
-      } else if (ballisticY > h + 0.03) {
+      } else if (ballisticY > h + PHYSICS.launchAccel * dt * dt) {
         this.vy = ballisticVy;
         this.y = ballisticY;
         this.airborne = true;
@@ -263,7 +264,8 @@ export class Rider {
       }
     }
 
-    this.pose = stunned ? 'hit' : this.airborne ? 'jump' : steer < -0.3 ? 'carveLeft' : steer > 0.3 ? 'carveRight' : pump ? 'accelerate' : 'idle';
+    // Steer > 0 heads to world +x, which is screen-left.
+    this.pose = stunned ? 'hit' : this.airborne ? 'jump' : steer > 0.3 ? 'carveLeft' : steer < -0.3 ? 'carveRight' : pump ? 'accelerate' : 'idle';
     this.updateVisuals(dt, ocean);
   }
 

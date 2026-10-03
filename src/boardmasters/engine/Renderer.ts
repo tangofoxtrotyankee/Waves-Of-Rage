@@ -53,7 +53,12 @@ export class Renderer {
   fit(): void {
     const pw = this.parent.clientWidth || this.width;
     const ph = this.parent.clientHeight || this.height;
-    const scale = Math.max(0.1, Math.min(pw / this.width, ph / this.height));
+    const fit = Math.max(0.1, Math.min(pw / this.width, ph / this.height));
+    // Whole device pixels per internal pixel keep the texture and dither even; take the loss of
+    // screen only when it is small, so phones still fill their width.
+    const dpr = window.devicePixelRatio || 1;
+    const whole = Math.floor(fit * dpr) / dpr;
+    const scale = whole >= 1 && whole / fit >= 0.85 ? whole : fit;
     const w = Math.floor(this.width * scale);
     const h = Math.floor(this.height * scale);
     this.cssScale = w / this.width;

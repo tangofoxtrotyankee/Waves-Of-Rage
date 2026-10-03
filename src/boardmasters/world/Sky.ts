@@ -1,18 +1,14 @@
-import { colorGeometry, createPS1Material, paintGeometry } from '../engine/PS1Material';
-import { mixRgb, mulberry32, rgb, smoothstep } from '../engine/math';
+import { colorGeometry, createPS1Material, paintGeometry, skyColorAt } from '../engine/PS1Material';
+import { mulberry32 } from '../engine/math';
 import { THREE } from '../engine/three';
 import { PALETTE } from '../game/constants';
 
-const TOP = rgb(PALETTE.skyTop);
-const MID = rgb(PALETTE.skyMid);
-const HORIZON = rgb(PALETTE.horizon);
-const FOG = rgb(0xf7a04b);
-
 /**
- * The sunset: a vertex-coloured dome that follows the camera (purple
- * overhead, orange, then the fog colour at the horizon so the fogged sea
- * blends into it), a flat sun disc ahead, and low-poly island silhouettes
- * along both sides of the course that loom out of the fog.
+ * The sunset: a vertex-coloured dome that follows the camera, painted with
+ * the same elevation ramp the shader's fog uses (fog orange at and below the
+ * horizon, a yellow glow, orange, purple overhead) so the fogged sea and
+ * fogged islands blend into it at every elevation; a flat sun disc ahead;
+ * and low-poly island silhouettes along both sides of the course.
  */
 export class Sky {
   readonly group = new THREE.Group();
@@ -20,12 +16,8 @@ export class Sky {
   private readonly sun: THREE.Mesh;
 
   constructor(courseLength: number) {
-    const domeGeometry = paintGeometry(new THREE.SphereGeometry(100, 16, 10), (_x, y) => {
-      const t = y / 100;
-      if (t > 0.08) return mixRgb(MID, TOP, smoothstep(0.08, 0.6, t));
-      if (t > -0.02) return mixRgb(HORIZON, MID, smoothstep(-0.02, 0.08, t));
-      return mixRgb(FOG, HORIZON, smoothstep(-0.4, -0.02, t));
-    });
+    // Enough latitude rows (48 over 180 degrees) for the narrow glow band above the horizon to exist.
+    const domeGeometry = paintGeometry(new THREE.SphereGeometry(100, 16, 48), (_x, y) => skyColorAt(y / 100));
     this.dome = new THREE.Mesh(domeGeometry, createPS1Material({ unlit: true, fog: false, side: THREE.BackSide, depthWrite: false }));
     this.dome.renderOrder = -2;
     this.dome.frustumCulled = false;
