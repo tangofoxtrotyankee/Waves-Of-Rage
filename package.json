@@ -2,7 +2,7 @@
   "name": "waves-of-rage",
   "version": "0.1.0",
   "private": true,
-  "description": "Waves of Rage - a browser-based 2D arcade surfing game built with Phaser 3, TypeScript and Vite.",
+  "description": "Waves of Rage - a browser-based 2D arcade surfing game built with Phaser 3, TypeScript and Vite, plus its 3D sequel Waves of Rage 2: Boardmasters built with Three.js.",
   "license": "GPL-3.0",
   "type": "module",
   "scripts": {
@@ -10,16 +10,18 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/api.mjs && node tests/e2e.mjs",
+    "test": "node tests/api.mjs && node tests/e2e.mjs && node tests/boardmasters-e2e.mjs",
     "art": "node tools/pixelart/build.mjs",
     "serve": "node server/index.mjs",
     "start": "node server/index.mjs"
   },
   "dependencies": {
     "pg": "^8.23.1",
-    "phaser": "^3.90.0"
+    "phaser": "^3.90.0",
+    "three": "^0.186.1"
   },
   "devDependencies": {
+    "@types/three": "^0.186.0",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.2"

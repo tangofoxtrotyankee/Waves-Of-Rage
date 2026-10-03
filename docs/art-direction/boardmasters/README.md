@@ -21,10 +21,11 @@ Visual direction, in addition to the original game's:
   font, hearts, the yellow-on-dark menu rows
 - exaggerated proportions and loud board shorts; nothing is realistic
 
-`public/assets/boardmasters/` holds crops of the title concept downsampled to
-the game's internal resolution for the current title card
-(`src/scenes/BoardmastersScene.ts`): the logo (220x110), the hero surfer
-(100x180, the right-hand column in landscape) and the whole poster
-(180x320, the portrait background). Regenerate them from `title-concept.webp`
-with ImageMagick if the crop needs to change; the crops are listed in the
-scene file's history.
+`public/assets/boardmasters/logo-220x110.png` is the logo block of
+`title-concept.webp` downsampled to the game's internal resolution; the
+sequel's title screen draws it over the live 3D scene. Regenerate it with
+ImageMagick if the crop needs to change (`convert title-concept.webp -crop
+860x430+40+40 +repage -filter Lanczos -resize 220x110! logo-220x110.png`).
+Everything else in the sequel is rendered: low-poly meshes built in code
+from the palette and 16 to 32 pixel textures painted at runtime
+(`src/boardmasters/engine/Textures.ts`).

@@ -88,12 +88,11 @@ try {
   // --- title and start ---
   check('title scene loads', (await scenes()).join() === 'TitleScene');
 
-  // --- game select: Down moves the cursor to Boardmasters, Space opens its title card, Escape comes back ---
+  // --- game menu: Down/Up move the cursor (starting Boardmasters navigates to its own page; see the touch block below) ---
   const selectedGame = () => ev(() => window.game.scene.getScene('TitleScene').selectedGame);
-  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Space'); await wait(500);
-  check('Down + Space opens Boardmasters', (await scenes()).join() === 'BoardmastersScene');
-  await wait(600); await page.keyboard.press('Escape'); await wait(500);
-  check('Escape returns to the title with Boardmasters selected', (await scenes()).join() === 'TitleScene' && (await selectedGame()) === 'boardmasters');
+  await wait(600); // the title ignores input for a moment after opening
+  await page.keyboard.press('ArrowDown'); await wait(100);
+  check('Down moves the cursor to Boardmasters', (await selectedGame()) === 'boardmasters');
   await page.keyboard.press('ArrowUp'); await wait(100);
   check('Up moves the cursor back to Waves of Rage', (await selectedGame()) === 'waves');
   await page.keyboard.press('Space'); await wait(500);
@@ -208,6 +207,27 @@ try {
   check('F1 toggles debug off', !(await st()).debug);
 
   check('no console errors', errors.length === 0, errors.join(' | '));
+
+  // --- touch: real taps hold for ~100 ms, so their release lands after the next scene has opened ---
+  const touchPage = await browser.newPage({ viewport: { width: 390, height: 780 } });
+  await touchPage.goto(`${URL}?touch=1`); await touchPage.waitForTimeout(1500);
+  const tScenes = () => touchPage.evaluate(() => window.game.scene.getScenes(true).map((s) => s.scene.key).join());
+  const box = await touchPage.evaluate(() => { const c = document.querySelector('canvas').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width }; });
+  const scale = box.w / 180; // portrait field: 180 game pixels wide
+  const tap = async (gx, gy) => { await touchPage.mouse.move(box.x + gx * scale, box.y + gy * scale); await touchPage.mouse.down(); await touchPage.waitForTimeout(120); await touchPage.mouse.up(); };
+  const buttons = await touchPage.evaluate(() => window.game.scene.getScene('TitleScene').buttonCentres);
+  await tap(buttons[0].x, buttons[0].y); await touchPage.waitForTimeout(500);
+  check('touch: tapping WAVES OF RAGE starts a run', (await tScenes()) === 'GameScene', `scenes=${await tScenes()}`);
+  await touchPage.keyboard.press('Escape'); await touchPage.waitForTimeout(300);
+  check('touch: Escape pauses', (await tScenes()).includes('PauseScene'));
+  await tap(90, 160 + 28); await touchPage.waitForTimeout(150); // MAIN MENU on the pause popover
+  const rightAfter = await tScenes();
+  await touchPage.waitForTimeout(900);
+  check('touch: MAIN MENU returns to the title and stays there', rightAfter === 'TitleScene' && (await tScenes()) === 'TitleScene', `right after=${rightAfter}, later=${await tScenes()}`);
+  await touchPage.waitForTimeout(400);
+  await tap(buttons[1].x, buttons[1].y); await touchPage.waitForTimeout(1500);
+  check('touch: tapping WOR 2: BOARDMASTERS opens its page', new globalThis.URL(touchPage.url()).pathname === '/boardmasters.html', touchPage.url());
+  await touchPage.close();
 } catch (err) {
   console.error('TEST CRASHED:', err);
   results.push(false);

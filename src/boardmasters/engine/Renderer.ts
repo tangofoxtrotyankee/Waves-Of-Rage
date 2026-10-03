@@ -1,0 +1,79 @@
+import { CAMERA, FOG, VIEW } from '../game/constants';
+import { THREE } from './three';
+
+/**
+ * The 3D canvas and the 2D HUD canvas, both at the internal resolution
+ * (426x240, or 240x426 upright), scaled up together to the largest fit with
+ * nearest-neighbour sampling and centred with letterboxing, like the original
+ * game's FIT scaling. There is no post-processing pass: the low resolution
+ * and the PS1 shader (PS1Material.ts) do all the work.
+ */
+export class Renderer {
+  readonly gl: THREE.WebGLRenderer;
+  readonly scene = new THREE.Scene();
+  readonly camera: THREE.PerspectiveCamera;
+  readonly canvas: HTMLCanvasElement;
+  readonly hudCanvas: HTMLCanvasElement;
+  readonly width = VIEW.width;
+  readonly height = VIEW.height;
+  /** CSS pixels per internal pixel after fitting, and the canvases' offset in the parent; input maps pointers with these. */
+  cssScale = 1;
+  offsetX = 0;
+  offsetY = 0;
+
+  /** Three's renderer needs WebGL 2. */
+  static supported(): boolean {
+    try {
+      return document.createElement('canvas').getContext('webgl2') !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  constructor(private parent: HTMLElement) {
+    this.canvas = document.createElement('canvas');
+    this.gl = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, alpha: false, stencil: false, powerPreference: 'high-performance' });
+    this.gl.setPixelRatio(1);
+    this.gl.setSize(this.width, this.height, false);
+    this.gl.setClearColor(FOG.color, 1);
+
+    this.hudCanvas = document.createElement('canvas');
+    this.hudCanvas.width = this.width;
+    this.hudCanvas.height = this.height;
+    parent.append(this.canvas, this.hudCanvas);
+
+    this.camera = new THREE.PerspectiveCamera(CAMERA.fov, this.width / this.height, CAMERA.near, CAMERA.far);
+    this.scene.add(this.camera);
+
+    window.addEventListener('resize', () => this.fit());
+    this.fit();
+  }
+
+  /** Size both canvases to the largest whole-aspect fit in the parent. */
+  fit(): void {
+    const pw = this.parent.clientWidth || this.width;
+    const ph = this.parent.clientHeight || this.height;
+    const scale = Math.max(0.1, Math.min(pw / this.width, ph / this.height));
+    const w = Math.floor(this.width * scale);
+    const h = Math.floor(this.height * scale);
+    this.cssScale = w / this.width;
+    this.offsetX = Math.floor((pw - w) / 2);
+    this.offsetY = Math.floor((ph - h) / 2);
+    for (const c of [this.canvas, this.hudCanvas]) {
+      c.style.width = `${w}px`;
+      c.style.height = `${h}px`;
+      c.style.left = `${this.offsetX}px`;
+      c.style.top = `${this.offsetY}px`;
+    }
+  }
+
+  /** Client (CSS) coordinates to internal pixels. */
+  toInternal(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = this.parent.getBoundingClientRect();
+    return { x: (clientX - rect.left - this.offsetX) / this.cssScale, y: (clientY - rect.top - this.offsetY) / this.cssScale };
+  }
+
+  render(): void {
+    this.gl.render(this.scene, this.camera);
+  }
+}

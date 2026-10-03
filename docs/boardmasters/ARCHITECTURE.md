@@ -1,10 +1,11 @@
-# Waves of Rage 2: Boardmasters, technical architecture proposal
+# Waves of Rage 2: Boardmasters, technical architecture
 
-**Status: proposal.** Nothing below is built. The only sequel code in the
-repository is the title card reached from the main menu
-(`src/scenes/BoardmastersScene.ts`), which also reports whether the browser
-has WebGL 2. The rendering approach needs agreeing before the prototype is
-written; the decisions are listed at the end.
+**Status: built as proposed; first playable prototype in the repository.**
+The go-ahead was given on the recommendations below (Three.js, a second
+Vite page in this repository, 426x240, keyboard first with basic touch,
+code-built placeholder meshes). Sections 2 to 9 describe what now exists in
+`src/boardmasters/`; where the build departs from the proposal it says so.
+Section 10 is the roadmap for what comes next.
 
 The brief: a 3D forward-scrolling arcade surf racer/brawler seen from a
 chase camera, looking like 1995-1998 PlayStation / Saturn 3D with the
@@ -69,17 +70,21 @@ as in the original game, are the simplest thing.
 ```
 index.html            -> src/main.ts              Waves of Rage (Phaser, unchanged)
 boardmasters.html     -> src/boardmasters/main.ts Waves of Rage 2 (Three.js)
-src/shared/           Storage.ts, platform.ts, pixel-font metrics, palette (moved from src/)
 ```
+
+As built: nothing was moved into a `src/shared/` folder yet. The sequel
+imports `src/game/platform.ts` (touch and portrait detection) and the
+`FONT_CHARS` constant from `src/game/constants.ts` directly, and loads the
+same `public/assets/sprites/font.png`. Moving those into `src/shared/` is a
+mechanical change for when a third consumer appears.
 
 - `vite.config.ts` gains `build.rollupOptions.input` with both pages. Vite
   builds two bundles; Phaser is only in the first, Three only in the second.
-- The main menu's "WOR 2: BOARDMASTERS" entry navigates to
-  `./boardmasters.html` (today it opens the title card scene; the card
-  moves to the new page). The sequel's own menu links back to `./`.
-- `server/index.mjs` needs nothing: it already serves any file in `dist/`.
-  A three-line route mapping `/boardmasters` to `boardmasters.html` gives a
-  clean URL.
+- The main menu's "WOR 2: BOARDMASTERS" button navigates to
+  `./boardmasters.html` (`GameEntry.url` in `src/game/games.ts`). The
+  sequel's title screen and results link back to `./`.
+- `server/index.mjs` serves any file in `dist/`; one line maps
+  `/boardmasters` to `boardmasters.html` for a clean URL.
 - Shared high scores later: `/api/scores?mode=bm-sunset-bay`; add the modes
   to `cleanMode()` in `server/scores.mjs`, one table per course.
 
@@ -184,8 +189,15 @@ src/shared/                       Storage.ts, platform.ts, font metrics, palette
 tests/boardmasters-e2e.mjs        Playwright, same style as tests/e2e.mjs
 ```
 
-About 1,500 lines of TypeScript and 100 lines of GLSL for the ten-point
-prototype. New dependencies: `three` and `@types/three`, nothing else.
+As built: about 1,700 lines of TypeScript and 90 lines of GLSL. New
+dependencies: `three` (runtime) and `@types/three` (dev), nothing else. The
+sequel's bundle is about 145 kB gzipped; the original game's is unchanged.
+Additions to the plan: `engine/Textures.ts` (runtime-painted 16/32 px
+textures), `entities/FinishLine.ts` and `entities/Spray.ts`,
+`game/characters.ts` (the seven characters' stats and colours plus the
+rival surfers, already consumed by the mesh builder and physics), an attract
+mode on the title (the surfer rides on its own behind the logo), racing
+position against the rival, and a `?character=` switch.
 
 ## 8. Mobile
 

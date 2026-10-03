@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -14,6 +15,15 @@ export default defineConfig({
   },
 
   build: {
+    // Two pages, one engine each: Phaser for Waves of Rage (index.html) and
+    // Three.js for Waves of Rage 2: Boardmasters (boardmasters.html). Neither
+    // bundle contains the other engine.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        boardmasters: fileURLToPath(new URL('boardmasters.html', import.meta.url)),
+      },
+    },
     // Phaser alone is well over the default 500 kB warning threshold.
     // Raise the limit so builds stay quiet; the size is expected.
     chunkSizeWarningLimit: 1600,

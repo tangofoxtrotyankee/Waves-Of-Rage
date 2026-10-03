@@ -107,7 +107,9 @@ async function handleApi(req, res, url) {
 
 async function handleStatic(req, res, url) {
   const safePath = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
-  let filePath = join(DIST, safePath === '/' ? 'index.html' : safePath);
+  // Clean URL for the sequel's page (dist/boardmasters.html).
+  const page = safePath === '/' ? 'index.html' : safePath === '/boardmasters' ? 'boardmasters.html' : safePath;
+  let filePath = join(DIST, page);
   if (!filePath.startsWith(DIST)) return send(res, 403, { error: 'forbidden' });
   try {
     if ((await stat(filePath)).isDirectory()) filePath = join(filePath, 'index.html');
