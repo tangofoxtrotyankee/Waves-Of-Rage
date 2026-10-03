@@ -245,8 +245,8 @@ Waves-Of-Rage/
         │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud light, fog, 5-bit banding
         │   ├── Textures.ts # 16/32 px textures painted at runtime (water, boards, skull buoy, chequered flag)
         │   ├── Hud2D.ts    # Pixel-font text and images on the HUD canvas (reuses sprites/font.png)
-        │   ├── Input.ts    # Keyboard + touch (stick, taps, on-screen buttons, several fingers) into one InputState
-        │   ├── TouchButtons.ts # CARVE < >, HIT and BRG layout, drawn by the HUD and hit-tested by Input
+        │   ├── Input.ts    # Keyboard + the phone's buttons into one InputState, with every press for the combo reader
+        │   ├── TouchButtons.ts # The phone pad (LEFT, UP, RIGHT) and JUMP, HIT, BRG, drawn by the HUD and hit-tested by Input
         │   ├── immersive.ts # Fullscreen + orientation lock for phones
         │   ├── Loop.ts     # Fixed 60 Hz step, render per frame
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
@@ -264,6 +264,7 @@ Waves-Of-Rage/
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
             ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
+            ├── Combos.ts   # Input combos (RIGHT RIGHT UP = barrel roll, UP UP = boost) and the reader
             └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera, HUD
 ```
 
@@ -424,10 +425,17 @@ that scale the physics and colour the rig); the choice is remembered.
 and tightens the carve, Space jumps (also from a crest, for more height),
 X or J punches (grabs in the air), Shift barges, Esc pauses (M on the pause
 panel for the main menu). On the title, Left/Right change character. On
-phones: hold a finger and move it sideways to carve or use the CARVE
-buttons, tap to jump, HIT and BRG are the buttons bottom-right, the pause
-button is top-centre and MENU is the top-left corner. The first tap asks
-for fullscreen and locks the phone upright where the browser allows it.
+phones the left thumb has a pad of LEFT, UP and RIGHT (hold LEFT/RIGHT to
+carve, hold UP to pump) and the right thumb has JUMP, HIT and BRG; the
+pause button is top-centre and MENU is the top-left corner. The first tap
+asks for fullscreen and locks the phone upright where the browser allows it.
+
+**Combos.** Presses within about half a second of each other form combos,
+from the keyboard or the pad alike (`src/boardmasters/game/Combos.ts`):
+RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch and a full roll
+about the board, 400 points plus the landing bonus; land before it is done
+and you crash), UP UP is a BOOST (a burst of speed, on a short cooldown).
+The HUD shows the presses it is holding, so moves can be learnt by watching.
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
 above), imports nothing from Phaser and shares only the platform detection,

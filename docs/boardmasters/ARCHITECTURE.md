@@ -221,9 +221,12 @@ sampled once per frame from a height grid with coarse outer columns).
 - Portrait phones render 240x426 (same pixel count, taller view) with a
   taller vertical FOV. The gameplay mockup is portrait, so phones are a
   primary target, not an afterthought.
-- Touch for the prototype keeps the original's pattern (drag to carve, tap
-  to jump). The mockup's on-screen CARVE / ATTACK / BARGE buttons arrive
-  with combat.
+- Touch: a pad of LEFT, UP and RIGHT under the left thumb (hold to carve
+  or pump) and JUMP, HIT and BRG under the right (`engine/TouchButtons.ts`).
+  A drag stick was tried first and was too hard to control; digital
+  buttons also give discrete presses, which feed the combo reader
+  (`game/Combos.ts`: RIGHT RIGHT UP is a barrel roll, UP UP a boost; the
+  table is where character signature moves go later).
 
 ## 9. Testing
 

@@ -33,9 +33,10 @@ attract mode, start, forward travel, carving, pumping, braking, jumping and
 landing, the rival, buoys, ramps and finish, a wipeout, restart, the finish,
 and Escape back to the main menu, with no console errors, plus character
 select, the field of eight, punch and barge knockouts, a clean 360 and a
-crashed 180, RAGE, pause, the follow camera and terrain, and a phone-shaped
-page (touch, upright view, tap to start and jump, the HIT and pause
-buttons). Waits are on game state, not the clock, because SwiftShader runs
+crashed 180, RAGE, the barrel roll and boost combos, pause, the follow
+camera and terrain, and a phone-shaped page (touch, upright view, tap to
+start and jump, the HIT and pause buttons, a held RIGHT on the pad, and the
+pad's barrel roll). Waits are on game state, not the clock, because SwiftShader runs
 the simulation slower than real time. Both browser suites spawn Vite's own
 script so killing it really stops the server.
 
@@ -113,11 +114,15 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
     `bm.look.affine = false` straightens the water texture, `bm.look.quantize
     = false` removes the banding, `bm.look.dither = false` the dither;
     `?res=320` is blockier.
-12. Touch (`?touch=1`, or a phone): the field is upright; a held finger
-    moved sideways carves, the CARVE buttons carve, a tap jumps, HIT and BRG
-    attack, the top-centre button pauses, MENU works; the first tap goes
-    fullscreen where allowed.
-13. Console: no errors throughout, on either page.
+12. Touch (`?touch=1`, or a phone): the field is upright; holding LEFT or
+    RIGHT on the pad carves, holding UP pumps, JUMP jumps (a tap elsewhere
+    does too), HIT and BRG attack, the top-centre button pauses, MENU works;
+    the first tap goes fullscreen where allowed.
+13. Combos: RIGHT RIGHT UP (keys or pad, within about half a second) shows
+    `BARREL ROLL!`, launches the surfer into a full roll about the board
+    and lands for `BARREL ROLL +...`; UP UP shows `BOOST!` and a burst of
+    speed and spray; the presses show briefly under the surfer.
+14. Console: no errors throughout, on either page.
 
 ## Manual test script (Waves of Rage)
 

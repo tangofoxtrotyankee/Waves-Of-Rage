@@ -1,4 +1,4 @@
-import { clamp } from './math';
+import type { ComboKey } from '../game/Combos';
 import { buttonAt, type ButtonId } from './TouchButtons';
 
 /** What the game reads each fixed step. Booleans for actions are edge-triggered (true for one step). */
@@ -10,7 +10,7 @@ export interface InputState {
   jump: boolean;
   attack: boolean;
   barge: boolean;
-  /** Space, Enter or a tap. */
+  /** Space, Enter, the JUMP button or a tap. */
   start: boolean;
   /** Escape. */
   back: boolean;
@@ -19,36 +19,47 @@ export interface InputState {
   menuRight: boolean;
   /** M: main menu from the pause panel. */
   menu: boolean;
+  /** Every press this step, in order, for the combo reader. */
+  presses: ComboKey[];
   /** Where a tap landed, in internal pixels (touch only). */
   tapX: number | null;
   tapY: number | null;
 }
 
-/** Touch feel: a press shorter than this with less movement is a tap; a held finger steers like a stick. */
-const TOUCH = {
-  tapMaxMs: 250,
-  tapMaxMovePx: 10,
-  /** CSS pixels of horizontal travel from the touch-down point for full steer. */
-  stickPx: 70,
-} as const;
+/** A press shorter than this with less movement is a tap. */
+const TOUCH = { tapMaxMs: 250, tapMaxMovePx: 10 } as const;
 
 const PREVENT_DEFAULT = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space']);
 
+/** Keyboard codes that count as combo presses. */
+const KEY_PRESSES: Record<string, ComboKey> = {
+  ArrowLeft: 'L',
+  KeyA: 'L',
+  ArrowRight: 'R',
+  KeyD: 'R',
+  ArrowUp: 'F',
+  KeyW: 'F',
+  Space: 'J',
+  KeyX: 'H',
+  KeyJ: 'H',
+  ShiftLeft: 'B',
+  ShiftRight: 'B',
+};
+
 interface Pointer {
   downX: number;
-  x: number;
+  downY: number;
   downAt: number;
   moved: number;
   button: ButtonId | null;
 }
 
 /**
- * Keyboard (arrows/WASD, Space, X/J, Shift, Esc, Enter) merged with touch.
- * Touch: the on-screen buttons (TouchButtons.ts) while `buttonsActive`,
- * with CARVE held and HIT/BARGE pressed; elsewhere a held finger is a
- * horizontal stick (steer follows how far it moved from where it landed)
- * and a short tap jumps or starts. Several fingers at once are fine: one
- * can hold CARVE while another taps HIT.
+ * Keyboard (arrows/WASD, Space, X/J, Shift, Esc, Enter) merged with the
+ * phone's buttons (TouchButtons.ts) while `buttonsActive`: LEFT/RIGHT held
+ * carve, UP held pumps, JUMP/HIT/BRG fire on press, and several fingers
+ * work at once. Outside the buttons a short tap jumps or starts. Every
+ * press, from either source, is also reported for the combo reader.
  */
 export class Input {
   /** The run sets this while playing so the buttons claim their corners. */
@@ -57,6 +68,7 @@ export class Input {
   private readonly pressed = new Set<string>();
   private readonly pointers = new Map<number, Pointer>();
   private readonly buttonPresses = new Set<ButtonId>();
+  private presses: ComboKey[] = [];
   private tap: { x: number; y: number } | null = null;
 
   constructor(
@@ -69,6 +81,8 @@ export class Input {
       if (e.repeat) return;
       this.held.add(e.code);
       this.pressed.add(e.code);
+      const key = KEY_PRESSES[e.code];
+      if (key) this.presses.push(key);
     });
     window.addEventListener('keyup', (e) => this.held.delete(e.code));
     window.addEventListener('blur', () => {
@@ -84,15 +98,16 @@ export class Input {
         /* not a capturable pointer */
       }
       const p = this.toInternal(e.clientX, e.clientY);
-      const button = this.buttonsActive ? buttonAt(p.x, p.y)?.id ?? null : null;
-      if (button === 'attack' || button === 'barge') this.buttonPresses.add(button); // fire on press
-      this.pointers.set(e.pointerId, { downX: e.clientX, x: e.clientX, downAt: performance.now(), moved: 0, button });
+      const button = this.buttonsActive ? buttonAt(p.x, p.y) : null;
+      if (button) {
+        this.buttonPresses.add(button.id); // JUMP, HIT and BRG fire on press; LEFT/RIGHT/UP act while held
+        this.presses.push(button.key);
+      }
+      this.pointers.set(e.pointerId, { downX: e.clientX, downY: e.clientY, downAt: performance.now(), moved: 0, button: button?.id ?? null });
     });
     window.addEventListener('pointermove', (e) => {
       const p = this.pointers.get(e.pointerId);
-      if (!p) return;
-      p.x = e.clientX;
-      p.moved = Math.max(p.moved, Math.abs(e.clientX - p.downX));
+      if (p) p.moved = Math.max(p.moved, Math.hypot(e.clientX - p.downX, e.clientY - p.downY));
     });
     const end = (e: PointerEvent) => {
       const p = this.pointers.get(e.pointerId);
@@ -114,32 +129,36 @@ export class Input {
     return codes.some((c) => this.pressed.has(c));
   }
 
-  /** Read the state for one fixed step; edge flags and the tap are consumed. */
+  private holding(id: ButtonId): boolean {
+    for (const p of this.pointers.values()) if (p.button === id) return true;
+    return false;
+  }
+
+  /** Read the state for one fixed step; edge flags, presses and the tap are consumed. */
   poll(): InputState {
     let steer = (this.down('ArrowLeft', 'KeyA') ? -1 : 0) + (this.down('ArrowRight', 'KeyD') ? 1 : 0);
-    for (const p of this.pointers.values()) {
-      if (p.button === 'carveLeft') steer = -1;
-      else if (p.button === 'carveRight') steer = 1;
-      else if (!p.button && p.moved > TOUCH.tapMaxMovePx) steer = clamp((p.x - p.downX) / TOUCH.stickPx, -1, 1);
-    }
+    if (this.holding('carveLeft')) steer = -1;
+    if (this.holding('carveRight')) steer = 1;
     const tap = this.tap;
     const state: InputState = {
       steer,
-      pump: this.down('ArrowUp', 'KeyW'),
+      pump: this.down('ArrowUp', 'KeyW') || this.holding('forward'),
       brake: this.down('ArrowDown', 'KeyS'),
-      jump: this.hit('Space') || tap !== null,
+      jump: this.hit('Space') || this.buttonPresses.has('jump') || tap !== null,
       attack: this.hit('KeyX', 'KeyJ') || this.buttonPresses.has('attack'),
       barge: this.hit('ShiftLeft', 'ShiftRight') || this.buttonPresses.has('barge'),
-      start: this.hit('Space', 'Enter') || tap !== null,
+      start: this.hit('Space', 'Enter') || this.buttonPresses.has('jump') || tap !== null,
       back: this.hit('Escape'),
       menuLeft: this.hit('ArrowLeft', 'KeyA'),
       menuRight: this.hit('ArrowRight', 'KeyD'),
       menu: this.hit('KeyM'),
+      presses: this.presses,
       tapX: tap ? tap.x : null,
       tapY: tap ? tap.y : null,
     };
     this.pressed.clear();
     this.buttonPresses.clear();
+    this.presses = [];
     this.tap = null;
     return state;
   }

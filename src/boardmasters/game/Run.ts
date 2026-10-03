@@ -19,6 +19,7 @@ import { buildCourse, COURSES, type CourseLayout, type CourseSpec } from '../wor
 import { Ocean } from '../world/Ocean';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
+import { type Combo, ComboReader, KEY_LABELS } from './Combos';
 import { CAMERA, COMBAT, FOG, IS_PORTRAIT, MENU_ZONE, PALETTE, PHYSICS, RAGE, SCORING, TRICKS } from './constants';
 
 export type RunState = 'title' | 'playing' | 'paused' | 'wipeout' | 'finished';
@@ -76,6 +77,7 @@ export class Run {
   readonly spray = new Spray();
   readonly layout: CourseLayout;
   private floating: FloatingText[] = [];
+  private readonly combos = new ComboReader();
   private invulnerableUntil = 0;
   private bumpCooldown = 0;
   private snapCamera = true;
@@ -142,6 +144,7 @@ export class Run {
     this.invulnerableUntil = 0;
     this.bumpCooldown = 0;
     this.snapCamera = true;
+    this.combos.clear();
     this.endRage();
     this.rage = 0;
   }
@@ -186,6 +189,10 @@ export class Run {
           this.state = 'paused';
           this.stateTime = 0;
           break;
+        }
+        for (const key of input.presses) {
+          const combo = this.combos.push(key, this.time);
+          if (combo) this.performCombo(combo);
         }
         this.simulate(dt, input, true);
         break;
@@ -251,8 +258,11 @@ export class Run {
     if (!s.airborne && !s.wiped && s.speed > 8) {
       const sinH = Math.sin(s.heading);
       const cosH = Math.cos(s.heading);
-      const side = Math.floor(this.time * 60) % 2 === 0 ? -1 : 1;
-      this.spray.emit(s.x - sinH * 0.9 + side * 0.35, s.y + 0.05, s.z - cosH * 0.9, side * (1.2 + Math.random() * 1.2) - sinH * 2, 1.2 + Math.random() * 1.2, -s.speed * 0.1);
+      const bursts = this.time < s.boostUntil ? 3 : 1; // BOOST throws extra spray
+      for (let i = 0; i < bursts; i++) {
+        const side = (Math.floor(this.time * 60) + i) % 2 === 0 ? -1 : 1;
+        this.spray.emit(s.x - sinH * 0.9 + side * 0.35, s.y + 0.05, s.z - cosH * 0.9, side * (1.2 + Math.random() * 1.2) - sinH * 2, 1.2 + Math.random() * 1.5, -s.speed * 0.1);
+      }
     }
     s.group.visible = s.wiped || this.time >= this.invulnerableUntil || Math.floor(this.time * 12) % 2 === 0;
     if (this.raging) s.setFlash(0.2 + 0.2 * Math.sin(this.time * 20));
@@ -308,11 +318,31 @@ export class Run {
       points += TRICKS.grabPoints;
       name += ' GRAB';
     }
-    if (halfTurns >= 1 || l.grabbed) points += TRICKS.landingPoints;
+    if (l.rolled) {
+      points += TRICKS.barrelRollPoints;
+      name = halfTurns >= 1 || l.grabbed ? `${name} ROLL` : 'BARREL ROLL';
+    }
+    const tricked = halfTurns >= 1 || l.grabbed || l.rolled;
+    if (tricked) points += TRICKS.landingPoints;
     this.score += points;
     this.lastLanding = { ...l, points };
-    this.float(`${name} +${points}`, hex(PALETTE.gold), halfTurns >= 1 || l.grabbed ? 2 : 1);
-    this.addRage(RAGE.perTrick * (1 + halfTurns * 0.5 + (l.grabbed ? 0.5 : 0)));
+    this.float(`${name} +${points}`, hex(PALETTE.gold), tricked ? 2 : 1);
+    this.addRage(RAGE.perTrick * (1 + halfTurns * 0.5 + (l.grabbed ? 0.5 : 0) + (l.rolled ? 1 : 0)));
+  }
+
+  /** A completed input combo: the move it names, if the surfer can do it right now. */
+  private performCombo(combo: Combo): void {
+    const s = this.surfer;
+    switch (combo.id) {
+      case 'barrelRollRight':
+      case 'barrelRollLeft':
+        // Screen-right is world -x; the roll direction follows the carve.
+        if (s.barrelRoll(combo.id === 'barrelRollRight' ? -1 : 1, this.time)) this.float(`${combo.name}!`, hex(PALETTE.cyan), 1);
+        break;
+      case 'boost':
+        if (s.boost(this.time)) this.float(`${combo.name}!`, hex(PALETTE.gold), 1);
+        break;
+    }
   }
 
   /** The player's punch or barge against the nearest rival in reach; rivals' shoulder checks against the player. */
@@ -532,10 +562,12 @@ export class Run {
       });
       if (Math.floor(this.time * 2) % 2 === 0) hud.text(W / 2, row + 56, touch ? 'TAP TO SURF' : 'PRESS SPACE TO SURF', gold, { align: 'center' });
       if (touch) {
-        hud.text(W / 2, H - 24, 'DRAG: CARVE   TAP: JUMP', grey, { align: 'center' });
-        hud.text(W / 2, H - 13, '< >: CHARACTER', grey, { align: 'center' });
+        hud.text(W / 2, H - 35, '> > UP: BARREL ROLL', grey, { align: 'center' });
+        hud.text(W / 2, H - 24, 'UP UP: BOOST', grey, { align: 'center' });
+        hud.text(W / 2, H - 13, '< >: CHARACTER   TAP: SURF', grey, { align: 'center' });
       } else {
-        hud.text(W / 2, H - 14, 'LEFT/RIGHT: CHARACTER   SPACE: SURF', grey, { align: 'center' });
+        hud.text(W / 2, H - 24, 'RIGHT RIGHT UP: BARREL ROLL   UP UP: BOOST', grey, { align: 'center' });
+        hud.text(W / 2, H - 13, 'LEFT/RIGHT: CHARACTER   SPACE: SURF', grey, { align: 'center' });
       }
       if (touch) menuCorner();
       else hud.text(6, 4, 'ESC: MAIN MENU', grey);
@@ -570,11 +602,16 @@ export class Run {
       stack += 8 * f.scale + 4;
     }
 
-    if (touch && this.state === 'playing') {
-      for (const b of TOUCH_BUTTONS) {
-        hud.circle(b.x, b.y, b.r, PALETTE.ui, 0.55);
-        hud.ring(b.x, b.y, b.r, b.color, 2);
-        hud.text(b.x, b.y - 4, b.label, hex(b.color), { align: 'center' });
+    if (this.state === 'playing') {
+      // The input trail: the presses the combo reader is holding, so moves can be learnt by watching.
+      const trail = this.combos.recent(this.time).map((k) => KEY_LABELS[k]).join(' ');
+      if (trail) hud.text(W / 2, H * 0.55, trail, cyan, { align: 'center' });
+      if (touch) {
+        for (const b of TOUCH_BUTTONS) {
+          hud.circle(b.x, b.y, b.r, PALETTE.ui, 0.55);
+          hud.ring(b.x, b.y, b.r, b.color, 2);
+          hud.text(b.x, b.y - 4, b.label, hex(b.color), { align: 'center' });
+        }
       }
     }
 

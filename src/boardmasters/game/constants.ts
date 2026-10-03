@@ -167,6 +167,19 @@ export const TRICKS = {
   /** A bad landing keeps this much speed and costs a heart. */
   badLandingSpeed: 0.5,
   crashSeconds: 0.7,
+  /** The barrel roll (RIGHT RIGHT UP / LEFT LEFT UP): a launch plus a full roll about the board over this long. */
+  rollSeconds: 0.55,
+  barrelRollPoints: 400,
+  /** Land before this much of the roll is done and it is a crash. */
+  rollLandingFraction: 0.85,
+} as const;
+
+/** BOOST (UP UP): a burst of speed, on a cooldown. */
+export const BOOST = {
+  gain: 5,
+  cooldown: 1.5,
+  /** Seconds of extra spray and the pump pose after the burst. */
+  seconds: 0.4,
 } as const;
 
 /** The RAGE meter: tricks and knockouts fill it; full, the surfer goes faster, hits harder and smashes buoys. */

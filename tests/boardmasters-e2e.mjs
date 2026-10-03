@@ -140,9 +140,10 @@ try {
   check('position is somewhere in the field of eight', await ev(() => window.bm.run.rank >= 1 && window.bm.run.rank <= 8));
 
   // --- combat: a rival beside the surfer, one punch on its last health point ---
+  // reset() puts the rival on the water with no velocity; setting x/z/y directly leaves a huge surface velocity that launches it.
   const placeRival = (i, dx, health) => ev(([i, dx, health]) => {
     const r = window.bm.run; const s = r.surfer; const v = r.rivals[i];
-    v.x = s.x + dx; v.z = s.z + 0.3; v.y = s.y; v.heading = 0; v.health = health; v.wiped = false; v.knockedOut = false;
+    v.reset(s.x + dx, s.z + 0.3, r.ocean); v.health = health;
   }, [i, dx, health]);
   // Fast riding hops off crests on its own, so wait for the water before anything that needs the surfer grounded.
   const grounded = async () => { for (let i = 0; i < 60 && (await surfer()).airborne; i++) await wait(50); };
@@ -204,6 +205,28 @@ try {
   await ev(() => { window.bm.run.rage = 0.95; window.bm.run.health = 3; });
   const rageStrike = await strike(3, 1.0, 1, 'x');
   check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9), `strike=${JSON.stringify(rageStrike)} ${await ev(() => { const r = window.bm.run; const s = r.surfer; return JSON.stringify({ state: r.state, kos: r.knockouts, health: r.health, texts: r.floating.map((f) => f.text), stun: +(s.stunnedUntil - r.time).toFixed(2), air: s.airborne, z: +s.z.toFixed(0), speed: +s.speed.toFixed(1) }); })}`);
+
+  // --- combos: RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
+  if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); }
+  let rolled = null;
+  for (let tries = 0; tries < 4 && !rolled; tries++) {
+    await grounded();
+    await ev(() => { window.bm.run.lastLanding = null; window.bm.run.surfer.rollProgress = 0; });
+    await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
+    await wait(80);
+    if (!(await ev(() => window.bm.run.surfer.rolling))) { await wait(400); continue; }
+    rolled = await until(() => window.bm.run.lastLanding !== null, 4000) ? await ev(() => window.bm.run.lastLanding) : null;
+  }
+  check('RIGHT RIGHT UP is a barrel roll that lands for points', !!rolled && rolled.rolled && rolled.clean && rolled.points >= 750, JSON.stringify(rolled));
+  let boosted = false;
+  for (let tries = 0; tries < 3 && !boosted; tries++) {
+    await grounded();
+    await ev(() => { window.bm.run.surfer.speed = 13; window.bm.run.surfer.boostCooldownUntil = 0; });
+    await page.keyboard.press('ArrowUp'); await page.keyboard.press('ArrowUp');
+    boosted = await until(() => window.bm.run.surfer.boostUntil > window.bm.run.time && window.bm.run.surfer.speed > 16, 600);
+    if (!boosted) await wait(600);
+  }
+  check('UP UP is a boost', boosted, `speed ${(await surfer()).speed.toFixed(1)}`);
 
   // --- pause ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); } // never press Escape outside play: it would leave the page
@@ -276,11 +299,28 @@ try {
   let phoneKo = 0;
   for (let tries = 0; tries < 4 && !phoneKo; tries++) {
     for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tp.evaluate(() => { const r = window.bm.run; const s = r.surfer; const v = r.rivals[1]; v.x = s.x + 1.0; v.z = s.z + 0.3; v.y = s.y; v.health = 1; v.wiped = false; v.knockedOut = false; });
-    await tapAt(240 - 68, 426 - 30); await tp.waitForTimeout(300);
+    await tp.evaluate(() => { const r = window.bm.run; const v = r.rivals[1]; v.reset(r.surfer.x + 1.0, r.surfer.z + 0.3, r.ocean); v.health = 1; });
+    await tapAt(240 - 84, 426 - 32); await tp.waitForTimeout(300);
     phoneKo = await tp.evaluate(() => window.bm.run.knockouts);
   }
   check('phone: the HIT button punches', phoneKo >= 1);
+  // Holding RIGHT on the pad carves to screen-right (world -x); a mouse press stands in for a held thumb.
+  for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
+  await tp.evaluate(() => { window.bm.run.surfer.heading = 0; window.bm.run.surfer.shoveVx = 0; window.bm.run.surfer.stunnedUntil = 0; });
+  await tp.mouse.move(css.ox + 76 * css.scale, css.oy + (426 - 32) * css.scale);
+  await tp.mouse.down();
+  let headingMin = 0;
+  for (let i = 0; i < 8; i++) { await tp.waitForTimeout(100); headingMin = Math.min(headingMin, await tp.evaluate(() => window.bm.run.surfer.heading)); }
+  await tp.mouse.up();
+  check('phone: holding RIGHT carves to screen-right (heading swings to -x)', headingMin < -0.3, `min heading ${headingMin.toFixed(2)}`);
+  let phoneRolled = false;
+  for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
+    for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
+    await tapAt(76, 426 - 32); await tapAt(76, 426 - 32); await tapAt(52, 426 - 74); await tp.waitForTimeout(80);
+    phoneRolled = await tp.evaluate(() => window.bm.run.surfer.rolling);
+    if (!phoneRolled) await tp.waitForTimeout(500);
+  }
+  check('phone: RIGHT RIGHT UP on the pad barrel-rolls', phoneRolled);
   await tapAt(120, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));
