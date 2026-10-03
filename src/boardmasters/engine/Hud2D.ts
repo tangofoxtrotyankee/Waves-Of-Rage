@@ -36,12 +36,19 @@ export class Hud2D {
     font.onload = () => {
       this.font = font;
     };
+    font.onerror = () => console.error('HUD font failed to load', font.src);
     font.src = 'assets/sprites/font.png';
+  }
+
+  /** True once the pixel font is usable (tests wait on it). */
+  get fontLoaded(): boolean {
+    return this.font !== null;
   }
 
   /** Register an image for `image()`; it draws once loaded. */
   loadImage(key: string, url: string): void {
     const img = new Image();
+    img.onerror = () => console.error('HUD image failed to load', url);
     img.src = url;
     this.images.set(key, img);
   }
@@ -55,6 +62,23 @@ export class Hud2D {
     this.ctx.fillStyle = hex(color);
     this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     this.ctx.globalAlpha = 1;
+  }
+
+  circle(x: number, y: number, r: number, color: number, alpha = 1): void {
+    this.ctx.globalAlpha = alpha;
+    this.ctx.fillStyle = hex(color);
+    this.ctx.beginPath();
+    this.ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.globalAlpha = 1;
+  }
+
+  ring(x: number, y: number, r: number, color: number, width = 2): void {
+    this.ctx.strokeStyle = hex(color);
+    this.ctx.lineWidth = width;
+    this.ctx.beginPath();
+    this.ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2);
+    this.ctx.stroke();
   }
 
   image(key: string, x: number, y: number, scale = 1): void {

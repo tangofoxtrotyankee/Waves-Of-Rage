@@ -121,6 +121,68 @@ export const SCORING = {
   wipeoutSeconds: 1.6,
 } as const;
 
+/** HIT (punch), BARGE (shoulder), knockouts and rivals' own shoulder checks. Metres, seconds, points. */
+export const COMBAT = {
+  rivalHealth: 2,
+  punchDamage: 1,
+  punchShove: 3.5,
+  punchCooldown: 0.45,
+  punchSeconds: 0.25,
+  punchRangeX: 1.7,
+  punchRangeZ: 2.2,
+  bargeDamage: 1,
+  bargeShove: 8,
+  bargeCooldown: 1.0,
+  bargeSeconds: 0.35,
+  bargeRangeX: 2.2,
+  bargeRangeZ: 2.6,
+  /** A barge costs the barger some speed and a moment of control: it risks destabilising you. */
+  bargeSelfSpeed: 0.92,
+  bargeSelfStun: 0.2,
+  knockoutPoints: 500,
+  /** Barged into a buoy or off the course. */
+  environmentPoints: 750,
+  /** A rival sliding this fast from a shove is knocked out by whatever it hits. */
+  environmentShove: 3,
+  comboSeconds: 4,
+  comboMax: 5,
+  respawnSeconds: 3,
+  respawnBehind: 20,
+  /** Rivals with POWER at least this shoulder-check the player when alongside. */
+  rivalAggression: 0.5,
+  rivalShove: 4,
+  rivalCheckCooldown: 4,
+  rivalCheckSeconds: 0.7,
+} as const;
+
+/** In the air: Left/Right spin, X grabs; land within the tolerance or wipe out. */
+export const TRICKS = {
+  /** Radians per second at full steer. */
+  spinRate: (Math.PI * 2) / 0.75,
+  /** Points by half-turns landed: 180, 360, 540, 720. */
+  spinPoints: [0, 250, 500, 750, 1000] as const,
+  grabPoints: 250,
+  landingPoints: 250,
+  landingToleranceDeg: 50,
+  /** A bad landing keeps this much speed and costs a heart. */
+  badLandingSpeed: 0.5,
+  crashSeconds: 0.7,
+} as const;
+
+/** The RAGE meter: tricks and knockouts fill it; full, the surfer goes faster, hits harder and smashes buoys. */
+export const RAGE = {
+  seconds: 8,
+  perTrick: 0.12,
+  perKnockout: 0.2,
+  decayPerSecond: 0.015,
+  speedMul: 1.3,
+  attackDamage: 2,
+  smashPoints: 100,
+} as const;
+
+/** The MENU corner on touch screens (internal pixels; at least 44 CSS px on phones). */
+export const MENU_ZONE = { w: 80, h: 32 } as const;
+
 /** The original game's palette (docs/art-direction/README.md), reused for water, sky and riders. */
 export const PALETTE = {
   deepWater: 0x1e4fa3,

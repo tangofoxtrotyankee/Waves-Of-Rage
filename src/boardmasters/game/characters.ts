@@ -57,6 +57,9 @@ export const CHARACTERS: Record<CharacterId, RiderSpec> = {
 
 export const CHARACTER_ORDER: CharacterId[] = ['sam', 'kai', 'chungus', 'skye', 'diesel', 'bish', 'shadow'];
 
+/** localStorage key (through systems/Storage) for the chosen character. */
+export const CHARACTER_STORAGE_KEY = 'bm.character';
+
 /** Rival surfers, cycled through as rivals are added to a course. */
 export const RIVALS: RiderSpec[] = [
   rider('local', 'LOCAL', 'RIVAL', [0.55, 0.6, 0.5, 0.5], { skin: 0xd98c4a, hair: 0x7a3f1d, shorts: 0x2a9d8f, board: 0x5fb3f0, boardStripe: 0xffffff }),

@@ -24,7 +24,9 @@ export class Renderer {
   /** Three's renderer needs WebGL 2. */
   static supported(): boolean {
     try {
-      return document.createElement('canvas').getContext('webgl2') !== null;
+      const gl = document.createElement('canvas').getContext('webgl2');
+      gl?.getExtension('WEBGL_lose_context')?.loseContext(); // do not keep a context alive just for the probe
+      return gl !== null;
     } catch {
       return false;
     }

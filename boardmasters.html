@@ -28,9 +28,8 @@
          resolution and scaled up together with nearest-neighbour sampling
          (src/boardmasters/engine/Renderer.ts positions them). */
       #game {
-        position: relative;
-        width: 100%;
-        height: 100%;
+        position: absolute;
+        inset: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         overflow: hidden;
         touch-action: none;
       }

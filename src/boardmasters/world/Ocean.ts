@@ -1,5 +1,5 @@
 import { createPS1Material } from '../engine/PS1Material';
-import { clamp, mixRgb, rgb, smoothstep } from '../engine/math';
+import { rgb, smoothstep } from '../engine/math';
 import { waterTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { PALETTE, PHYSICS } from '../game/constants';
@@ -27,6 +27,10 @@ const COLUMN_X: number[] = [...OUTER.map((x) => -x).reverse(), ...Array.from({ l
 const COLS = COLUMN_X.length - 1;
 const ROWS = 110;
 const BEHIND = 12;
+/** The sampled height grid carries one extra ring so every vertex has neighbours for its normal. */
+const GW = COLS + 3;
+const GH = ROWS + 3;
+const GRID_X: number[] = [COLUMN_X[0] - (COLUMN_X[1] - COLUMN_X[0]), ...COLUMN_X, COLUMN_X[COLS] + (COLUMN_X[COLS] - COLUMN_X[COLS - 1])];
 
 /**
  * The swells travel towards the rider (crests move to -z); the cross chop
@@ -47,10 +51,12 @@ const FOAM = rgb(PALETTE.foam);
 
 /**
  * The sea as terrain. A heightfield mesh that follows the rider in whole
- * cells and is resampled every frame from `height(x, z)`; riders sample the
- * same function, so what you see is what you ride. Vertex colours go from
- * deep blue in the troughs to light blue and foam on crests and steep faces;
- * normals come from the analytic slope for the shader's per-vertex lighting.
+ * cells and is resampled from `height(x, z)` once per rendered frame
+ * (`rebuild()`), while the simulation only advances the swell and the
+ * window (`advance()`). Riders sample the same function, so what you see is
+ * what you ride. Vertex colours go from deep blue in the troughs to light
+ * blue and foam on crests and steep faces; normals come from neighbouring
+ * samples for the shader's per-vertex lighting.
  */
 export class Ocean {
   readonly mesh: THREE.Mesh;
@@ -60,18 +66,20 @@ export class Ocean {
   originZ = 0;
   private features: OceanFeature[] = [];
   private active: OceanFeature[] = [];
+  private dirty = true;
+  private readonly heights = new Float32Array(GW * GH);
   private readonly positions: Float32Array;
   private readonly normals: Float32Array;
   private readonly colors: Float32Array;
-  private readonly uvs: Float32Array;
   private readonly geometry: THREE.BufferGeometry;
+  private readonly material: THREE.ShaderMaterial;
 
   constructor() {
     const count = (COLS + 1) * (ROWS + 1);
     this.positions = new Float32Array(count * 3);
     this.normals = new Float32Array(count * 3);
     this.colors = new Float32Array(count * 3);
-    this.uvs = new Float32Array(count * 2);
+    const uvs = new Float32Array(count * 2);
     const index = new Uint32Array(COLS * ROWS * 6);
     let i = 0;
     for (let r = 0; r < ROWS; r++) {
@@ -86,24 +94,31 @@ export class Ocean {
         i += 6;
       }
     }
+    // Texture coordinates never change: the window's z offset is a uniform.
+    let uv = 0;
+    for (let r = 0; r <= ROWS; r++) {
+      for (let c = 0; c <= COLS; c++) {
+        uvs[uv++] = COLUMN_X[c] / 4;
+        uvs[uv++] = r / 4;
+      }
+    }
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setIndex(new THREE.BufferAttribute(index, 1));
-    for (const [name, array, size] of [
-      ['position', this.positions, 3],
-      ['normal', this.normals, 3],
-      ['color', this.colors, 3],
-      ['uv', this.uvs, 2],
-    ] as const) {
-      this.geometry.setAttribute(name, new THREE.BufferAttribute(array, size).setUsage(THREE.DynamicDrawUsage));
-    }
-    this.mesh = new THREE.Mesh(this.geometry, createPS1Material({ map: waterTexture() }));
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    this.material = createPS1Material({ map: waterTexture() });
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.frustumCulled = false;
-    this.update(0, 0);
+    this.advance(0, 0);
+    this.rebuild();
   }
 
   setFeatures(features: OceanFeature[]): void {
     this.features = [...features].sort((a, b) => a.z - b.z);
     this.active = this.features;
+    this.dirty = true;
   }
 
   /** Water height at a point on the course, metres. */
@@ -131,7 +146,7 @@ export class Ocean {
     return h;
   }
 
-  /** Slope (dh/dx, dh/dz) at a point. */
+  /** Slope (dh/dx, dh/dz) at a point, for the riders. */
   slope(x: number, z: number): { dx: number; dz: number } {
     const e = 0.3;
     return {
@@ -140,48 +155,65 @@ export class Ocean {
     };
   }
 
-  /** Advance the swell and rebuild the mesh around `centreZ`. */
-  update(dt: number, centreZ: number): void {
+  /** One simulation step: move the swell and the window around `centreZ`. */
+  advance(dt: number, centreZ: number): void {
     this.time += dt;
     this.originZ = Math.floor(centreZ) - BEHIND;
     const lo = this.originZ - 5;
     const hi = this.originZ + ROWS + 5;
     this.active = this.features.filter((f) => f.z + f.length >= lo && f.z <= hi);
+    this.dirty = true;
+  }
 
-    const foamColor = FOAM;
+  /** Resample the mesh for the current time and window; once per rendered frame, however many steps ran. */
+  rebuild(): void {
+    if (!this.dirty) return;
+    this.dirty = false;
+    const heights = this.heights;
+    for (let gr = 0; gr < GH; gr++) {
+      const z = this.originZ + gr - 1;
+      const row = gr * GW;
+      for (let gc = 0; gc < GW; gc++) heights[row + gc] = this.height(GRID_X[gc], z);
+    }
+    const halfWidth = PHYSICS.trackHalfWidth;
     let p = 0;
-    let uv = 0;
     for (let r = 0; r <= ROWS; r++) {
       const z = this.originZ + r;
+      const row = (r + 1) * GW;
       for (let c = 0; c <= COLS; c++) {
+        const gc = c + 1;
+        const g = row + gc;
         const x = COLUMN_X[c];
-        const h = this.height(x, z);
-        const s = this.slope(x, z);
-        // Normal of the surface y = h(x, z).
-        const nl = 1 / Math.hypot(s.dx, 1, s.dz);
+        const h = heights[g];
+        const dx = (heights[g + 1] - heights[g - 1]) / (GRID_X[gc + 1] - GRID_X[gc - 1]);
+        const dz = (heights[g + GW] - heights[g - GW]) * 0.5;
+        const nl = 1 / Math.hypot(dx, 1, dz);
         this.positions[p] = x;
         this.positions[p + 1] = h;
         this.positions[p + 2] = z;
-        this.normals[p] = -s.dx * nl;
+        this.normals[p] = -dx * nl;
         this.normals[p + 1] = nl;
-        this.normals[p + 2] = -s.dz * nl;
+        this.normals[p + 2] = -dz * nl;
 
-        const t = clamp((h + 2.0) / 4.0, 0, 1);
-        const base = t < 0.5 ? mixRgb(DEEP, MID, t * 2) : mixRgb(MID, LIGHT, (t - 0.5) * 2);
-        const steep = Math.hypot(s.dx, s.dz);
-        const edge = Math.abs(x) > PHYSICS.trackHalfWidth ? smoothstep(PHYSICS.trackHalfWidth, PHYSICS.trackHalfWidth + EDGE.fade, Math.abs(x)) : 0;
-        const foam = clamp(smoothstep(1.6, 2.4, h) + smoothstep(0.8, 1.3, steep) + edge * 0.9, 0, 1);
-        const col = mixRgb(base, foamColor, foam);
-        this.colors[p] = col[0];
-        this.colors[p + 1] = col[1];
-        this.colors[p + 2] = col[2];
+        // Deep -> mid -> light by height, then towards foam on crests, steep faces and the edges. No allocations.
+        let t = (h + 2) / 4;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const low = t < 0.5;
+        const t2 = low ? t * 2 : (t - 0.5) * 2;
+        const a = low ? DEEP : MID;
+        const b = low ? MID : LIGHT;
+        const ax = x < 0 ? -x : x;
+        const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
+        let foam = smoothstep(1.6, 2.4, h) + smoothstep(0.8, 1.3, Math.hypot(dx, dz)) + edge * 0.9;
+        if (foam > 1) foam = 1;
+        for (let k = 0; k < 3; k++) {
+          const base = a[k] + (b[k] - a[k]) * t2;
+          this.colors[p + k] = base + (FOAM[k] - base) * foam;
+        }
         p += 3;
-
-        this.uvs[uv] = x / 4;
-        this.uvs[uv + 1] = z / 4;
-        uv += 2;
       }
     }
-    for (const name of ['position', 'normal', 'color', 'uv']) this.geometry.getAttribute(name).needsUpdate = true;
+    for (const name of ['position', 'normal', 'color']) this.geometry.getAttribute(name).needsUpdate = true;
+    (this.material.uniforms.uUvOffset.value as THREE.Vector2).set(0, this.originZ / 4);
   }
 }

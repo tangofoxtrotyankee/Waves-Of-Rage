@@ -34,6 +34,8 @@ export const GAME_ORDER: GameId[] = ['waves', 'boardmasters'];
  * persisted) so coming back from a game lands on the entry that started it.
  */
 let selected: GameId = 'waves';
+// Coming back from the sequel's page (a new document) carries the cursor in the URL.
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('game') === 'boardmasters') selected = 'boardmasters';
 
 export function getSelectedGame(): GameId {
   return selected;

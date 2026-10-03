@@ -6,6 +6,8 @@ import type { Ocean } from '../world/Ocean';
 /** The skull buoy from the hazards sheet: a red drum with a cap and a light, bobbing on the water. Hitting it costs a heart. */
 export class Buoy {
   readonly group = new THREE.Group();
+  /** Smashed through in RAGE mode: gone until the next run. */
+  smashed = false;
 
   constructor(
     readonly x: number,
@@ -26,6 +28,16 @@ export class Buoy {
     light.position.y = 1.98;
     this.group.add(drum, cap, mast, light);
     this.group.position.set(x, 0, z);
+  }
+
+  smash(): void {
+    this.smashed = true;
+    this.group.visible = false;
+  }
+
+  restore(): void {
+    this.smashed = false;
+    this.group.visible = true;
   }
 
   update(time: number, ocean: Ocean): void {

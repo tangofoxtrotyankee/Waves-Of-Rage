@@ -18,7 +18,7 @@ export interface CourseLayout {
 
 /** The six stages from the brief start with the first; the others are rows to add here when their hazards exist. */
 export const COURSES = {
-  sunsetBay: { id: 'sunset-bay', name: 'SUNSET BAY', length: 1200, seed: 7, rivals: 1 },
+  sunsetBay: { id: 'sunset-bay', name: 'SUNSET BAY', length: 1200, seed: 7, rivals: 7 },
 } as const satisfies Record<string, CourseSpec>;
 
 /**

@@ -3,7 +3,8 @@ import { Hud2D } from './engine/Hud2D';
 import { Input } from './engine/Input';
 import { Loop } from './engine/Loop';
 import { Renderer } from './engine/Renderer';
-import { characterById } from './game/characters';
+import { loadJSON } from '../systems/Storage';
+import { CHARACTER_STORAGE_KEY, characterById } from './game/characters';
 import { CHARACTER_PARAM, LOOK } from './game/constants';
 import { Run } from './game/Run';
 
@@ -17,19 +18,28 @@ const parent = document.getElementById('game');
 const message = document.getElementById('message');
 if (!parent || !message) throw new Error('boardmasters.html is missing #game or #message');
 
-if (!Renderer.supported()) {
-  message.innerHTML = 'WAVES OF RAGE 2 NEEDS WEBGL 2, WHICH THIS BROWSER DOES NOT PROVIDE.<br /><br /><a href="./">BACK TO THE MAIN MENU</a>';
+const fail = (text: string) => {
+  message.innerHTML = `${text}<br /><br /><a href="./">BACK TO THE MAIN MENU</a>`;
   message.classList.add('show');
-} else {
-  const renderer = new Renderer(parent);
-  const hud = new Hud2D(renderer.hudCanvas);
-  const input = new Input(parent, isTouchDevice(), (x, y) => renderer.toInternal(x, y));
-  const run = new Run(renderer, hud, input, characterById(CHARACTER_PARAM));
-  const loop = new Loop((dt) => run.update(dt), () => run.render());
-  loop.start();
+};
 
-  // In development, expose the game for console poking and automated tests (tests/boardmasters-e2e.mjs).
-  if (import.meta.env.DEV) {
-    (window as Window & { bm?: unknown }).bm = { run, renderer, input, loop, look: LOOK };
+if (!Renderer.supported()) {
+  fail('WAVES OF RAGE 2 NEEDS WEBGL 2, WHICH THIS BROWSER DOES NOT PROVIDE.');
+} else {
+  try {
+    const renderer = new Renderer(parent);
+    const hud = new Hud2D(renderer.hudCanvas);
+    const input = new Input(parent, isTouchDevice(), (x, y) => renderer.toInternal(x, y));
+    const run = new Run(renderer, hud, input, characterById(CHARACTER_PARAM ?? loadJSON<string>(CHARACTER_STORAGE_KEY, 'sam')));
+    const loop = new Loop((dt) => run.update(dt), () => run.render());
+    loop.start();
+
+    // In development, expose the game for console poking and automated tests (tests/boardmasters-e2e.mjs).
+    if (import.meta.env.DEV) {
+      (window as Window & { bm?: unknown }).bm = { run, renderer, hud, input, loop, look: LOOK };
+    }
+  } catch (err) {
+    console.error(err);
+    fail('WAVES OF RAGE 2 COULD NOT START ITS 3D RENDERER ON THIS DEVICE.');
   }
 }

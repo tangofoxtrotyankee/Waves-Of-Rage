@@ -107,7 +107,11 @@ async function handleApi(req, res, url) {
 
 async function handleStatic(req, res, url) {
   const safePath = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
-  // Clean URL for the sequel's page (dist/boardmasters.html).
+  // Clean URL for the sequel's page (dist/boardmasters.html); its relative asset paths need the slash-less form.
+  if (safePath === '/boardmasters/') {
+    res.writeHead(301, { Location: `/boardmasters${url.search}` });
+    return res.end();
+  }
   const page = safePath === '/' ? 'index.html' : safePath === '/boardmasters' ? 'boardmasters.html' : safePath;
   let filePath = join(DIST, page);
   if (!filePath.startsWith(DIST)) return send(res, 403, { error: 'forbidden' });

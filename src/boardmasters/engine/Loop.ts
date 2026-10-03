@@ -1,7 +1,7 @@
 /**
  * Fixed-step simulation (60 Hz) with a render each animation frame. Long
- * gaps (a hidden tab, a hitch) are clamped so the game never tries to catch
- * up with a burst of steps.
+ * gaps (a hidden tab, a hitch) are clamped to three steps so the game never
+ * tries to catch up with a burst of work.
  */
 export class Loop {
   private last = 0;
@@ -34,8 +34,12 @@ export class Loop {
 
   private readonly tick = (now: number): void => {
     if (!this.running) return;
-    this.accumulator += Math.min(0.1, (now - this.last) / 1000);
+    let elapsed = (now - this.last) / 1000;
     this.last = now;
+    // rAF timestamps jitter around the step; snap them so frames run one step, not 0 then 2.
+    if (Math.abs(elapsed - this.dt) < this.dt * 0.2) elapsed = this.dt;
+    // At most three steps of catch-up; a moment of slow motion beats a spiral of work.
+    this.accumulator = Math.min(this.accumulator + elapsed, this.dt * 3);
     while (this.accumulator >= this.dt) {
       this.step(this.dt);
       this.accumulator -= this.dt;
