@@ -27,15 +27,15 @@ export const CHARACTER_PARAM = params.get('character');
 
 /** Chase camera: behind the surfer at about waist height, looking a little way ahead. */
 export const CAMERA = {
-  fov: IS_PORTRAIT ? 80 : 62,
+  fov: IS_PORTRAIT ? 72 : 62,
   near: 0.4,
   far: 130,
-  /** Metres behind and above the surfer. */
-  back: 4.8,
-  height: 1.5,
+  /** Metres behind and above the surfer. Upright phones sit closer and higher, looking further down the course (the gameplay mockup's framing). */
+  back: IS_PORTRAIT ? 4.2 : 4.8,
+  height: IS_PORTRAIT ? 2.0 : 1.5,
   /** The look-at point, metres ahead of and above the surfer. */
-  lookAhead: 7,
-  lookHeight: 0.5,
+  lookAhead: IS_PORTRAIT ? 10 : 7,
+  lookHeight: IS_PORTRAIT ? 0.2 : 0.5,
   /** Exponential easing rates per second for position and look target. */
   followRate: 6,
   lookRate: 8,
