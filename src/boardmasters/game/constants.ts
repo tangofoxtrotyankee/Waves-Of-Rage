@@ -189,6 +189,8 @@ export const RAGE = {
   seconds: 8,
   perTrick: 0.12,
   perKnockout: 0.2,
+  /** Riding through a boost gate. */
+  perGate: 0.06,
   decayPerSecond: 0.015,
   speedMul: 1.3,
   attackDamage: 2,
@@ -200,10 +202,16 @@ export const MENU_ZONE = { w: 80, h: 32 } as const;
 
 /** The original game's palette (docs/art-direction/README.md), reused for water, sky and riders. */
 export const PALETTE = {
-  deepWater: 0x1e4fa3,
-  water: 0x2a66c4,
-  lightWater: 0x5fb3f0,
+  deepWater: 0x25307e,
+  water: 0x1f6fc2,
+  lightWater: 0x45cbe6,
   foam: 0xf8fbff,
+  cloud: 0xff9a7a,
+  cloudLit: 0xffd1a0,
+  cliff: 0x5b2f86,
+  cliffLit: 0x9a5fc4,
+  palm: 0x1d6b4a,
+  wood: 0x7a4a2a,
   skyTop: 0x2d0b4e,
   skyMid: 0xf26b4e,
   horizon: 0xffcf6b,

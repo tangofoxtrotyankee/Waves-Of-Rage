@@ -108,7 +108,7 @@ export class Ocean {
     this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    this.material = createPS1Material({ map: waterTexture() });
+    this.material = createPS1Material({ map: waterTexture(), flat: 0.22 }); // faceted, like the mockup's crystal water
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.frustumCulled = false;
     this.advance(0, 0);
@@ -180,6 +180,8 @@ export class Ocean {
     for (let r = 0; r <= ROWS; r++) {
       const z = this.originZ + r;
       const row = (r + 1) * GW;
+      // Foam fades out towards the horizon, where the facets are a pixel wide and would sparkle.
+      const far = 1 - smoothstep(22, 70, r);
       for (let c = 0; c <= COLS; c++) {
         const gc = c + 1;
         const g = row + gc;
@@ -187,13 +189,16 @@ export class Ocean {
         const h = heights[g];
         const dx = (heights[g + 1] - heights[g - 1]) / (GRID_X[gc + 1] - GRID_X[gc - 1]);
         const dz = (heights[g + GW] - heights[g - GW]) * 0.5;
-        const nl = 1 / Math.hypot(dx, 1, dz);
+        // Normals flatten towards the horizon too, so the low sun does not light every distant facet differently.
+        const ndx = dx * far;
+        const ndz = dz * far;
+        const nl = 1 / Math.hypot(ndx, 1, ndz);
         this.positions[p] = x;
         this.positions[p + 1] = h;
         this.positions[p + 2] = z;
-        this.normals[p] = -dx * nl;
+        this.normals[p] = -ndx * nl;
         this.normals[p + 1] = nl;
-        this.normals[p + 2] = -dz * nl;
+        this.normals[p + 2] = -ndz * nl;
 
         // Deep -> mid -> light by height, then towards foam on crests, steep faces and the edges. No allocations.
         let t = (h + 2) / 4;
@@ -204,10 +209,12 @@ export class Ocean {
         const b = low ? MID : LIGHT;
         const ax = x < 0 ? -x : x;
         const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
-        let foam = smoothstep(1.6, 2.4, h) + smoothstep(0.8, 1.3, Math.hypot(dx, dz)) + edge * 0.9;
+        let foam = (smoothstep(1.3, 2.1, h) + smoothstep(0.7, 1.15, Math.hypot(dx, dz)) + edge * 0.9) * far;
         if (foam > 1) foam = 1;
         for (let k = 0; k < 3; k++) {
-          const base = a[k] + (b[k] - a[k]) * t2;
+          // The deep-to-light ramp flattens towards mid blue in the distance, for the same reason.
+          const ramp = a[k] + (b[k] - a[k]) * t2;
+          const base = ramp + (MID[k] - ramp) * (1 - far) * 0.7;
           this.colors[p + k] = base + (FOAM[k] - base) * foam;
         }
         p += 3;

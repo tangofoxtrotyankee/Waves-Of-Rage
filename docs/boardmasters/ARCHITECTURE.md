@@ -106,13 +106,13 @@ available behind `?res=320` so both can be compared on real screens; 3D at
 | Low resolution, crisp pixels | `renderer.setSize(426, 240, false)`, canvas CSS-scaled to the largest fit (same letterboxing rule as the original), `image-rendering: pixelated`. No post pass needed for the prototype. | `engine/Renderer.ts` |
 | Vertex jitter / snapping | In the vertex shader, snap clip-space x/y to the low-res pixel grid: `pos.xy = floor(pos.xy / pos.w * snap) / snap * pos.w`. | `engine/PS1Material.ts` |
 | Texture warping | Affine (not perspective-correct) texture mapping: pass `uv * w` and `w` as varyings and divide in the fragment shader. The classic PS1 wobble, switchable. | `engine/PS1Material.ts` |
-| Low-res textures | 32x32 to 64x64 PNGs from `tools/pixelart/` (so the texture palette is the game palette), `NearestFilter`, no mipmaps. | `tools/pixelart/`, `public/assets/boardmasters/` |
-| Flat, chunky lighting | Per-vertex Lambert (Gouraud) in the shader: one sun direction plus ambient, multiplied with vertex colours. No normal maps, no shadows. | `engine/PS1Material.ts` |
+| Low-res textures | 16 to 128 px textures painted at runtime from the palette (`engine/Textures.ts`), `NearestFilter`, no mipmaps; the water is the one exception (nearest mipmaps), because its dashes become a band of noise at the horizon without them. | `engine/Textures.ts` |
+| Flat, chunky lighting | Per-vertex Lambert (Gouraud) in the shader: one sun direction plus ambient, multiplied with vertex colours. No normal maps, no shadows. The `flat` option (sea, scenery) makes it per facet instead (`flat` varyings) with a per-facet brightness hash, fading with depth; the sea also flattens its normals, foam and colour ramp towards the horizon. | `engine/PS1Material.ts`, `world/Ocean.ts` |
 | Short draw distance and fog | Linear fog to the sunset colour, roughly 25 m to 70 m; the camera's far plane sits at the fog's far distance. | `world/Sky.ts`, material uniforms |
-| Sky and sun | An unlit gradient backdrop quad and a sun disc that follow the camera. | `world/Sky.ts` |
+| Sky, sun and shore | A sunset dome sharing the fog's elevation ramp, a sun disc with slowly turning rays, a shell of drifting low-poly clouds; cliffs with palms and waterfalls on both sides and a pier (pilings, deck, crowd, tents, flags, banner) in two 1,200 m spans that leapfrog the camera. | `world/Sky.ts`, `world/Scenery.ts` |
 | Dithering and colour banding | Optional later: a fullscreen pass that quantises to 5 bits per channel with a 4x4 Bayer matrix. Not in the prototype. | `engine/PostPass.ts` (later) |
 | Spray and particles | A handful of camera-facing quads using the existing foam/spray pixel art, spawned at the board's tail. | `entities/Surfer.ts` |
-| HUD | A second 2D canvas at the same internal resolution, drawn with the 8x8 pixel font sheet, so text pixels match world pixels. Content per the gameplay mockup: HEALTH hearts, DIST, SCORE now; POS, RAGE bar, course map and floating trick text later. | `engine/Hud2D.ts` |
+| HUD | A second 2D canvas at the same internal resolution, drawn with the 8x8 pixel font sheet, so text pixels match world pixels. Per the gameplay mockup: framed boxes for hearts and position and for score and distance, a gradient RAGE bar, a speed bar, a radar of the course ahead, outlined floating trick text, and the phone's buttons with icons. | `engine/Hud2D.ts`, `Run.drawHud` |
 
 One material, `PS1Material` (a `ShaderMaterial`, about 80 lines of GLSL),
 is used by everything in the world. Its uniforms (`snapResolution`,
@@ -155,7 +155,11 @@ an arcade game needs.
 
 **Obstacle.** A skull buoy (cylinder plus cone) at fixed course positions;
 hitting it costs a heart and speed. Rocks, pilings, boats and sharks are
-the same interface with different meshes and behaviours.
+the same interface with different meshes and behaviours. Boost gates
+(`entities/Chevron.ts`, three chevrons lying on the water) are the first
+pickup: the generator lays one every 110 to 190 m in a lane, and riding
+over it on the water gives a BOOST (ignoring the combo's cooldown), a
+little RAGE and `BOOST!`.
 
 **Course.** Endless, like Temple Run: `CourseGenerator` lays out ramps,
 troughs and buoy spots deterministically from the seed a few hundred
@@ -179,11 +183,13 @@ src/boardmasters/
   world/
     Ocean.ts                      heightfield mesh, oceanHeight(x, z, t), feature list
     Course.ts                     course data and the Sunset Bay prototype course
-    Sky.ts                        backdrop, sun, fog colour
+    Sky.ts                        dome, sun and rays, clouds
+    Scenery.ts                    cliffs, palms, waterfalls, the pier
   entities/
     Surfer.ts                     track-space physics and a code-built low-poly surfer and board
     Rival.ts                      racing-line AI and contact
     Buoy.ts                       static obstacle
+    Chevron.ts                    boost gate
   game/
     Run.ts                        assembles a run: entities, collisions, DIST / SCORE / HEALTH
     constants.ts                  resolution, camera, physics and fog tuning in one place
@@ -212,6 +218,12 @@ table, `Run.startRage`), a pause state, the mockup's touch buttons, and
 the review's fixes (steering direction, step-rate independent launches,
 the sky's elevation ramp shared with the fog, ordered dither, the ocean
 sampled once per frame from a height grid with coarse outer columns).
+Then the phone pad and the combo reader, the endless course with the
+persisted best, and the first graphics tranche towards the mockup: the
+faceted sea, the sun's rays and clouds, the shore and the pier
+(`world/Scenery.ts`), boost gates (`entities/Chevron.ts`), the boxed HUD
+with the gradient RAGE bar and the radar, and a better rig (tapered
+chest, hair spikes, patterned shorts from `shortsTexture`).
 
 ## 8. Mobile
 
@@ -253,7 +265,7 @@ before multiplying content. Sizes are rough line counts.
 | 3. RAGE as a choice | A full meter waits for the player (R, or tapping the bar); the pink tint becomes `RAGE.fog` / `RAGE.horizon` plus a water tint uniform; rivals steer away from a raging player | `Run.ts`, `PS1Material.ts`, `Rival.think` | ~50 |
 | 4. Hazard interface and rival personality | `entities/Hazard.ts` (`x`, `z`, extents, `lethalToShoved`, `update`, `onPlayer`); `Buoy` implements it and `Run.hazards` replaces `buoys`; `RIVALS` rows gain an `ai` block (lane amplitude and frequency, catch-up, aggression) replacing the constants in `Rival.think`; `Run.standings()` for the results | `entities/`, `characters.ts`, `Run.ts` | ~150 |
 | 5. Characters | A `BOARDS` table (the eight boards from the sheet) referenced by `RiderSpec.board`; unlockables gated by `bm.unlocks` in storage (finish, knockouts, score); title and results drawing pulled out of `drawHud` into `game/Screens.ts`; TURN also scales `maxHeading` so it is felt | `characters.ts`, `Rider.setSpec`, `Run.ts` | ~150 |
-| 6. Pickups | `entities/Pickup.ts` implementing `Hazard` (`coin`, `health`, `speed`); `buildCourse` places them, in arcs over ramp apexes | `Course.ts`, `Run.ts` | ~80 |
+| 6. Pickups | `entities/Pickup.ts` implementing `Hazard` (`coin`, `health`, `speed`); the generator places them, in arcs over ramp apexes; the boost gate (`Chevron`) becomes the first row of the table | `Course.ts`, `Run.ts` | ~80 |
 | 7. Courses and hazards | `CourseSpec` gains swell, palette, storm and a hazard mix; `Ocean.setSwell`, `Sky.setPalette`; new hazards `Piling`, `Reef`, `Shark` (lunge ported from the original's `Shark.ts`), `Boat`, `JetSki extends Rival`; `?course=`; `bm-*` score modes in `server/scores.mjs` | `world/`, `entities/`, `main.ts`, server | ~350 |
 
 Deliberately deferred: an entity/component split (a third contact rule

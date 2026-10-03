@@ -13,6 +13,12 @@ export interface BuoySpot {
   z: number;
 }
 
+export interface Generated {
+  buoys: BuoySpot[];
+  /** Boost gates (chevrons on the water). */
+  chevrons: BuoySpot[];
+}
+
 /** The six stages from the brief start with the first; the others are rows to add here when their hazards exist. */
 export const COURSES = {
   sunsetBay: { id: 'sunset-bay', name: 'SUNSET BAY', seed: 7, rivals: 7 },
@@ -27,6 +33,8 @@ const ENDLESS = {
   /** ...shrinking to this fraction of that by `tightenOver` metres. */
   buoyGapMin: 0.45,
   tightenOver: 6000,
+  /** Boost chevrons every 110 to 190 m, in a lane. */
+  chevronGap: [110, 80] as const,
   /** Metres of course kept generated ahead of the rider, and dropped behind. */
   ahead: 320,
   behind: 60,
@@ -46,17 +54,23 @@ export class CourseGenerator {
   private readonly rng: () => number;
   private nextRampZ = 70;
   private nextBuoyZ = 90;
+  private nextChevronZ = 50;
 
   constructor(readonly spec: CourseSpec) {
     this.rng = mulberry32(spec.seed);
   }
 
-  /** Make sure everything up to `riderZ + ahead` exists and drop what is far behind. Returns the new buoy spots. */
-  extend(riderZ: number): BuoySpot[] {
+  /** Make sure everything up to `riderZ + ahead` exists and drop what is far behind. Returns the new spots. */
+  extend(riderZ: number): Generated {
     const toZ = riderZ + ENDLESS.ahead;
     const rng = this.rng;
     const lanes = [-6, 0, 6];
     const added: BuoySpot[] = [];
+    const chevrons: BuoySpot[] = [];
+    while (this.nextChevronZ < toZ) {
+      chevrons.push({ x: lanes[Math.floor(rng() * lanes.length)] + (rng() - 0.5) * 4, z: this.nextChevronZ });
+      this.nextChevronZ += ENDLESS.chevronGap[0] + rng() * ENDLESS.chevronGap[1];
+    }
     while (this.nextRampZ < toZ) {
       const x = lanes[Math.floor(rng() * lanes.length)] + (rng() - 0.5) * 3;
       this.features.push({ kind: 'ramp', z: this.nextRampZ, x, length: 9, width: 4.5, height: 1.5 + rng() * 0.5 });
@@ -79,6 +93,6 @@ export class CourseGenerator {
     const behind = riderZ - ENDLESS.behind;
     for (let i = this.features.length - 1; i >= 0; i--) if (this.features[i].z + this.features[i].length < behind) this.features.splice(i, 1);
     for (let i = this.buoys.length - 1; i >= 0; i--) if (this.buoys[i].z < behind) this.buoys.splice(i, 1);
-    return added;
+    return { buoys: added, chevrons };
   }
 }

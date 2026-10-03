@@ -242,9 +242,9 @@ Waves-Of-Rage/
         ├── engine/
         │   ├── three.ts    # Imports Three with colour management off (colours are written as given)
         │   ├── Renderer.ts # WebGL canvas + HUD canvas at 426x240 (240x426 upright), nearest-neighbour FIT scaling
-        │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud light, fog, 5-bit banding
-        │   ├── Textures.ts # 16/32 px textures painted at runtime (water, boards, skull buoy, chequered flag)
-        │   ├── Hud2D.ts    # Pixel-font text and images on the HUD canvas (reuses sprites/font.png)
+        │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud or faceted light, fog, 5-bit banding
+        │   ├── Textures.ts # Textures painted at runtime (water, boards, shorts, skull buoy, crowd, banner, flag)
+        │   ├── Hud2D.ts    # Pixel-font text (shadowed or outlined), panels, gradient bars and images on the HUD canvas
         │   ├── Input.ts    # Keyboard + the phone's buttons into one InputState, with every press for the combo reader
         │   ├── TouchButtons.ts # The phone pad (LEFT, UP, RIGHT) and JUMP, HIT, BRG, drawn by the HUD and hit-tested by Input
         │   ├── immersive.ts # Fullscreen + orientation lock for phones
@@ -252,13 +252,15 @@ Waves-Of-Rage/
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
         │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
-        │   ├── Course.ts   # Course data (Sunset Bay) and the endless generator of ramps, troughs and buoys
-        │   └── Sky.ts      # Sunset dome, sun disc, island silhouettes
+        │   ├── Course.ts   # Course data (Sunset Bay) and the endless generator of ramps, troughs, buoys and boost gates
+        │   ├── Scenery.ts  # The shore: cliffs with palms and waterfalls, the pier with its crowd, tents, flags and banner
+        │   └── Sky.ts      # Sunset dome, sun with rays, drifting clouds
         ├── entities/
         │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
         │   ├── Surfer.ts   # The player's rider (input -> control)
         │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
         │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
+        │   ├── Chevron.ts  # Boost gate: chevrons on the water, pooled; ride over them for a BOOST
         │   └── Spray.ts    # Spray as one instanced mesh
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
@@ -406,7 +408,8 @@ title screen's second menu entry or directly at `boardmasters.html`
 is real terrain: you climb faces, drop into troughs and launch off crests
 when you are going fast enough, and steep-backed ramps and slowing troughs
 are generated ahead of you as you ride, with the buoys coming thicker and
-the cruising speed rising the further you get. There is no finish line: a
+the cruising speed rising the further you get. Cyan chevrons on the water
+are boost gates: ride over them for a free BOOST. There is no finish line: a
 run ends with the last heart, and your best score and distance are kept on
 the device (and shown on the title). Seven rivals ride their own lanes, steer round
 the skull buoys, keep pace with you, and the strong ones shoulder-check you
@@ -438,6 +441,17 @@ RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch and a full roll
 about the board, 400 points plus the landing bonus; land before it is done
 and you crash), UP UP is a BOOST (a burst of speed, on a short cooldown).
 The HUD shows the presses it is holding, so moves can be learnt by watching.
+
+**The look.** Everything is drawn at 426x240 (240x426 upright) through one
+shader with the PlayStation's vertex snapping, affine textures and 5-bit
+dithered colour. The sea is faceted: flat-shaded, each facet its own shade,
+calming towards the horizon so the distance does not sparkle. The shore is
+built in code from the palette: cliffs with palms and waterfalls, and every
+so often the pier with its pilings, crowd, tents, flags and the BOARDMASTERS
+banner; the sky is a sunset dome with the sun's rays and drifting clouds.
+The HUD follows the gameplay mockup: boxes for hearts and position and for
+score and distance, a gradient RAGE bar, a speed bar, and a radar of the
+course ahead (buoys red, gates cyan, rivals white, you gold).
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
 above), imports nothing from Phaser and shares only the platform detection,

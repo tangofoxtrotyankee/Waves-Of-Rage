@@ -208,8 +208,9 @@ try {
 
   // --- combos: RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); }
+  // Retried: a roll cut short by a rising face (under half a second) is not scored, and the next flight would be read instead.
   let rolled = null;
-  for (let tries = 0; tries < 4 && !rolled; tries++) {
+  for (let tries = 0; tries < 5 && !(rolled && rolled.rolled); tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.surfer.rollProgress = 0; });
     await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
@@ -269,6 +270,26 @@ try {
   await wait(300);
   const far = await ev(() => ({ state: window.bm.run.state, ahead: window.bm.run.generator.generatedTo, buoysAhead: window.bm.run.buoys.filter((b) => b.active && b.z > 1300).length }));
   check('there is no finish line: at 1,300 m the run goes on with course ahead', far.state === 'playing' && far.ahead > 1500 && far.buoysAhead > 2, JSON.stringify(far));
+
+  // --- boost gates: ride over the chevrons for a BOOST ---
+  await grounded();
+  const gate = await ev(() => {
+    const run = window.bm.run;
+    const s = run.surfer;
+    const c = run.chevrons.find((c) => c.active && c.z > s.z + 10);
+    if (!c) return null;
+    s.heading = 0;
+    s.shoveVx = 0;
+    s.x = c.x;
+    s.z = c.z - 6;
+    s.y = run.ocean.height(c.x, c.z - 6);
+    s.vy = 0;
+    s.boostUntil = 0;
+    return { x: +c.x.toFixed(1), z: c.z, time: +run.time.toFixed(2) };
+  });
+  const gateBoost = !!gate && (await until(() => window.bm.run.surfer.boostUntil > window.bm.run.time, 4000));
+  const gateAfter = await ev((z) => ({ taken: !window.bm.run.chevrons.some((c) => c.active && c.z === z), texts: window.bm.run.floating.map((f) => f.text) }), gate ? gate.z : -1);
+  check('riding over a boost gate gives a BOOST and takes the gate', gateBoost && gateAfter.taken && gateAfter.texts.includes('BOOST!'), JSON.stringify({ gate, gateAfter }));
 
   // --- back to the main menu, from the pause panel ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run

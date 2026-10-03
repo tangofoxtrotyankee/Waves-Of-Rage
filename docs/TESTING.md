@@ -96,7 +96,9 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 5. Endless: there is no finish; the buoys come thicker and the cruising
    speed rises with distance; after a wipeout the results show distance,
    place, score, knockouts and `NEW BEST!` when it is one; the title shows
-   the best; Space restarts from the start line with three hearts.
+   the best; Space restarts from the start line with three hearts. Riding
+   over a set of cyan chevrons shows `BOOST!` and a burst of speed, and
+   the chevrons vanish; the radar (top right) shows them in cyan ahead.
 6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
    `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
    knockouts within four seconds show `X2`; Shift shoves a rival hard and
@@ -112,10 +114,13 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 10. Pause: Esc (the top-centre button on touch) shows PAUSED; Space (tap)
     resumes; M (MENU corner) returns to the main menu with the sequel's
     entry highlighted.
-11. Look: `bm.look.snap = false` in the console stops the polygon jitter,
-    `bm.look.affine = false` straightens the water texture, `bm.look.quantize
-    = false` removes the banding, `bm.look.dither = false` the dither;
-    `?res=320` is blockier.
+11. Look: the sea is faceted and calm towards the horizon (no band of
+    noise under the sun); cliffs with palms pass on both sides and the pier
+    with its crowd, flags and banner comes round about every 1,200 m; the
+    sun has rays and the clouds drift. `bm.look.snap = false` in the
+    console stops the polygon jitter, `bm.look.affine = false` straightens
+    the water texture, `bm.look.quantize = false` removes the banding,
+    `bm.look.dither = false` the dither; `?res=320` is blockier.
 12. Touch (`?touch=1`, or a phone): the field is upright; holding LEFT or
     RIGHT on the pad carves, holding UP pumps, JUMP jumps (a tap elsewhere
     does too), HIT and BRG attack, the top-centre button pauses, MENU works;

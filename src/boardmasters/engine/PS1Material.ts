@@ -61,6 +61,7 @@ export function skyColorAt(e: number): [number, number, number] {
 
 const vertexShader = /* glsl */ `
 uniform vec2 uSnap;
+uniform float uFacet;
 uniform vec2 uUvOffset;
 uniform vec3 uSunDir;
 uniform float uAmbient;
@@ -69,10 +70,16 @@ uniform float uFogNear;
 uniform float uFogFar;
 uniform float uUseFog;
 
+// Faceted (flat) materials take the provoking vertex's colour and light for the whole triangle.
+#ifdef PS1_FLAT
+flat varying vec3 vColor;
+flat varying float vLight;
+#else
 varying vec3 vColor;
+varying float vLight;
+#endif
 varying vec2 vUvPersp;
 varying vec3 vUvAffine;
-varying float vLight;
 varying float vFog;
 varying float vElevation;
 
@@ -100,13 +107,18 @@ void main() {
   vUvPersp = uvo;
   vUvAffine = vec3(uvo * clip.w, clip.w);
 
+  float depth = -mvPosition.z;
+  vFog = uUseFog * clamp((depth - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+
   vec3 worldNormal = normalize(mat3(modelMatrix) * localNormal);
   float diffuse = max(dot(worldNormal, uSunDir), 0.0);
   vLight = mix(uAmbient + (1.0 - uAmbient) * diffuse, 1.0, uUnlit);
+  #ifdef PS1_FLAT
+    // Each facet its own shade, like crystal: a hash of the provoking vertex. Fades out with depth so the far water does not sparkle.
+    float facet = fract(sin(float(gl_VertexID) * 12.9898) * 43758.5453);
+    vLight *= 1.0 + (facet - 0.5) * uFacet * (1.0 - smoothstep(18.0, 60.0, depth));
+  #endif
   vColor = color;
-
-  float depth = -mvPosition.z;
-  vFog = uUseFog * clamp((depth - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
 }
 `;
 
@@ -124,10 +136,15 @@ uniform float uDither;
 uniform float uFlash;
 uniform float uOpacity;
 
+#ifdef PS1_FLAT
+flat varying vec3 vColor;
+flat varying float vLight;
+#else
 varying vec3 vColor;
+varying float vLight;
+#endif
 varying vec2 vUvPersp;
 varying vec3 vUvAffine;
-varying float vLight;
 varying float vFog;
 varying float vElevation;
 
@@ -165,12 +182,16 @@ export interface PS1MaterialOptions {
   opacity?: number;
   side?: THREE.Side;
   depthWrite?: boolean;
+  /** Faceted: one colour and shade per triangle, with this much brightness variation between facets (0 for none). */
+  flat?: number;
 }
 
 export function createPS1Material(options: PS1MaterialOptions = {}): THREE.ShaderMaterial {
-  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true } = options;
+  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true, flat } = options;
   return new THREE.ShaderMaterial({
+    defines: flat !== undefined ? { PS1_FLAT: 1 } : {},
     uniforms: {
+      uFacet: { value: flat ?? 0 },
       ...sharedUniforms,
       uMap: { value: map ?? null },
       uUseMap: { value: map ? 1 : 0 },

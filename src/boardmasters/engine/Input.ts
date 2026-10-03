@@ -129,7 +129,8 @@ export class Input {
     return codes.some((c) => this.pressed.has(c));
   }
 
-  private holding(id: ButtonId): boolean {
+  /** True while a finger is on this on-screen button (the HUD lights it). */
+  holding(id: ButtonId): boolean {
     for (const p of this.pointers.values()) if (p.button === id) return true;
     return false;
   }

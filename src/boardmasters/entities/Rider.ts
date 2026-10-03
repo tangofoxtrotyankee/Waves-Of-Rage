@@ -2,7 +2,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import { colorGeometry, createPS1Material } from '../engine/PS1Material';
 import { clamp, damp } from '../engine/math';
-import { boardTexture } from '../engine/Textures';
+import { boardTexture, shortsTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { statMultipliers, type RiderSpec } from '../game/characters';
 import { BOOST, COMBAT, PALETTE, PHYSICS, TRICKS } from '../game/constants';
@@ -136,6 +136,7 @@ export class Rider {
   private legR = new THREE.Mesh();
   private bodyMaterial: THREE.ShaderMaterial | null = null;
   private boardMaterial: THREE.ShaderMaterial | null = null;
+  private shortsMaterial: THREE.ShaderMaterial | null = null;
   private readonly current: PoseParams = { ...POSES.idle };
   private slopeDz = 0;
   private landing: Landing | null = null;
@@ -168,9 +169,11 @@ export class Rider {
     }
     this.bodyMaterial?.dispose();
     this.boardMaterial?.dispose();
+    this.shortsMaterial?.dispose();
     const c = spec.colors;
     this.bodyMaterial = createPS1Material();
     this.boardMaterial = createPS1Material({ map: boardTexture(c.board, c.boardStripe) });
+    this.shortsMaterial = createPS1Material({ map: shortsTexture(c.shorts, c.boardStripe) });
 
     // Board: a flat box with the nose tapered.
     const boardGeometry = new THREE.BoxGeometry(0.58, 0.08, 2.2, 1, 1, 3);
@@ -189,8 +192,21 @@ export class Rider {
     this.legR = new THREE.Mesh(legGeometry, this.bodyMaterial);
     this.legL.position.set(-0.1, 0.62, 0.32);
     this.legR.position.set(0.1, 0.62, -0.32);
-    const shorts = new THREE.Mesh(part(0.5, 0.24, 0.72, c.shorts, 0, 0.72, 0), this.bodyMaterial);
-    const torsoGeometry = mergeGeometries([part(0.5, 0.52, 0.3, c.skin, 0, 0.28, 0), part(0.26, 0.26, 0.26, c.skin, 0, 0.7, 0), part(0.34, 0.16, 0.34, c.hair, 0, 0.88, 0)]);
+    const shorts = new THREE.Mesh(part(0.5, 0.24, 0.72, 0xffffff, 0, 0.72, 0), this.shortsMaterial);
+    // Chest: wide at the shoulders, narrow at the waist; a head with the hairline and a few spikes.
+    const chest = new THREE.BoxGeometry(0.56, 0.52, 0.3);
+    const chestPos = chest.getAttribute('position');
+    for (let i = 0; i < chestPos.count; i++) if (chestPos.getY(i) < 0) chestPos.setX(i, chestPos.getX(i) * 0.78);
+    chest.translate(0, 0.28, 0);
+    const spikes: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 3; i++) spikes.push(part(0.1, 0.14, 0.1, c.hair, (i - 1) * 0.1, 1.0, (i % 2) * 0.06 - 0.03));
+    const torsoGeometry = mergeGeometries([
+      colorGeometry(chest, c.skin),
+      part(0.26, 0.26, 0.26, c.skin, 0, 0.7, 0),
+      part(0.34, 0.14, 0.34, c.hair, 0, 0.87, 0),
+      part(0.3, 0.1, 0.12, c.hair, 0, 0.74, -0.14),
+      ...spikes,
+    ]);
     this.torso = new THREE.Group();
     this.torso.add(new THREE.Mesh(torsoGeometry, this.bodyMaterial));
     this.torso.position.y = 0.84;
@@ -287,8 +303,8 @@ export class Rider {
   }
 
   /** BOOST: a burst of speed. False while on cooldown or wiped. */
-  boost(time: number): boolean {
-    if (this.wiped || time < this.boostCooldownUntil) return false;
+  boost(time: number, gate = false): boolean {
+    if (this.wiped || (!gate && time < this.boostCooldownUntil)) return false;
     this.speed = Math.min(PHYSICS.maxSpeed * this.stats.speed * 1.1, this.speed + BOOST.gain);
     this.boostUntil = time + BOOST.seconds;
     this.boostCooldownUntil = time + BOOST.cooldown;
