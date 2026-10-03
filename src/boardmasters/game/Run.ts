@@ -1,5 +1,5 @@
 import { platformOverrideQuery } from '../../game/platform';
-import { saveJSON } from '../../systems/Storage';
+import { loadJSON, saveJSON } from '../../systems/Storage';
 import type { Hud2D } from '../engine/Hud2D';
 import { requestImmersiveMode } from '../engine/immersive';
 import type { Input, InputState } from '../engine/Input';
@@ -10,19 +10,18 @@ import { damp, hex } from '../engine/math';
 import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { Buoy } from '../entities/Buoy';
-import { FinishLine } from '../entities/FinishLine';
 import type { Landing } from '../entities/Rider';
 import { Rival } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
 import { Surfer } from '../entities/Surfer';
-import { buildCourse, COURSES, type CourseLayout, type CourseSpec } from '../world/Course';
+import { CourseGenerator, COURSES, type CourseSpec } from '../world/Course';
 import { Ocean } from '../world/Ocean';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
 import { type Combo, ComboReader, KEY_LABELS } from './Combos';
 import { CAMERA, COMBAT, FOG, IS_PORTRAIT, MENU_ZONE, PALETTE, PHYSICS, RAGE, SCORING, TRICKS } from './constants';
 
-export type RunState = 'title' | 'playing' | 'paused' | 'wipeout' | 'finished';
+export type RunState = 'title' | 'playing' | 'paused' | 'wipeout';
 
 interface FloatingText {
   text: string;
@@ -38,6 +37,11 @@ const PAUSE_ZONE = { w: 28, h: 14 };
 const ARROW_DX = 66;
 /** The start grid for the rivals: (x, z) around the player. */
 const RIVAL_GRID: [number, number][] = [[-4, 6], [4, 9], [-8, 3], [8, 12], [-6, -6], [2, 16], [7, -9], [-3, 20]];
+
+/** localStorage key (through systems/Storage) for the best score and distance. */
+const BEST_KEY = 'bm.best';
+/** Pooled skull buoys: enough for the generated stretch ahead at the tightest spacing. */
+const BUOY_POOL = 24;
 
 const pad = (value: number, digits: number): string => String(Math.max(0, Math.floor(value))).padStart(digits, '0');
 const ordinal = (n: number): string => `${n}${n === 1 ? 'ST' : n === 2 ? 'ND' : n === 3 ? 'RD' : 'TH'}`;
@@ -68,14 +72,18 @@ export class Run {
   characterIndex = 0;
   /** The last landing with the points it scored (tests read it). */
   lastLanding: (Landing & { points: number }) | null = null;
+  /** Best score and distance on this device, and whether this run set one. */
+  best: { score: number; distance: number };
+  newBest = false;
   readonly ocean = new Ocean();
   readonly sky: Sky;
   readonly surfer: Surfer;
   readonly rivals: Rival[] = [];
   readonly buoys: Buoy[] = [];
-  readonly finish: FinishLine;
   readonly spray = new Spray();
-  readonly layout: CourseLayout;
+  /** The endless course, generated ahead of the surfer. */
+  generator: CourseGenerator;
+  private featureCount = -1;
   private floating: FloatingText[] = [];
   private readonly combos = new ComboReader();
   private invulnerableUntil = 0;
@@ -94,12 +102,11 @@ export class Run {
     spec: RiderSpec,
     readonly course: CourseSpec = COURSES.sunsetBay,
   ) {
-    this.layout = buildCourse(course);
-    this.ocean.setFeatures(this.layout.features);
-    this.sky = new Sky(course.length);
-    this.finish = new FinishLine(this.layout.finishZ);
+    this.generator = new CourseGenerator(course);
+    this.best = loadJSON<{ score: number; distance: number }>(BEST_KEY, { score: 0, distance: 0 });
+    this.sky = new Sky();
     const scene = renderer.scene;
-    scene.add(this.ocean.mesh, this.sky.group, this.spray.mesh, this.finish.group);
+    scene.add(this.ocean.mesh, this.sky.group, this.spray.mesh);
 
     this.characterIndex = Math.max(0, CHARACTER_ORDER.indexOf(spec.id as (typeof CHARACTER_ORDER)[number]));
     this.surfer = new Surfer(spec);
@@ -112,8 +119,8 @@ export class Run {
     }
     const drum = createPS1Material({ map: skullTexture() });
     const plain = createPS1Material();
-    for (const { x, z } of this.layout.buoys) {
-      const buoy = new Buoy(x, z, drum, plain);
+    for (let i = 0; i < BUOY_POOL; i++) {
+      const buoy = new Buoy(drum, plain);
       this.buoys.push(buoy);
       scene.add(buoy.group);
     }
@@ -125,13 +132,17 @@ export class Run {
     return this.surfer.spec;
   }
 
-  /** Everyone back to the start line. */
+  /** Everyone back to the start line, with a fresh course ahead. */
   reset(): void {
+    this.generator = new CourseGenerator(this.course);
+    this.featureCount = -1;
+    for (const b of this.buoys) b.retire();
+    this.extendCourse(0);
     this.ocean.advance(0, 0);
     this.surfer.reset(0, 0, this.ocean);
     this.surfer.health = SCORING.startHealth;
     this.rivals.forEach((rival, i) => rival.respawn(RIVAL_GRID[i % RIVAL_GRID.length][0], RIVAL_GRID[i % RIVAL_GRID.length][1], this.ocean));
-    for (const b of this.buoys) b.restore();
+    this.newBest = false;
     this.score = 0;
     this.health = SCORING.startHealth;
     this.distance = 0;
@@ -153,6 +164,20 @@ export class Run {
     this.reset();
     this.state = 'playing';
     this.stateTime = 0;
+  }
+
+  /** Generate the course ahead of `z`, hand new buoy spots to pooled buoys, and retire buoys left behind. */
+  private extendCourse(z: number): void {
+    const added = this.generator.extend(z);
+    if (added.length > 0 || this.generator.features.length !== this.featureCount) {
+      this.ocean.setFeatures(this.generator.features);
+      this.featureCount = this.generator.features.length;
+    }
+    for (const b of this.buoys) if (b.active && b.z < z - 60) b.retire();
+    for (const spot of added) {
+      const free = this.buoys.find((b) => !b.active);
+      if (free) free.place(spot.x, spot.z);
+    }
   }
 
   /** Title screen: cycle the character; the choice is remembered. */
@@ -204,7 +229,6 @@ export class Run {
         }
         break;
       case 'wipeout':
-      case 'finished':
         if (this.stateTime > SCORING.wipeoutSeconds) {
           if (input.back || this.tappedMenu(input)) this.mainMenu();
           else if (input.start) this.start();
@@ -243,17 +267,19 @@ export class Run {
   /** Advance the world one step; `live` applies the rules (score, damage, combat, finish). */
   private simulate(dt: number, input: InputState, live: boolean): void {
     const s = this.surfer;
+    this.extendCourse(s.z);
     // The sea moves first so every rider samples the surface that is drawn this frame.
     this.ocean.advance(dt, s.z);
-    s.targetSpeed = this.raging ? PHYSICS.baseSpeed * s.stats.speed * RAGE.speedMul : null;
+    // The endless course speeds up with distance; RAGE on top.
+    const ramp = 1 + Math.min(SCORING.speedRampMax, (this.distance / SCORING.speedRampOver) * SCORING.speedRampMax);
+    s.targetSpeed = PHYSICS.baseSpeed * s.stats.speed * ramp * (this.raging ? RAGE.speedMul : 1);
     s.update(dt, s.fromInput(input), this.ocean, this.time);
-    const buoyPositions = this.buoys.filter((b) => !b.smashed);
+    const buoyPositions = this.buoys.filter((b) => b.active && !b.smashed);
     for (const r of this.rivals) {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
       r.update(dt, r.think(s, buoyPositions, this.time), this.ocean, this.time);
     }
     for (const b of this.buoys) b.update(this.time, this.ocean);
-    this.finish.update(this.time, this.ocean);
 
     if (!s.airborne && !s.wiped && s.speed > 8) {
       const sinH = Math.sin(s.heading);
@@ -285,13 +311,6 @@ export class Run {
     if (landing) this.resolveLanding(landing);
     this.resolveAttacks();
     this.resolveHazards();
-
-    if (s.z >= this.layout.finishZ) {
-      this.state = 'finished';
-      this.stateTime = 0;
-      this.score += SCORING.finishBonus + (this.rank === 1 ? SCORING.firstPlaceBonus : 0);
-      this.float(this.rank === 1 ? 'FINISH! 1ST PLACE' : 'FINISH!', hex(PALETTE.gold), 2);
-    }
   }
 
   /** Air, spins and grabs score on a clean landing; a bad one is a crash. */
@@ -387,7 +406,7 @@ export class Run {
     const s = this.surfer;
     const near = (ax: number, az: number, bx: number, bz: number, rx: number, rz: number) => Math.abs(ax - bx) < rx && Math.abs(az - bz) < rz;
     for (const b of this.buoys) {
-      if (b.smashed || Math.abs(b.z - s.z) > 4) continue;
+      if (!b.active || b.smashed || Math.abs(b.z - s.z) > 4) continue;
       if (near(s.x, s.z, b.x, b.z, 1.05, 1.1) && s.airHeight(this.ocean) < 1.0) {
         if (this.raging) {
           b.smash();
@@ -410,7 +429,7 @@ export class Run {
       }
       if (r.airborne) continue;
       for (const b of this.buoys) {
-        if (b.smashed || Math.abs(b.z - r.z) > 4 || !near(r.x, r.z, b.x, b.z, 1.05, 1.1)) continue;
+        if (!b.active || b.smashed || Math.abs(b.z - r.z) > 4 || !near(r.x, r.z, b.x, b.z, 1.05, 1.1)) continue;
         if (shoved) {
           this.knockout(r, 'INTO THE BUOY', COMBAT.environmentPoints);
           break;
@@ -448,6 +467,14 @@ export class Run {
       s.group.visible = true;
       this.endRage();
       this.float('WIPEOUT', hex(PALETTE.red), 2);
+      // The run is over: keep the best score and distance on this device.
+      const score = Math.floor(this.score);
+      const distance = Math.floor(this.distance);
+      if (score > this.best.score || distance > this.best.distance) {
+        this.best = { score: Math.max(score, this.best.score), distance: Math.max(distance, this.best.distance) };
+        this.newBest = true;
+        saveJSON(BEST_KEY, this.best);
+      }
     } else {
       this.invulnerableUntil = this.time + SCORING.invulnerableSeconds;
       this.float(label, hex(PALETTE.red), 1);
@@ -539,7 +566,7 @@ export class Run {
       hud.image('logo', (W - logoW) / 2, ly);
       const y0 = ly + logoH + 8;
       hud.rect(0, y0 - 4, W, 66, PALETTE.ui, 0.65);
-      hud.text(W / 2, y0, `${this.course.name}  ${this.course.length}M`, cyan, { align: 'center' });
+      hud.text(W / 2, y0, `${this.course.name}  BEST ${pad(this.best.score, 6)} ${pad(this.best.distance, 4)}M`, cyan, { align: 'center' });
       const row = this.titleRow();
       hud.text(W / 2 - ARROW_DX, row, '<', gold, { align: 'center' });
       hud.text(W / 2 + ARROW_DX, row, '>', gold, { align: 'center' });
@@ -576,7 +603,6 @@ export class Run {
 
     // In play: hearts, pause, score; position and distance; speed and progress; RAGE.
     const hearts = '♥'.repeat(this.health) + '♡'.repeat(SCORING.startHealth - this.health);
-    const progress = Math.min(1, this.distance / this.layout.finishZ);
     const n = this.rivals.length + 1;
     const s = this.surfer;
     hud.text(6, 5, hearts, red);
@@ -587,8 +613,6 @@ export class Run {
     }
     hud.text(6, 16, `POS ${this.rank}/${n}`, white);
     hud.text(W - 6, 16, `DIST ${pad(this.distance, 4)}M`, cyan, { align: 'right' });
-    hud.rect(W - 6 - 64, 27, 64, 4, PALETTE.ui, 0.75);
-    hud.rect(W - 6 - 64, 27, Math.round(64 * progress), 4, PALETTE.cyan);
     hud.rect(6, 27, 48, 4, PALETTE.ui, 0.75);
     hud.rect(6, 27, Math.round((48 * s.speed) / (PHYSICS.maxSpeed * 1.1)), 4, s.airborne ? PALETTE.gold : PALETTE.cyan);
     hud.text(6, 35, 'RAGE', this.raging ? red : grey);
@@ -627,16 +651,16 @@ export class Run {
       menuCorner();
     }
 
-    if (this.state === 'wipeout' || this.state === 'finished') {
+    if (this.state === 'wipeout') {
       const pw = Math.min(W - 16, 216);
       const ph = 100;
       const px = (W - pw) / 2;
       const py = (H - ph) / 2;
       hud.rect(px, py, pw, ph, PALETTE.ui, 0.9);
-      const title = this.state === 'wipeout' ? 'WIPEOUT' : 'FINISH!';
-      hud.text(W / 2, py + 8, title, this.state === 'wipeout' ? red : gold, { align: 'center', scale: 2 });
+      hud.text(W / 2, py + 8, 'WIPEOUT', red, { align: 'center', scale: 2 });
       hud.text(W / 2, py + 32, `DIST ${pad(this.distance, 4)}M  ${ordinal(this.rank)} PLACE`, cyan, { align: 'center' });
       hud.text(W / 2, py + 44, `SCORE ${pad(this.score, 6)}  KO ${this.knockouts}`, gold, { align: 'center' });
+      hud.text(W / 2, py + 56, this.newBest ? 'NEW BEST!' : `BEST ${pad(this.best.score, 6)} ${pad(this.best.distance, 4)}M`, this.newBest ? gold : grey, { align: 'center' });
       if (this.stateTime > SCORING.wipeoutSeconds) {
         hud.text(W / 2, py + 68, touch ? 'TAP: SURF AGAIN' : 'SPACE: SURF AGAIN', white, { align: 'center' });
         hud.text(W / 2, py + 80, touch ? 'MENU: TOP LEFT' : 'ESC: MAIN MENU', grey, { align: 'center' });

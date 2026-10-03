@@ -109,8 +109,10 @@ export const SCORING = {
   airBonus: 100,
   bigAirSeconds: 1.0,
   bigAirBonus: 250,
-  finishBonus: 1000,
-  firstPlaceBonus: 500,
+  /** The endless course: cruising speed grows with distance up to this much more... */
+  speedRampMax: 0.3,
+  /** ...reached after this many metres. */
+  speedRampOver: 4000,
   startHealth: 3,
   buoyDamage: 1,
   invulnerableSeconds: 1.2,

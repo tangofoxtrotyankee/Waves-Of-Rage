@@ -157,10 +157,12 @@ an arcade game needs.
 hitting it costs a heart and speed. Rocks, pilings, boats and sharks are
 the same interface with different meshes and behaviours.
 
-**Course.** Data: length, swell parameters, a list of `(z, x, kind)`
-features and obstacles, rival count. The prototype's Sunset Bay is a
-straight 1,200 m run with a DIST counter; the finish line and positions
-come with racing.
+**Course.** Endless, like Temple Run: `CourseGenerator` lays out ramps,
+troughs and buoy spots deterministically from the seed a few hundred
+metres ahead of the surfer and drops what is behind; buoys are a pool of
+meshes placed at the spots. Buoys come thicker and the cruising speed rises
+with distance. There is no finish line; a run ends with the last heart and
+the best score and distance persist on the device (`bm.best`).
 
 ## 7. File layout and size
 

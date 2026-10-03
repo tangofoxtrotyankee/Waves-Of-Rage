@@ -252,14 +252,13 @@ Waves-Of-Rage/
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
         │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
-        │   ├── Course.ts   # Course data (Sunset Bay) and the seeded layout of ramps, troughs and buoys
+        │   ├── Course.ts   # Course data (Sunset Bay) and the endless generator of ramps, troughs and buoys
         │   └── Sky.ts      # Sunset dome, sun disc, island silhouettes
         ├── entities/
         │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
         │   ├── Surfer.ts   # The player's rider (input -> control)
         │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
-        │   ├── Buoy.ts     # Skull buoy hazard (smashable in RAGE)
-        │   ├── FinishLine.ts # Posts and chequered banner
+        │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
         │   └── Spray.ts    # Spray as one instanced mesh
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
@@ -403,10 +402,13 @@ presentation around it. It has its first playable prototype, reached from the
 title screen's second menu entry or directly at `boardmasters.html`
 (`/boardmasters` on the production server).
 
-**What is in the prototype.** Sunset Bay, a 1,200 m course on a swell that
+**What is in the prototype.** Sunset Bay, an endless course on a swell that
 is real terrain: you climb faces, drop into troughs and launch off crests
 when you are going fast enough, and steep-backed ramps and slowing troughs
-are laid out along the way. Seven rivals ride their own lanes, steer round
+are generated ahead of you as you ride, with the buoys coming thicker and
+the cruising speed rising the further you get. There is no finish line: a
+run ends with the last heart, and your best score and distance are kept on
+the device (and shown on the title). Seven rivals ride their own lanes, steer round
 the skull buoys, keep pace with you, and the strong ones shoulder-check you
 when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
 (Shift) knock rivals about and, after two hits, out of the race for 500
@@ -417,7 +419,7 @@ the spin (180 to 720) and the grab score, with a clean-landing bonus; land
 badly and you crash for a heart. A skull buoy costs a heart too; three and
 you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
 faster for eight seconds, one hit knocks out, buoys smash for points and
-the sea turns hot pink. A chequered banner marks the finish. The title
+the sea turns hot pink. The title
 screen picks the character (seven, with SPEED / TURN / POWER / RAGE bars
 that scale the physics and colour the rig); the choice is remembered.
 

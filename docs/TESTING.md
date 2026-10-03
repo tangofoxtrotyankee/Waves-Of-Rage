@@ -93,8 +93,10 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 4. Hazards: hitting a skull buoy flashes the surfer, shows `OUCH!` and costs
    a heart; the third hit shows `WIPEOUT` and the results panel after a
    moment; touching the rival shows `BUMP` and pushes both apart.
-5. Finish: crossing the chequered banner shows `FINISH!` with the place and
-   the bonus; Space restarts from the start line with three hearts.
+5. Endless: there is no finish; the buoys come thicker and the cruising
+   speed rises with distance; after a wipeout the results show distance,
+   place, score, knockouts and `NEW BEST!` when it is one; the title shows
+   the best; Space restarts from the start line with three hearts.
 6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
    `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
    knockouts within four seconds show `X2`; Shift shoves a rival hard and

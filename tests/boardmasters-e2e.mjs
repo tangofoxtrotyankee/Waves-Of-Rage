@@ -123,9 +123,9 @@ try {
   const world = await ev(() => ({
     rivals: window.bm.run.rivals.length,
     rivalZ: window.bm.run.rivals[0]?.z ?? -1,
-    buoys: window.bm.run.buoys.length,
-    ramps: window.bm.run.layout.features.filter((f) => f.kind === 'ramp').length,
-    finish: window.bm.run.layout.finishZ,
+    buoys: window.bm.run.buoys.filter((b) => b.active).length,
+    ramps: window.bm.run.generator.features.filter((f) => f.kind === 'ramp').length,
+    ahead: window.bm.run.generator.generatedTo - window.bm.run.surfer.z,
     oceanMesh: !!window.bm.run.ocean.mesh.geometry,
   }));
   check('seven rivals ride the course', world.rivals === 7 && world.rivalZ > 10 && Math.abs(world.rivalZ - (await surfer()).z) < 150, `rival z=${world.rivalZ.toFixed(1)}`);
@@ -236,7 +236,7 @@ try {
   check('nothing moves while paused', (await surfer()).z === zPaused);
   await page.keyboard.press('Space'); await wait(150);
   check('Space resumes', (await state()) === 'playing');
-  check('the course has buoys, ramps and a finish', world.buoys > 5 && world.ramps > 5 && world.finish === 1200, `${world.buoys} buoys, ${world.ramps} ramps`);
+  check('the course is generated ahead with buoys and ramps', world.buoys > 3 && world.ramps > 3 && world.ahead > 250, `${world.buoys} buoys, ${world.ramps} ramps, ${world.ahead.toFixed(0)} m ahead`);
   check('the ocean mesh exists', world.oceanMesh);
 
   // --- wipeout: put a buoy in the surfer's path with one heart left (RAGE would smash it, so end it first) ---
@@ -254,6 +254,9 @@ try {
     Object.defineProperty(b, 'z', { value: s.z + 5, writable: true });
   });
   check('a buoy hit on the last heart wipes out', await until(() => window.bm.run.state === 'wipeout') && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
+  // An earlier wipeout in this page may already hold a better run; either way the saved best covers this one.
+  const best = await ev(() => ({ newBest: window.bm.run.newBest, score: Math.floor(window.bm.run.score), saved: JSON.parse(localStorage.getItem('waves-of-rage.bm.best') || 'null') }));
+  check('the best score and distance are kept on the device', !!best.saved && best.saved.score > 0 && best.saved.distance > 0 && (best.newBest || best.saved.score >= best.score), JSON.stringify(best));
   await page.keyboard.press('Space');
   await wait(200);
   check('results ignore input at first', (await state()) === 'wipeout');
@@ -261,16 +264,16 @@ try {
   await page.keyboard.press('Space');
   check('Space restarts from the results', await until(() => window.bm.run.state === 'playing') && (await ev(() => window.bm.run.health)) === 3 && (await surfer()).z < 20);
 
-  // --- finish ---
-  await ev(() => {
-    window.bm.run.surfer.z = window.bm.run.layout.finishZ - 8;
-  });
-  check('crossing the line finishes the run', await until(() => window.bm.run.state === 'finished'));
+  // --- endless: far down the course the run goes on and the course keeps coming ---
+  await ev(() => { window.bm.run.surfer.z = 1300; });
+  await wait(300);
+  const far = await ev(() => ({ state: window.bm.run.state, ahead: window.bm.run.generator.generatedTo, buoysAhead: window.bm.run.buoys.filter((b) => b.active && b.z > 1300).length }));
+  check('there is no finish line: at 1,300 m the run goes on with course ahead', far.state === 'playing' && far.ahead > 1500 && far.buoysAhead > 2, JSON.stringify(far));
 
-  // --- back to the main menu ---
-  await until(() => window.bm.run.stateTime > 1.7);
+  // --- back to the main menu, from the pause panel ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
-  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape'); await wait(150);
+  await page.keyboard.press('m');
   await wait(1000);
   let phaserReady = false; // the original game's bundle takes a moment on a cold dev server
   for (let i = 0; i < 48 && !phaserReady; i++) {
