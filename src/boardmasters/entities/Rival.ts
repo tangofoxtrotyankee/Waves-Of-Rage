@@ -22,14 +22,34 @@ export class Rival extends Rider {
     super(spec);
     this.phase = index * 2.1;
     this.laneOffset = ((index % 4) - 1.5) * 2.2;
+    // The lane-keeping steer is not a trick: rivals ride their air straight and land clean.
+    this.spinsInAir = false;
+    // A rival passing the camera screen-doors out instead of filling the screen.
+    this.autoNearFade = true;
   }
 
-  think(player: Rider, buoys: { x: number; z: number }[], time: number): RiderControl {
+  /** No shoulder checks before `time` (the start of a run). */
+  holdChecks(time: number): void {
+    this.nextCheckAt = time;
+  }
+
+  /**
+   * This step's control. With a `slot` ([x, metres ahead of the player]),
+   * the rival rides parked there instead (the title screen: no racing line,
+   * no shoulder checks), still steering round buoys.
+   */
+  think(player: Rider, buoys: { x: number; z: number }[], time: number, slot: readonly [number, number] | null = null): RiderControl {
     if (this.wiped) return IDLE;
-    let lane = 4.5 * Math.sin(this.z / 30 + this.phase) + this.laneOffset;
+    // Punched or barged: ride the shove out in a straight line rather than steering straight back (the reaction stays readable).
+    if (time < this.shovedUntil + 0.3) return IDLE;
+    let lane = slot ? slot[0] : 4.5 * Math.sin(this.z / 30 + this.phase) + this.laneOffset;
     for (const b of buoys) {
       const dz = b.z - this.z;
       if (dz > 0 && dz < 14 && Math.abs(b.x - this.x) < 2.4) lane = this.x + (this.x >= b.x ? 3 : -3);
+    }
+    if (slot) {
+      this.targetSpeed = player.speed + clamp((player.z + slot[1] - this.z) * 0.6, -3, 3);
+      return { steer: clamp((lane - this.x) * 0.3 - this.heading * 1.2, -1, 1), pump: false, brake: false, jump: false, attack: false, barge: false };
     }
     const alongside = !player.wiped && Math.abs(player.z - this.z) < 3 && Math.abs(player.x - this.x) < 3.2;
     if (this.spec.power >= COMBAT.rivalAggression && alongside && time >= this.nextCheckAt) {

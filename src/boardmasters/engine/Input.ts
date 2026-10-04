@@ -1,5 +1,6 @@
 import type { ComboKey } from '../game/Combos';
-import { buttonAt, type ButtonId } from './TouchButtons';
+import { VIEW } from '../game/constants';
+import { buttonAt, CONTROLS_BAND, type ButtonId } from './TouchButtons';
 
 /** What the game reads each fixed step. Booleans for actions are edge-triggered (true for one step). */
 export interface InputState {
@@ -58,7 +59,8 @@ interface Pointer {
  * Keyboard (arrows/WASD, Space, X/J, Shift, Esc, Enter) merged with the
  * phone's buttons (TouchButtons.ts) while `buttonsActive`: LEFT/RIGHT held
  * carve, UP held pumps, JUMP/HIT/BRG fire on press, and several fingers
- * work at once. Outside the buttons a short tap jumps or starts. Every
+ * work at once. Outside the buttons a short tap jumps or starts (in play,
+ * not one among the controls at the bottom edge: CONTROLS_BAND). Every
  * press, from either source, is also reported for the combo reader.
  */
 export class Input {
@@ -115,7 +117,11 @@ export class Input {
       this.pointers.delete(e.pointerId);
       if (p.button) return;
       const quick = performance.now() - p.downAt <= TOUCH.tapMaxMs;
-      if (quick && p.moved <= TOUCH.tapMaxMovePx) this.tap = this.toInternal(e.clientX, e.clientY);
+      if (!quick || p.moved > TOUCH.tapMaxMovePx) return;
+      const at = this.toInternal(e.clientX, e.clientY);
+      // A thumb that just misses a button (between the CARVE pair, under one) must not jump: in play, taps among the controls do nothing.
+      if (this.buttonsActive && at.y > VIEW.height - CONTROLS_BAND) return;
+      this.tap = at;
     };
     window.addEventListener('pointerup', end);
     window.addEventListener('pointercancel', end);

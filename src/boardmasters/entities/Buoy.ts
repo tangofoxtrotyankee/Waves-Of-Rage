@@ -1,9 +1,83 @@
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
 import { colorGeometry } from '../engine/PS1Material';
+import { SKULL_BODY_V, SKULL_PLAIN_V } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { PALETTE } from '../game/constants';
 import type { Ocean } from '../world/Ocean';
 
-/** The skull buoy from the hazards sheet: a red drum with a cap and a light, bobbing on the water. Hitting it costs a heart. */
+/** Point every uv of a part at the skull texture's plain white rows, so its vertex colour shows as is. */
+function plain<T extends THREE.BufferGeometry>(geometry: T, color: number): T {
+  const uv = geometry.getAttribute('uv');
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.5, SKULL_PLAIN_V);
+  return colorGeometry(geometry, color);
+}
+
+let shared: THREE.BufferGeometry | null = null;
+/** How unlit the buoys' material is (0 lit, 1 unlit), and the materials already set so. */
+const BUOY_UNLIT = 0.45;
+const tuned = new WeakSet<THREE.Material>();
+/** A strike's recoil: seconds to ring back upright, the tilt away from the rider (radians) and the dip (metres). */
+const RECOIL_SECONDS = 0.8;
+const RECOIL_TILT = 0.5;
+const RECOIL_SINK = 0.4;
+/** Near the lens the buoy screen-doors away (metres from the camera to its middle: solid beyond FADE_START, gone at FADE_FULL). */
+const FADE_START = 3.4;
+const FADE_FULL = 1.9;
+
+/**
+ * One bell buoy as a single geometry (shared by the whole pool): a tapered
+ * red bell wrapped in the skull texture (two skulls round it) on a dark
+ * fender, an open cage of dark bars on top with a gold bell and a lamp, and
+ * a ring of foam where it sits in the water. About 2.8 m tall.
+ */
+function buoyGeometry(): THREE.BufferGeometry {
+  if (shared) return shared;
+  const profile = [
+    new THREE.Vector2(0.98, 0.2),
+    new THREE.Vector2(0.92, 0.42),
+    new THREE.Vector2(0.8, 0.75),
+    new THREE.Vector2(0.66, 1.25),
+    new THREE.Vector2(0.56, 1.58),
+    new THREE.Vector2(0.4, 1.68),
+    new THREE.Vector2(0.0, 1.7),
+  ];
+  const bell = new THREE.LatheGeometry(profile, 10);
+  bell.rotateY(Math.PI / 2); // the two skulls face down the course and back up it
+  const uv = bell.getAttribute('uv');
+  const [v0, v1] = SKULL_BODY_V;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, v0 + (v1 - v0) * Math.min(1, uv.getY(i) * 1.2));
+  colorGeometry(bell, 0xffffff);
+  const fender = plain(new THREE.CylinderGeometry(1.05, 1.0, 0.32, 10, 1, true).translate(0, 0.2, 0), 0x2a2140);
+  const parts: THREE.BufferGeometry[] = [bell, fender];
+  // The cage: four bars leaning in to a cap, with a ring of bars half way.
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const bar = new THREE.BoxGeometry(0.09, 1.15, 0.09);
+    bar.rotateZ(0.32);
+    bar.translate(0.32, 0, 0);
+    bar.rotateY(a);
+    bar.translate(0, 2.2, 0);
+    parts.push(plain(bar, 0x3a3048));
+    const rail = new THREE.BoxGeometry(0.62, 0.08, 0.08);
+    rail.translate(0, 0, 0.31);
+    rail.rotateY(a + Math.PI / 4);
+    rail.translate(0, 2.15, 0);
+    parts.push(plain(rail, 0x3a2a50));
+  }
+  parts.push(plain(new THREE.BoxGeometry(0.5, 0.1, 0.5).translate(0, 2.76, 0), PALETTE.outline));
+  parts.push(plain(new THREE.ConeGeometry(0.22, 0.34, 6).translate(0, 2.0, 0), PALETTE.gold));
+  parts.push(plain(new THREE.BoxGeometry(0.22, 0.22, 0.22).translate(0, 2.92, 0), 0xffe9a0));
+  // Foam round the waterline.
+  const ring = new THREE.RingGeometry(1.0, 1.55, 12, 1);
+  ring.rotateX(-Math.PI / 2);
+  ring.translate(0, 0.32, 0);
+  parts.push(plain(ring, PALETTE.foam));
+  shared = mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)));
+  return shared;
+}
+
+/** The skull bell buoy from the hazards sheet: one mesh, bobbing on the water. Hitting it costs a heart. */
 export class Buoy {
   readonly group = new THREE.Group();
   x = 0;
@@ -12,21 +86,42 @@ export class Buoy {
   smashed = false;
   /** Pooled: an inactive buoy is hidden and free to be placed ahead. */
   active = false;
+  private readonly fadeUniform: { value: number } | null;
+  private strikeAt = -Infinity;
+  private strikeDir = 0;
 
-  constructor(drumMaterial: THREE.Material, plainMaterial: THREE.Material) {
-    const drumGeometry = new THREE.CylinderGeometry(0.55, 0.65, 1.1, 8);
-    const uv = drumGeometry.getAttribute('uv');
-    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 3); // three skulls around
-    const drum = new THREE.Mesh(colorGeometry(drumGeometry, 0xffffff), drumMaterial);
-    drum.position.y = 0.55;
-    const cap = new THREE.Mesh(colorGeometry(new THREE.ConeGeometry(0.5, 0.5, 8), PALETTE.outline), plainMaterial);
-    cap.position.y = 1.32;
-    const mast = new THREE.Mesh(colorGeometry(new THREE.BoxGeometry(0.08, 0.5, 0.08), PALETTE.outline), plainMaterial);
-    mast.position.y = 1.7;
-    const light = new THREE.Mesh(colorGeometry(new THREE.BoxGeometry(0.18, 0.18, 0.18), PALETTE.gold), plainMaterial);
-    light.position.y = 1.98;
-    this.group.add(drum, cap, mast, light);
+  /**
+   * `skullMaterial` maps skullTexture(); the plain parts use its white rows,
+   * so the second material is no longer needed. The first buoy built with a
+   * material sets it half unlit (BUOY_UNLIT): the buoys face away from the
+   * low sun, and the mockup's read bright red from the course. Give each buoy
+   * its own material made with the `fade` option for the near fade (fadeNear).
+   */
+  constructor(skullMaterial: THREE.Material, _plainMaterial?: THREE.Material) {
+    if (!tuned.has(skullMaterial)) {
+      tuned.add(skullMaterial);
+      const uniforms = (skullMaterial as THREE.ShaderMaterial).uniforms;
+      if (uniforms?.uUnlit) uniforms.uUnlit.value = BUOY_UNLIT;
+    }
+    this.fadeUniform = (skullMaterial as THREE.ShaderMaterial).uniforms?.uFade ?? null;
+    this.group.add(new THREE.Mesh(buoyGeometry(), skullMaterial));
     this.group.visible = false;
+  }
+
+  /** The rider hit it: it lurches away from `dir` (the side the rider is on, +1 is +x), dips, and rings back upright. */
+  strike(dir: number, time: number): void {
+    this.strikeDir = dir;
+    this.strikeAt = time;
+  }
+
+  /** Screen-door the buoy away as the camera comes right up to it (a chase camera passing a buoy the rider just clipped). */
+  fadeNear(camera: THREE.Vector3): void {
+    if (!this.fadeUniform || !this.active) return;
+    const dx = this.x - camera.x;
+    const dy = this.group.position.y + 1.0 - camera.y;
+    const dz = this.z - camera.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    this.fadeUniform.value = Math.min(1, Math.max(0, (FADE_START - d) / (FADE_START - FADE_FULL)));
   }
 
   /** Put the buoy at a spot on the course. */
@@ -35,6 +130,8 @@ export class Buoy {
     this.z = z;
     this.smashed = false;
     this.active = true;
+    this.strikeAt = -Infinity;
+    if (this.fadeUniform) this.fadeUniform.value = 0;
     this.group.visible = true;
     this.group.position.set(x, 0, z);
   }
@@ -51,8 +148,12 @@ export class Buoy {
 
   update(time: number, ocean: Ocean): void {
     if (!this.active) return;
-    this.group.position.y = ocean.height(this.x, this.z) - 0.2 + 0.1 * Math.sin(time * 2.5 + this.x);
-    this.group.rotation.z = 0.08 * Math.sin(time * 2 + this.z);
-    this.group.rotation.x = 0.06 * Math.sin(time * 1.7 + this.x);
+    // A strike's recoil: thrown over away from the rider and forward, dipping, then rocking back upright as it dies away.
+    const k = (time - this.strikeAt) / RECOIL_SECONDS;
+    const fall = k >= 0 && k < 1 ? (1 - k) * (1 - k) : 0;
+    const rock = fall > 0 ? fall * Math.cos(k * 9) : 0;
+    this.group.position.y = ocean.height(this.x, this.z) - 0.3 + 0.1 * Math.sin(time * 2.5 + this.x) - RECOIL_SINK * fall;
+    this.group.rotation.z = 0.08 * Math.sin(time * 2 + this.z) + this.strikeDir * RECOIL_TILT * rock; // +z roll tips the top towards -x
+    this.group.rotation.x = 0.06 * Math.sin(time * 1.7 + this.x) + RECOIL_TILT * 0.5 * rock;
   }
 }

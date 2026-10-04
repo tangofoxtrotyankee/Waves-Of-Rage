@@ -103,19 +103,22 @@ available behind `?res=320` so both can be compared on real screens; 3D at
 
 | Effect | How | Where |
 | ------ | --- | ----- |
-| Low resolution, crisp pixels | `renderer.setSize(426, 240, false)`, canvas CSS-scaled to the largest fit (same letterboxing rule as the original), `image-rendering: pixelated`. No post pass needed for the prototype. | `engine/Renderer.ts` |
+| Low resolution, crisp pixels | The HUD canvas draws at VIEW (426x240; upright 240 wide, its height following the phone from 426 to 540) and is fitted, whole-pixel where possible, inside the safe area. The world renders at `renderScale` times VIEW (1.5, 2 or 2.5, picked by `Renderer.fit` so a world pixel covers a whole number of device pixels within a pixel budget; `?res=N` forces it, `?res=320` is the old 320x180 look) and bleeds past the camera's 426x240 / 240x426 framing rectangle (`VIEW.frame`, `camera.setViewOffset`) to the screen edges, so phones have no letterbox bars. `image-rendering: pixelated`, no post pass. | `engine/Renderer.ts`, `game/constants.ts` |
 | Vertex jitter / snapping | In the vertex shader, snap clip-space x/y to the low-res pixel grid: `pos.xy = floor(pos.xy / pos.w * snap) / snap * pos.w`. | `engine/PS1Material.ts` |
 | Texture warping | Affine (not perspective-correct) texture mapping: pass `uv * w` and `w` as varyings and divide in the fragment shader. The classic PS1 wobble, switchable. | `engine/PS1Material.ts` |
-| Low-res textures | 16 to 128 px textures painted at runtime from the palette (`engine/Textures.ts`), `NearestFilter`, no mipmaps; the water is the one exception (nearest mipmaps), because its dashes become a band of noise at the horizon without them. | `engine/Textures.ts` |
+| Low-res textures | 16 to 512 px textures painted at runtime from the palette (`engine/Textures.ts`, `entities/riderTextures.ts`), `NearestFilter`; only the water texture and the festival atlas (banner lettering) have mipmaps, because they shimmer at a distance without them. | `engine/Textures.ts` |
 | Flat, chunky lighting | Per-vertex Lambert (Gouraud) in the shader: one sun direction plus ambient, multiplied with vertex colours. No normal maps, no shadows. The `flat` option (sea, scenery) makes it per facet instead (`flat` varyings) with a per-facet brightness hash, fading with depth; the sea also flattens its normals, foam and colour ramp towards the horizon. | `engine/PS1Material.ts`, `world/Ocean.ts` |
-| Short draw distance and fog | Linear fog to the sunset colour, roughly 25 m to 70 m; the camera's far plane sits at the fog's far distance. | `world/Sky.ts`, material uniforms |
-| Sky, sun and shore | A sunset dome sharing the fog's elevation ramp, a sun disc with slowly turning rays, a shell of drifting low-poly clouds; cliffs with palms and waterfalls on both sides and a pier (pilings, deck, crowd, tents, flags, banner) in two 1,200 m spans that leapfrog the camera. | `world/Sky.ts`, `world/Scenery.ts` |
-| Dithering and colour banding | Optional later: a fullscreen pass that quantises to 5 bits per channel with a 4x4 Bayer matrix. Not in the prototype. | `engine/PostPass.ts` (later) |
-| Spray and particles | A handful of camera-facing quads using the existing foam/spray pixel art, spawned at the board's tail. | `entities/Surfer.ts` |
-| HUD | A second 2D canvas at the same internal resolution, drawn with the 8x8 pixel font sheet, so text pixels match world pixels. Per the gameplay mockup: framed boxes for hearts and position and for score and distance, a gradient RAGE bar, a speed bar, a radar of the course ahead, outlined floating trick text, and the phone's buttons with icons. | `engine/Hud2D.ts`, `Run.drawHud` |
+| Short draw distance and fog | Linear fog to the sunset colour, about 30 m to 100 m on the sea; the shore has its own longer fog so the cliffs and pier stay vivid. | `world/Sky.ts`, `world/Scenery.ts`, material uniforms |
+| The sea | The `PS1_WATER` block: turquoise near and deep blue far, dithered whitewater from a per-vertex foam amount (cells that travel with the swell), the sun's glitter as sparse points, all faceted; normals, foam and colour calm towards the horizon. Wakes (`entities/Wake.ts`) and splash rings use the same block as a screen-door foam overlay. | `engine/PS1Material.ts`, `world/Ocean.ts` |
+| Sky, sun and shore | A dome sharing the fog's elevation ramp with the sun's halo painted in, a striped sun and fading rays, banded sunset clouds and mountain ridges closing the bay; towering cliffs with lit villages, palms and waterfalls along +x (screen-left) and the festival pier with stage, crowd, tents, flags and the BOARDMASTERS banner along -x, in two 1,200 m spans placed from the camera every frame. | `world/Sky.ts`, `world/Scenery.ts` |
+| Riders | One `SkinnedMesh` per rider (rigid skinning, 18 bones) built in code from faceted primitives with baked shading, plus the board and its foam: three draw calls. `PS1Material` includes Three's skinning chunks. | `entities/RiderModel.ts`, `RiderFoam.ts` |
+| Near fade | Screen-door transparency (`fade: true` materials discard against the 4x4 Bayer matrix): rivals close to the lens or on the sight line to the surfer dither out, except the rival being hit. | `Rider.setNearFade`, `Run.updateNearFade` |
+| Dithering and colour banding | In the shader: a 4x4 ordered dither and 5-bit quantise on every material. | `engine/PS1Material.ts` |
+| Spray and particles | Instanced two-tone clumps that dissolve (a rooster tail on hard carves) and `splash()` bursts with a foam ring for landings, knockouts and buoy hits. | `entities/Spray.ts` |
+| HUD | A second 2D canvas at VIEW resolution with the 8x8 pixel font plus heavy italic lettering baked from canvas text (thresholded, gradient-filled, outlined). Per the mockups: HEALTH, POS, DIST and SCORE panels, RAGE lettering over a segmented bar, a course strip on the left edge, trick text and comic bursts, sparks where blows land, icon buttons with captions; the title, pause and results screens. | `game/HudView.ts`, `HudArt.ts`, `HudLayout.ts`, `engine/Hud2D.ts` |
 
-One material, `PS1Material` (a `ShaderMaterial`, about 80 lines of GLSL),
-is used by everything in the world. Its uniforms (`snapResolution`,
+One material, `PS1Material` (a `ShaderMaterial` with optional `flat`,
+`water`, `fade` and `dissolve` blocks), is used by everything in the world. Its uniforms (`snapResolution`,
 `affine`, `fogColor`, `fogNear`, `fogFar`, `sunDirection`, `map`) are
 exposed on the dev handle so the look can be A/B'd live.
 
@@ -141,22 +144,43 @@ the carve and scrubs speed. Carving turns the heading; lateral movement is
 `speed * sin(heading)`. Jump gives a vertical impulse when grounded. When
 the water drops away faster than gravity can follow, the surfer launches
 from the crest on their own; landing is `y <= oceanHeight` and queues a
-landing result, which is where trick scoring plugs in later.
+landing result for trick scoring.
 
-**Camera.** Behind and above at about waist height: the target is
-`player + (0, 1.4, -4.5)` in the player's heading frame, eased towards each
-frame, looking at a point a few metres ahead; a few degrees of roll with
-the carve; vertical FOV about 60 degrees; far plane at the fog distance.
+**Air spin.** Only a press made in the air spins (a steer carried over a
+crest arms only once released). It builds to 330 degrees a second over a
+quarter of a second after the first tenth of a second of air. The rider
+predicts its touchdown: a press that cannot become a full turn by then is
+a tweak of up to 30 degrees that settles upright; once a spin is 60
+degrees round and a full turn is reachable, it is helped round (up to
+1.8 times the rate) to land the 360; released, the rider settles to the
+upright its momentum points at. A half turn held into the landing still
+crashes. A JUMP press is kept for 0.3 s and pops the rider off an
+unplanned hop. Tuning in `TRICKS` and `PHYSICS`.
+
+**Hits.** A punch or barge counts at once but lands `RIDER_ANIM.impactDelay`
+later, when the fist or shoulder arrives: the run freezes for a few frames
+(hit-stop), shakes the camera, throws a spark and the word over the victim,
+which flinches and is shoved; a knockout launches it tumbling, and its body
+and board splash where they meet the water. Crashes, buoy hits, bumps and
+the last heart flinch and shake too. Tuning in `IMPACT` and `RIDER_ANIM`.
+
+**Camera.** Behind and above, looking down on the surfer as in the
+mockup (upright: 4.3 m back, 2.4 m up, 64 degree FOV, looking 12 m ahead),
+swinging round with part of the heading and banking with the turn rate
+(`Rider.lean`), letting big airs rise in the frame, widening its FOV with
+speed, BOOST and RAGE, pulling back for a fight so both riders stay in
+frame, shaking on demand (`Run.shake`), and never going under the water.
+All in the `CAMERA` block.
 
 **Rival.** Follows a precomputed racing line (`x` as a function of `z`
 with noise) at 95 to 105 % of the player's speed; contact shoves both
 sideways. Collision is circles in track space, which is cheap and is all
 an arcade game needs.
 
-**Obstacle.** A skull buoy (cylinder plus cone) at fixed course positions;
+**Obstacle.** A skull bell buoy (tapered bell, cage top, skull decal) at fixed course positions;
 hitting it costs a heart and speed. Rocks, pilings, boats and sharks are
 the same interface with different meshes and behaviours. Boost gates
-(`entities/Chevron.ts`, three chevrons lying on the water) are the first
+(`entities/Chevron.ts`, a small `>>` sign on a float) are the first
 pickup: the generator lays one every 110 to 190 m in a lane, and riding
 over it on the water gives a BOOST (ignoring the combo's cooldown), a
 little RAGE and `BOOST!`.
@@ -223,18 +247,29 @@ persisted best, and the first graphics tranche towards the mockup: the
 faceted sea, the sun's rays and clouds, the shore and the pier
 (`world/Scenery.ts`), boost gates (`entities/Chevron.ts`), the boxed HUD
 with the gradient RAGE bar and the radar, and a better rig (tapered
-chest, hair spikes, patterned shorts from `shortsTexture`).
+chest, hair spikes, patterned shorts from `shortsTexture`). Then the big
+upgrade after the first phone playtest ("the graphics need a big upgrade!
+the physics also spin too hard, hitting animation non existent"): skinned
+riders with per-character looks and a procedural animator, the forgiving
+air spin, hit-stop, shake, flinches, knockout tumbles and splashes, the
+turquoise sea with whitewater, wakes and glitter, the cliffs and festival
+pier, the higher world resolution with full-bleed framing, and the
+mockup HUD and title spanning the phone screen.
 
 ## 8. Mobile
 
 - WebGL 2 is required (Three's current releases target it). It is available
   on iOS 15+ Safari, Android Chrome and all desktop browsers; the title
   card now reports `WEBGL2 OK` or `WEBGL2 MISSING` on the device in hand.
-- At 426x240 the GPU work is negligible on any phone; the cost is the
-  upscale, which is free.
-- Portrait phones render 240x426 (same pixel count, taller view) with a
-  taller vertical FOV. The gameplay mockup is portrait, so phones are a
-  primary target, not an afterthought.
+- The world renders at about 280k to 420k pixels on a phone (1.5 to 2.5
+  times the HUD's resolution, bleeding to the screen edges); draw calls
+  are about 50 in play. The loop catches up six fixed steps per frame, so
+  the game keeps full speed down to 10 frames per second.
+- Upright phones get a HUD 240 wide whose height follows the screen (426
+  to 540), so the top bar sits at the top and the buttons at the bottom;
+  the camera keeps its 240x426 framing in the middle and the world bleeds
+  past it. The gameplay mockup is portrait, so phones are a primary
+  target, not an afterthought.
 - Touch: a pad of LEFT, UP and RIGHT under the left thumb (hold to carve
   or pump) and JUMP, HIT and BRG under the right (`engine/TouchButtons.ts`).
   A drag stick was tried first and was too hard to control; digital

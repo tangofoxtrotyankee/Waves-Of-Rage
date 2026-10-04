@@ -33,11 +33,16 @@ attract mode, start, forward travel, carving, pumping, braking, jumping and
 landing, the rival, buoys, ramps and finish, a wipeout, restart, the finish,
 and Escape back to the main menu, with no console errors, plus character
 select, the field of eight, punch and barge knockouts, a clean 360 and a
-crashed 180, RAGE, the barrel roll and boost combos, pause, the follow
-camera and terrain, and a phone-shaped page (touch, upright view, tap to
-start and jump, the HIT and pause buttons, a held RIGHT on the pad, and the
-pad's barrel roll). Waits are on game state, not the clock, because SwiftShader runs
-the simulation slower than real time. Both browser suites spawn Vite's own
+crashed 180, forgiving spins (a tap in the air, a carve carried over a
+crest, weaving with carve taps, a spin let go at the top, a held spin
+through big air), RAGE, the barrel roll and boost combos, pause (which
+freezes wakes, spray and floating words), the endless course and the shore
+after a restart, boost gates, the follow camera and terrain, and a
+phone-shaped page (touch, an upright view whose HUD fills the screen, tap
+to start and jump, the HIT and pause buttons, a held RIGHT on the pad, the
+pad's barrel roll, and a knockout that stays in frame). Waits are on game
+state or the run clock, not wall time, because SwiftShader renders slowly
+and a loaded machine slows it further. Both browser suites spawn Vite's own
 script so killing it really stops the server.
 
 ### Setup (once)
@@ -81,31 +86,42 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 
 ## Manual test script (Waves of Rage 2)
 
-1. Title: the logo and course name show over the attract-mode surfer; Space
-   (tap on touch) starts; Esc (MENU corner on touch) returns to the main
-   menu page.
-2. Riding: the surfer sits on the drawn water at all times; the camera stays
-   behind at waist height and never goes under a wave; Left/Right carve
-   with a visible lean, Up gains speed (bar), Down brakes.
+1. Title: the logo, the yellow PLAY row and the character panel show over
+   the attract-mode surfer; Space (tap on touch) starts; Esc (MENU corner
+   on touch) returns to the main menu page.
+2. Riding: the surfer (a faceted low-poly rider in a surf stance, arms out,
+   knees soaking up the swell) sits on the drawn water at all times; the
+   camera stays behind and above and never goes under a wave; Left/Right
+   carve with the rider leaning in and the camera banking a little, never
+   reading as the board spinning; Up pumps, Down brakes.
 3. Air: Space jumps; riding fast over a crest or any ramp launches without
    pressing anything; a landing after half a second shows `AIR +100`, after
    a second `BIG AIR +250`; the shadow shrinks while airborne.
-4. Hazards: hitting a skull buoy flashes the surfer, shows `OUCH!` and costs
-   a heart; the third hit shows `WIPEOUT` and the results panel after a
-   moment; touching the rival shows `BUMP` and pushes both apart.
+4. Hazards: hitting a skull bell buoy splashes, shakes the camera, makes the
+   surfer flinch and pulse white, shows `OUCH!` and costs a heart; the
+   third hit pitches the surfer over the nose into the water and the
+   results panel slams in after the fall; touching a rival pushes both
+   apart with a flinch.
 5. Endless: there is no finish; the buoys come thicker and the cruising
    speed rises with distance; after a wipeout the results show distance,
    place, score, knockouts and `NEW BEST!` when it is one; the title shows
    the best; Space restarts from the start line with three hearts. Riding
    over a set of cyan chevrons shows `BOOST!` and a burst of speed, and
-   the chevrons vanish; the radar (top right) shows them in cyan ahead.
-6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
-   `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
+   the gate vanishes; the course strip (left edge) shows gates ahead.
+6. Combat: X beside a rival swings a punch at it (wind-up, strike,
+   recovery); as it lands the game freezes for a few frames, the camera
+   shakes, a spark and `HIT!` burst over the rival, which flinches and is
+   shoved away while staying in view; a second X shows `KNOCKOUT +500` and
+   throws the rival tumbling through the air into a splash, its board
+   flying off on its own, then it reappears behind you; two
    knockouts within four seconds show `X2`; Shift shoves a rival hard and
    costs you a little speed; a rival shoved into a buoy shows
    `INTO THE BUOY +750`; strong rivals shove you (`SHOVED!`) when alongside.
-7. Tricks: in the air Left/Right spin and X grabs; a clean 360 shows
-   `360 +...`, a half spin shows `WIPEOUT -1` and a tumble.
+7. Tricks: in the air Left/Right spin and X grabs; a short tap or a spin
+   let go settles back upright; a carve carried over a crest never spins;
+   a spin held through about a second of air lands as a clean `360 +...`;
+   a half turn held into the landing shows `WIPEOUT -1` and a tumble (or
+   `CRASH!` with no heart while you are still invulnerable).
 8. RAGE: the meter fills with tricks and knockouts; full, `RAGE!` shows,
    the sea turns pink, you ride faster, one hit knocks out and buoys show
    `SMASH +100`; it drains over eight seconds.
@@ -114,18 +130,22 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 10. Pause: Esc (the top-centre button on touch) shows PAUSED; Space (tap)
     resumes; M (MENU corner) returns to the main menu with the sequel's
     entry highlighted.
-11. Look: the sea is faceted and calm towards the horizon (no band of
-    noise under the sun); cliffs with palms pass on both sides and the pier
-    with its crowd, flags and banner comes round about every 1,200 m; the
-    sun has rays and the clouds drift. `bm.look.snap = false` in the
+11. Look: compare with docs/art-direction/boardmasters/gameplay-mockup.webp.
+    The sea is turquoise near and deep blue far with dithered whitewater, a
+    sparse glitter of the sun and foam wakes behind every rider; towering
+    cliffs with lit villages, palms and waterfalls run down the left and the
+    festival pier with its stage, crowd and BOARDMASTERS banner comes round
+    on the right about every 1,200 m; a rival between the camera and the
+    surfer fades out in a dither instead of filling the screen. `bm.look.snap = false` in the
     console stops the polygon jitter, `bm.look.affine = false` straightens
     the water texture, `bm.look.quantize = false` removes the banding,
     `bm.look.dither = false` the dither; `?res=320` is blockier.
-12. Touch (`?touch=1`, or a phone): the field is upright; holding LEFT or
+12. Touch (`?touch=1`, or a phone): the field is upright and the HUD runs
+    from the top of the screen to the buttons at the bottom; holding LEFT or
     RIGHT on the pad carves, holding UP pumps, JUMP jumps (a tap elsewhere
     does too), HIT and BRG attack, the top-centre button pauses, MENU works;
     the first tap goes fullscreen where allowed.
-13. Combos: RIGHT RIGHT UP (keys or pad, within about half a second) shows
+13. Combos: RIGHT RIGHT UP (keys or pad, about a third of a second apart) shows
     `BARREL ROLL!`, launches the surfer into a full roll about the board
     and lands for `BARREL ROLL +...`; UP UP shows `BOOST!` and a burst of
     speed and spray; the presses show briefly under the surfer.
