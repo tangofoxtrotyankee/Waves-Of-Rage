@@ -332,6 +332,25 @@ try {
     else await wait(300);
   }
   check('a spin held through big air lands as a clean 360', !!held360 && held360.landing.clean && Math.round(held360.landing.spinDeg / 180) === 2 && held360.landing.points >= 850 && held360.health === 3, JSON.stringify(held360));
+  // Weaving with quick carve taps (a phone's CARVE buttons): crests throw the rider into the air on their own, and a tap
+  // made in one of those hops must never spin it into a crooked landing (no JUMP pressed at all).
+  await grounded();
+  await ev(() => {
+    const run = window.bm.run;
+    window.__crooked = [];
+    window.__resolveLanding = run.resolveLanding;
+    run.resolveLanding = function (l) { if (!l.clean && l.airTime >= 0.45) window.__crooked.push({ air: +l.airTime.toFixed(2), spin: Math.round(l.spinDeg) }); return window.__resolveLanding.call(this, l); };
+  });
+  let hops = 0;
+  for (let i = 0; i < 24; i++) {
+    await ev(() => { const r = window.bm.run; r.health = 3; for (const b of r.buoys) if (b.active && Math.abs(b.z - r.surfer.z) < 80) b.retire(); r.rivals.forEach((v, k) => { if (Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 2.5, r.surfer.z - 60 - k * 5, r.ocean); }); });
+    const key = i % 2 === 0 ? 'ArrowLeft' : 'ArrowRight';
+    await page.keyboard.down(key); await wait(350);
+    if ((await surfer()).airborne) hops++;
+    await page.keyboard.up(key); await wait(250);
+  }
+  const crooked = await ev(() => { window.bm.run.resolveLanding = window.__resolveLanding; return window.__crooked; });
+  check('weaving with carve taps never lands crooked (no spin crashes off crest hops)', crooked.length === 0, `${JSON.stringify(crooked)}, airborne at ${hops} of 24 taps`);
   // The course's own buoys are still out there; and these landings feed the RAGE meter, which the RAGE check wants empty and idle.
   await ev(() => { const r = window.bm.run; r.health = 3; r.rage = 0; r.rageUntil = 0; });
   await wait(1500);
@@ -342,19 +361,19 @@ try {
   const rageStrike = await strike(3, 1.0, 1, 'x');
   check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9), `strike=${JSON.stringify(rageStrike)} ${await ev(() => { const r = window.bm.run; const s = r.surfer; return JSON.stringify({ state: r.state, kos: r.knockouts, health: r.health, texts: r.floating.map((f) => f.text), stun: +(s.stunnedUntil - r.time).toFixed(2), air: s.airborne, z: +s.z.toFixed(0), speed: +s.speed.toFixed(1) }); })}`);
 
-  // --- combos: RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
+  // --- combos: JUMP RIGHT RIGHT barrel-rolls, UP UP boosts ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); }
   // Retried: a roll cut short by a rising face (under half a second) is not scored, and the next flight would be read instead.
   let rolled = null;
   for (let tries = 0; tries < 5 && !(rolled && rolled.rolled); tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.surfer.rollProgress = 0; });
-    await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Space'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
     await wait(80);
     if (!(await ev(() => window.bm.run.surfer.rolling))) { await wait(400); continue; }
     rolled = await until(() => window.bm.run.lastLanding !== null, 4000) ? await ev(() => window.bm.run.lastLanding) : null;
   }
-  check('RIGHT RIGHT UP is a barrel roll that lands for points', !!rolled && rolled.rolled && rolled.clean && rolled.points >= 750, JSON.stringify(rolled));
+  check('JUMP RIGHT RIGHT is a barrel roll that lands for points', !!rolled && rolled.rolled && rolled.clean && rolled.points >= 750, JSON.stringify(rolled));
   let boosted = false;
   for (let tries = 0; tries < 3 && !boosted; tries++) {
     await grounded();
@@ -459,10 +478,10 @@ try {
   const css = await tp.evaluate(() => ({ scale: window.bm.renderer.cssScale, ox: window.bm.renderer.offsetX, oy: window.bm.renderer.offsetY }));
   const tapAt = async (gx, gy) => tp.touchscreen.tap(css.ox + gx * css.scale, css.oy + gy * css.scale);
   // HUD points from its real size: W x H. The touch buttons sit as in src/boardmasters/engine/TouchButtons.ts:
-  // RIGHT at (76, H - 32), UP at (52, H - 74), HIT at (W - 84, H - 32); the pause button at the top centre.
+  // RIGHT at (76, H - 32), UP at (52, H - 74), HIT at (W - 84, H - 32), JUMP at (W - 34, H - 32); the pause button at the top centre.
   const W = view.w;
   const H = view.h;
-  const BUTTON = { right: [76, H - 32], up: [52, H - 74], hit: [W - 84, H - 32] };
+  const BUTTON = { right: [76, H - 32], up: [52, H - 74], hit: [W - 84, H - 32], jump: [W - 34, H - 32] };
   const open = [W / 2, Math.round(H * 0.7)]; // open water over the sea, clear of the buttons
   await tapAt(...open); await tp.waitForTimeout(400);
   check('phone: a tap starts the run', (await tp.evaluate(() => window.bm.run.state)) === 'playing');
@@ -489,11 +508,11 @@ try {
   let phoneRolled = false;
   for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
     for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tapAt(...BUTTON.up); await tp.waitForTimeout(80);
+    await tapAt(...BUTTON.jump); await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tp.waitForTimeout(80);
     phoneRolled = await tp.evaluate(() => window.bm.run.surfer.rolling);
     if (!phoneRolled) await tp.waitForTimeout(500);
   }
-  check('phone: RIGHT RIGHT UP on the pad barrel-rolls', phoneRolled);
+  check('phone: JUMP RIGHT RIGHT on the pad barrel-rolls', phoneRolled);
   await tapAt(W / 2, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));

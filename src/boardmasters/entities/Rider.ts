@@ -158,9 +158,14 @@ export class Rider {
   private bargeUntil = 0;
   private attackCooldownUntil = 0;
   private bargeCooldownUntil = 0;
-  /** A press that could not fire (airborne, stunned) is kept for a moment, so it is not lost to a shove. */
+  /** A press that could not fire (airborne, stunned) is kept for a moment, so it is not lost to a shove (or, for JUMP, to a hop off a crest). */
   private attackBufferedUntil = 0;
   private bargeBufferedUntil = 0;
+  private jumpBufferedUntil = 0;
+  /** This air already had its jump (a press, or a lip pop): a second press waits for the water. */
+  private jumpedThisAir = false;
+  /** What is left of a clean landing's yaw off true (radians), eased to nothing so the board does not snap straight. */
+  private landYaw = 0;
   private flashFrom = 0;
   private flashUntil = 0;
   private flash = 0;
@@ -249,6 +254,9 @@ export class Rider {
     this.bargeCooldownUntil = 0;
     this.attackBufferedUntil = 0;
     this.bargeBufferedUntil = 0;
+    this.jumpBufferedUntil = 0;
+    this.jumpedThisAir = false;
+    this.landYaw = 0;
     this.flashFrom = 0;
     this.flashUntil = 0;
     this.pendingShove = 0;
@@ -360,13 +368,15 @@ export class Rider {
     this.foamMaterial.dispose();
   }
 
-  /** BARREL ROLL: launch (if on the water) and roll a full turn about the board. False if the rider cannot right now. */
+  /** BARREL ROLL: launch (if on the water; in the air, a pop so the roll has time) and roll a full turn about the board. False if the rider cannot right now. */
   barrelRoll(dir: number, time: number): boolean {
     if (this.wiped || time < this.stunnedUntil || this.rolling) return false;
     if (!this.airborne) {
       this.vy = PHYSICS.jumpVelocity * 0.95 + Math.max(0, this.vy);
       this.y += 0.01;
       this.takeOff();
+    } else {
+      this.vy = Math.max(this.vy, PHYSICS.jumpVelocity * TRICKS.rollPop);
     }
     this.rolling = true;
     this.rollDir = dir;
@@ -423,6 +433,8 @@ export class Rider {
     if (control.barge) this.bargeBufferedUntil = time + 0.25;
     const stunned = time < this.stunnedUntil;
     if (stunned) control = CONTROL_IDLE;
+    if (control.jump) this.jumpBufferedUntil = time + PHYSICS.jumpBuffer;
+    const wantsJump = !stunned && time < this.jumpBufferedUntil;
     this.steerIn = control.steer;
     this.pumpIn = control.pump;
     this.brakeIn = control.brake;
@@ -467,7 +479,8 @@ export class Rider {
     // Move along the course; the whitewater at the edges pushes back.
     this.z += this.speed * Math.cos(this.heading) * dt;
     this.x += (this.speed * Math.sin(this.heading) + this.shoveVx) * dt;
-    this.shoveVx *= Math.exp(-PHYSICS.shoveDecay * dt);
+    this.shoveVx *= Math.exp(-(time < this.shovedUntil ? PHYSICS.shovedDecay : PHYSICS.shoveDecay) * dt);
+    this.landYaw += (0 - this.landYaw) * damp(TRICKS.landYawRate, dt);
     const limit = PHYSICS.trackHalfWidth;
     if (this.x > limit || this.x < -limit) {
       this.edgeShove = Math.abs(this.shoveVx);
@@ -488,10 +501,12 @@ export class Rider {
       const surfaceVy = (h - this.y) / dt;
       const ballisticVy = this.vy - PHYSICS.gravity * dt;
       const ballisticY = this.y + ballisticVy * dt;
-      if (control.jump) {
+      if (wantsJump) {
         this.vy = PHYSICS.jumpVelocity + Math.max(0, surfaceVy);
         this.y = h + 0.01;
         this.takeOff();
+        this.jumpedThisAir = true;
+        this.jumpBufferedUntil = 0;
       } else if (ballisticY > h + PHYSICS.launchAccel * dt * dt) {
         this.vy = ballisticVy;
         this.y = ballisticY;
@@ -519,7 +534,14 @@ export class Rider {
         this.animator.barge(time);
       }
     } else {
-      if (control.jump && this.vy <= 0 && this.y - h < PHYSICS.coyoteHeight) this.vy = PHYSICS.jumpVelocity;
+      // JUMP in the air: a lip pop in the first moment of a hop off a crest, or a jump just above the water on the way down;
+      // otherwise the press waits (jumpBuffer) and fires on touchdown.
+      const lipPop = !this.jumpedThisAir && this.airTime < PHYSICS.lipPopSeconds;
+      if (wantsJump && (lipPop || (this.vy <= 0 && this.y - h < PHYSICS.coyoteHeight))) {
+        this.vy = Math.max(this.vy, PHYSICS.jumpVelocity);
+        this.jumpedThisAir = true;
+        this.jumpBufferedUntil = 0;
+      }
       this.vy -= PHYSICS.gravity * dt;
       this.y += this.vy * dt;
       this.airTime += dt;
@@ -545,6 +567,8 @@ export class Rider {
         const upright = off <= TRICKS.landingToleranceDeg || off >= 360 - TRICKS.landingToleranceDeg;
         const clean = upright && (!this.rolling || rolled);
         this.landing = { airTime: this.airTime, spinDeg, grabbed: this.grabbing, rolled, clean };
+        // Landed clean but a little off true: ease the rest of the way rather than snapping straight in one frame.
+        if (clean) this.landYaw = this.spin - Math.round(this.spin / TWO_PI) * TWO_PI;
         this.airTime = 0;
         this.spin = 0;
         this.spinVel = 0;
@@ -572,6 +596,7 @@ export class Rider {
     this.airborne = true;
     this.airTime = 0;
     this.spinVel = 0;
+    this.jumpedThisAir = false;
     // A steer carried off the water (a carve over the lip) does not spin until it is let go or reversed.
     this.takeOffSteer = Math.abs(this.steerIn) > 0.05 ? Math.sign(this.steerIn) : 0;
     this.spinArmed = this.takeOffSteer === 0;
@@ -582,11 +607,15 @@ export class Rider {
    * first moment of air; holding it builds the rate up to spinRate. When the
    * next upright can still be reached by touchdown only by turning faster,
    * the held spin is helped round (up to spinSettleMul times as fast), so a
-   * 360 held on a big air lands; a completed turn that cannot become another
-   * in time is held there and landed. Released (or not armed), the rider settles
-   * to an upright by the time it lands: the one its momentum points at, or
-   * the other if only that one can still be reached. `water` is the
-   * surface height under the rider, for the time to touchdown.
+   * 360 held on a big enough air lands; a completed turn that cannot become
+   * another in time is held there and landed. A press that cannot become a
+   * full turn by touchdown (a hop off a crest, a small jump) is only a tweak:
+   * the board turns up to spinTweak and back to upright for the landing, so
+   * a carve pressed while skipping over chop never spins the rider into a
+   * crash. Released (or not armed, or rolling), the rider settles to an
+   * upright by the time it lands: the one its momentum points at, or the
+   * other if only that one can still be reached. `water` is the surface
+   * height under the rider, for the time to touchdown.
    */
   private airSpin(steer: number, ocean: Ocean, water: number, dt: number): void {
     const pressed = Math.abs(steer) > 0.05;
@@ -597,28 +626,38 @@ export class Rider {
     const fastest = TRICKS.spinRate * TRICKS.spinSettleMul;
     const toLand = this.timeToLand(ocean, water);
     const T = Math.max(toLand - TRICKS.spinLandingMargin, 0.06);
-    if (pressed && this.spinArmed && this.spinsInAir && this.airTime > TRICKS.spinDelay) {
+    // A barrel roll in progress keeps the board's heading: the steer rolls it, it does not spin it as well.
+    let spinning = pressed && this.spinArmed && this.spinsInAir && !this.rolling && this.airTime > TRICKS.spinDelay;
+    if (spinning) {
       const dir = Math.sign(steer);
       const ahead = (dir > 0 ? Math.floor(this.spin / TWO_PI + 1e-6) + 1 : Math.ceil(this.spin / TWO_PI - 1e-6) - 1) * TWO_PI;
       const behind = ahead - dir * TWO_PI;
       const dist = Math.abs(ahead - this.spin);
+      const past = Math.abs(this.spin - behind);
       const boost = accel * TRICKS.spinAssistMul;
       let target = steer * TRICKS.spinRate;
       let rate = this.spinVel * dir < 0 ? brake : accel;
-      const committed = Math.abs(this.spin - behind) >= TRICKS.spinAssistFrom;
       if (this.spinShortfall(dist, dir, T, boost, fastest) <= SPIN_AIM) {
         // The next upright can still be made by touchdown: once the spin is clearly meant (past spinAssistFrom), turn faster if that is what it takes.
-        if (committed && dist / T > TRICKS.spinRate) {
+        if (past >= TRICKS.spinAssistFrom && dist / T > TRICKS.spinRate) {
           target = dir * Math.min(dist / T, fastest);
           rate = boost;
         }
-      } else if (Math.abs(behind) > 0.1 && Math.abs(this.spin - behind) <= SPIN_AIM) {
+      } else if (Math.abs(behind) > 0.1 && past <= SPIN_AIM) {
         // A completed turn that cannot become another before touchdown is held there and landed, not over-rotated into a crash.
         target = clamp((behind - this.spin) * Math.max(1 / T, TRICKS.spinSettleGain), -fastest, fastest);
         rate = brake;
+      } else if (past < Math.PI) {
+        // Not a full turn by touchdown (and not past the half turn): a tweak, held at spinTweak and settled upright for the landing.
+        if (toLand < TRICKS.spinTweakLand) spinning = false;
+        else {
+          target = clamp((behind + dir * TRICKS.spinTweak - this.spin) * TRICKS.spinSettleGain, -TRICKS.spinRate, TRICKS.spinRate);
+          rate = brake;
+        }
       }
-      this.spinVel = moveTowards(this.spinVel, target, rate * dt);
-    } else {
+      if (spinning) this.spinVel = moveTowards(this.spinVel, target, rate * dt);
+    }
+    if (!spinning) {
       let upright = Math.round((this.spin + this.spinVel * Math.min(toLand, TRICKS.spinSettleLead)) / TWO_PI) * TWO_PI;
       const d = upright - this.spin;
       if (Math.abs(d) > 0.07) {
@@ -658,6 +697,7 @@ export class Rider {
     this.airborne = false;
     this.spin = 0;
     this.spinVel = 0;
+    this.landYaw = 0;
     this.rolling = false;
     this.rollAngle = 0;
     this.grabbing = false;
@@ -737,7 +777,7 @@ export class Rider {
     this.group.rotation.set(0, 0, 0);
     if (!anim.knockedOutBody) {
       const pitch = this.airborne ? clamp(-this.vy * 0.05, -0.4, 0.4) : clamp(-Math.atan(this.slopeDz) * 0.6, -0.4, 0.4);
-      this.group.rotateY(this.heading + this.spin);
+      this.group.rotateY(this.heading + this.spin + this.landYaw);
       this.group.rotateX(pitch + anim.tilt);
       // Positive lean and bank tip the rider towards world +x; the barrel roll turns towards its direction (screen-right is world -x).
       this.group.rotateZ(-(this.lean * PHYSICS.carveLean + anim.bank) - this.rollAngle);

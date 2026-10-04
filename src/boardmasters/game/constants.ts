@@ -284,8 +284,14 @@ export const PHYSICS = {
   launchAccel: 10,
   /** Rideable water is this wide either side of the centre line; beyond it is whitewater. */
   trackHalfWidth: 11,
-  /** Sideways shoves from contact decay at this rate per second. */
+  /** Sideways shoves from contact decay at this rate per second... */
   shoveDecay: 5,
+  /** ...and more slowly for a rider just punched or barged (a slide that reads, rather than a jerk off the screen). */
+  shovedDecay: 3.5,
+  /** A JUMP press that cannot fire yet (skipping over a crest) is kept this long and fires on touchdown. */
+  jumpBuffer: 0.3,
+  /** In the first moment of an unplanned hop off a crest, a JUMP press still jumps (a lip pop): up to this long into the air. */
+  lipPopSeconds: 0.25,
 } as const;
 
 export const SCORING = {
@@ -388,10 +394,13 @@ export const IMPACT = {
  *  - held on a big enough air (about a second), the spin is helped round to
  *    land the 360, and a completed 360 that cannot become a 720 in time is
  *    held there rather than over-rotated
+ *  - a press that cannot become a full turn by touchdown (a hop off a crest,
+ *    a small jump) is only a tweak of up to 30 degrees, upright again for
+ *    the landing: carving while skipping over chop never spins the rider
+ *    into a crash
  *
- * A spin held into a landing it cannot complete (a half turn off a small
- * jump) still lands crooked and crashes: that, and pressing too late, are
- * the risks.
+ * A spin already past the half turn that cannot be finished (forced round,
+ * or a swell rising early under it) still lands crooked and crashes.
  */
 export const TRICKS = {
   /** Radians per second at full steer, once the rate has built up (330 degrees a second). */
@@ -403,7 +412,7 @@ export const TRICKS = {
   /** Stopping, reversing and settling a spin is this many times quicker than building one. */
   spinBrakeMul: 4,
   /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate... */
-  spinSettleMul: 1.4,
+  spinSettleMul: 1.8,
   /** ...and helping a held spin round, its rate may build this many times faster than spinRampSeconds allows... */
   spinAssistMul: 2,
   /** ...but only once the turn is this far round (radians, 60 degrees): a short tap never gets the help, so it unwinds instead of whipping round a full 360. */
@@ -414,6 +423,16 @@ export const TRICKS = {
   spinSettleLead: 0.35,
   /** The settle aims to be upright this long before touching down (a little slack for a swell rising to meet the rider). */
   spinLandingMargin: 0.08,
+  /**
+   * A press that cannot become a full turn by touchdown (a hop off a crest,
+   * a small jump) is only a tweak: it turns the board up to this far
+   * (radians, 30 degrees) and no further, and settles upright for the last
+   * `spinTweakLand` seconds of the air, so it never lands crooked.
+   */
+  spinTweak: Math.PI / 6,
+  spinTweakLand: 0.2,
+  /** A clean landing off true (a tweak, an assisted spin a little short) eases straight at this rate per second rather than snapping. */
+  landYawRate: 25,
   /** Points by half-turns landed: 180, 360, 540, 720. */
   spinPoints: [0, 250, 500, 750, 1000] as const,
   grabPoints: 250,
@@ -422,8 +441,10 @@ export const TRICKS = {
   /** A bad landing keeps this much speed and costs a heart. */
   badLandingSpeed: 0.5,
   crashSeconds: 0.7,
-  /** The barrel roll (RIGHT RIGHT UP / LEFT LEFT UP): a launch plus a full roll about the board over this long. */
+  /** The barrel roll (JUMP RIGHT RIGHT / JUMP LEFT LEFT): a full roll about the board over this long, with a pop if the air is short. */
   rollSeconds: 0.55,
+  /** Started in the air, the roll pops the rider up to at least this fraction of a jump's lift, so it has the air to finish. */
+  rollPop: 0.75,
   barrelRollPoints: 400,
   /** Land before this much of the roll is done and it is a crash. */
   rollLandingFraction: 0.85,

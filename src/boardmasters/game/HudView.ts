@@ -737,7 +737,7 @@ export class HudView {
     hud.text(bx + 27, bestY, bestScore, '#ffe14d', TIGHT);
     hud.text(bx + bw, bestY, bestDist, HUD_COLORS.label, TIGHT_RIGHT);
     // The moves, then the prompt pill.
-    hud.text(W / 2, H - 29, touch ? '> > UP: ROLL   UP UP: BOOST' : 'RIGHT RIGHT UP: BARREL ROLL   UP UP: BOOST   ARROWS: RIDER', HUD_COLORS.label, TIGHT_CENTER_OUTLINE);
+    hud.text(W / 2, H - 29, touch ? 'JUMP > >: ROLL   UP UP: BOOST' : 'SPACE RIGHT RIGHT: BARREL ROLL   UP UP: BOOST   ARROWS: RIDER', HUD_COLORS.label, TIGHT_CENTER_OUTLINE);
     if (!this.promptPill) {
       const text = hud.styledText(touch ? 'TAP TO PLAY' : 'PRESS SPACE', {
         stops: HUD_COLORS.white,

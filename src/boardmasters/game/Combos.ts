@@ -15,13 +15,14 @@ export interface Combo {
 }
 
 export const COMBOS: Combo[] = [
-  { id: 'barrelRollRight', name: 'BARREL ROLL', sequence: ['R', 'R', 'F'] },
-  { id: 'barrelRollLeft', name: 'BARREL ROLL', sequence: ['L', 'L', 'F'] },
+  // JUMP-led, so two quick carve taps and a pump (ordinary riding on a phone) never launch an accidental roll.
+  { id: 'barrelRollRight', name: 'BARREL ROLL', sequence: ['J', 'R', 'R'] },
+  { id: 'barrelRollLeft', name: 'BARREL ROLL', sequence: ['J', 'L', 'L'] },
   { id: 'boost', name: 'BOOST', sequence: ['F', 'F'] },
 ];
 
 /** Seconds allowed between two presses of one combo. */
-export const COMBO_WINDOW = 0.45;
+export const COMBO_WINDOW = 0.35;
 /** How long a press stays on the HUD's input trail. */
 export const TRAIL_SECONDS = 1.0;
 
