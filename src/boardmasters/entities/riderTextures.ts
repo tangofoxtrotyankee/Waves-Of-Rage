@@ -305,8 +305,8 @@ function paintDeck(ctx: Ctx, spec: RiderSpec, r: Region): void {
           x = Math.max(3, Math.min(r.w - 6, x));
         }
       }
+      // Orange flecks; no stringer (a dark line down the middle reads as a pole through the board from behind).
       for (let i = 0; i < 18; i++) at(4 + Math.floor(rng() * 24), Math.floor(rng() * r.h), 0xff8c42, 2, 1);
-      at(mid - 1, 0, PALETTE.outline, 2, r.h);
       break;
     case 'flame': {
       // Flames licking up from the tail.
@@ -369,10 +369,11 @@ function paintDeck(ctx: Ctx, spec: RiderSpec, r: Region): void {
       break;
     }
     case 'reggae':
-      fill(ctx, 0xe63946, r.x, r.y, r.w, 21);
-      fill(ctx, 0xffd166, r.x, r.y + 21, r.w, 22);
-      fill(ctx, 0x2bb673, r.x, r.y + 43, r.w, 21);
-      at(mid - 1, 0, PALETTE.outline, 2, r.h);
+      // Three bands, each with a faint one-pixel stringer in its own shade.
+      for (const [y, h, c] of [[0, 21, 0xe63946], [21, 22, 0xffd166], [43, 21, 0x2bb673]] as const) {
+        fill(ctx, c, r.x, r.y + y, r.w, h);
+        at(mid, y, mixColor(c, 0x000000, 0.3), 1, h);
+      }
       break;
     case 'neon':
       fill(ctx, 0x3a1060, r.x, r.y, r.w, r.h);

@@ -165,25 +165,38 @@ export const COMBAT = {
 
 /**
  * In the air: Left/Right spin, X grabs; land within the tolerance or wipe
- * out. The spin is eased so a tap on a phone's digital button is not a full
- * 300-degree-a-second spin: the rate builds while the steer is held, the
- * first moment of air ignores the steer (a carve carried over a crest does
- * not spin), and on release the rider settles to the nearest upright, so a
- * short accidental spin unwinds and a nearly complete 360 completes.
+ * out. The spin is eased so a phone's digital button is not a full-rate
+ * spin the moment it is touched:
+ *
+ *  - only a press made in the air spins: a steer carried off the water (a
+ *    carve held over a crest) never does until it is let go or reversed, and
+ *    the first moment of air ignores the steer altogether
+ *  - the rate builds while the steer is held, to about 330 degrees a second
+ *  - released, the rider settles to an upright by the time it lands
+ *    (predicted from its height and fall): a short stray spin unwinds, a
+ *    spin with momentum past the half turn completes, and a spin held on a
+ *    big enough air is helped round to land the 360
+ *
+ * A spin held into a landing it cannot complete still lands crooked and
+ * crashes: that, and pressing too late, are the risks.
  */
 export const TRICKS = {
-  /** Radians per second at full steer, once the rate has built up (about 315 degrees a second). */
-  spinRate: (Math.PI * 2) / 1.15,
+  /** Radians per second at full steer, once the rate has built up (330 degrees a second). */
+  spinRate: (Math.PI * 2 * 330) / 360,
   /** Seconds of holding the steer for the spin rate to build from nothing to full. */
-  spinRampSeconds: 0.28,
-  /** Seconds after leaving the water before the steer starts a spin. */
-  spinDelay: 0.12,
-  /** With the steer released the rider settles towards the nearest upright at up to this rate, radians per second... */
-  spinSettleRate: 3.4,
-  /** ...approaching it at this rate per second (proportional), so it eases in rather than stopping dead... */
+  spinRampSeconds: 0.25,
+  /** Seconds after leaving the water before a press starts a spin. */
+  spinDelay: 0.1,
+  /** Stopping, reversing and settling a spin is this many times quicker than building one. */
+  spinBrakeMul: 4,
+  /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate. */
+  spinSettleMul: 1.4,
+  /** Released, the rider approaches its upright at least this fast (proportional, per second), and faster when the water is close... */
   spinSettleGain: 6,
-  /** ...and picks that upright from where the spin would carry it in this many seconds (momentum). */
-  spinSettleLead: 0.12,
+  /** ...and picks it from where the spin would carry it in this many seconds (momentum: past the half turn it completes). */
+  spinSettleLead: 0.35,
+  /** The settle aims to be upright this long before touching down. */
+  spinLandingMargin: 0.05,
   /** Points by half-turns landed: 180, 360, 540, 720. */
   spinPoints: [0, 250, 500, 750, 1000] as const,
   grabPoints: 250,
@@ -215,12 +228,12 @@ export const RIDER_ANIM = {
   flinchSeconds: 0.5,
   /** The deep knee bend on landing. */
   landSeconds: 0.22,
-  /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the other way. */
+  /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the same side, lower and slower, flipping. */
   koUp: 6,
   koSide: 2.6,
   koTumble: 8,
   boardUp: 4.2,
-  boardSide: 1.8,
+  boardSide: 1.2,
   boardTumble: 11,
   /** Floating after the splash, the body sinks this far over the respawn wait. */
   koSink: 0.55,

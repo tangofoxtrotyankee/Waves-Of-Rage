@@ -5,6 +5,7 @@ import { statMultipliers, type RiderSpec } from '../game/characters';
 import { BOOST, COMBAT, PALETTE, PHYSICS, RIDER_ANIM, TRICKS } from '../game/constants';
 import type { Ocean } from '../world/Ocean';
 import { RiderAnimator, type AnimInput, type Splash } from './RiderAnimator';
+import { buildFoamGeometry, createFoamMaterial } from './RiderFoam';
 import { buildRiderModel, type RiderModel } from './RiderModel';
 
 /** The animation set from the character sheet, plus `punch` (the sheet's HIT, delivered rather than taken) and `knockout`. */
@@ -33,9 +34,29 @@ export interface Landing {
 
 const CONTROL_IDLE: RiderControl = { steer: 0, pump: false, brake: false, jump: false, attack: false, barge: false };
 const TWO_PI = Math.PI * 2;
+/** A settling spin aims to land this close to upright (radians), inside the landing tolerance. */
+const SPIN_AIM = ((TRICKS.landingToleranceDeg - 15) * Math.PI) / 180;
 
 /** Every rider, so a punch can turn towards the nearest one before the run has resolved it. */
 const RIDERS: Rider[] = [];
+
+const UP = new THREE.Vector3(0, 1, 0);
+const _normal = new THREE.Vector3();
+const _tilt = new THREE.Quaternion();
+const _turn = new THREE.Quaternion();
+/** The shadow disc lies in its own xy plane; this lays it flat. */
+const FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+
+/** Seconds for a fall starting at vertical speed `vy` to drop `height` metres. */
+const fallTime = (vy: number, height: number): number => (vy + Math.sqrt(Math.max(0, vy * vy + 2 * PHYSICS.gravity * Math.max(0, height)))) / PHYSICS.gravity;
+
+/** The near fade for a point: 0 beyond `start` metres from the camera, 0.9 at `full` metres and nearer. */
+const nearFadeAt = (camera: THREE.Vector3, x: number, y: number, z: number, start: number, full: number): number => {
+  const dx = x - camera.x;
+  const dy = y - camera.y;
+  const dz = z - camera.z;
+  return 0.9 * clamp((start - Math.sqrt(dx * dx + dy * dy + dz * dz)) / (start - full), 0, 1);
+};
 
 const moveTowards = (value: number, target: number, step: number): number => (value < target ? Math.min(target, value + step) : Math.max(target, value - step));
 
@@ -90,6 +111,8 @@ export class Rider {
   /** Rotation accumulated in the air, radians, and its rate (radians per second). */
   spin = 0;
   spinVel = 0;
+  /** Steering in the air spins this rider (the AI's lane-keeping steer does not). */
+  spinsInAir = true;
   grabbing = false;
   /** A barrel roll in progress: direction, 0..1 progress, and the roll angle shown. */
   rolling = false;
@@ -112,13 +135,20 @@ export class Rider {
   private model: RiderModel;
   private readonly animator: RiderAnimator;
   private readonly shadowMaterial: THREE.ShaderMaterial;
+  /** White water round the board (RiderFoam), riding on the shadow so it lies on the water. */
+  private readonly foam: THREE.Mesh;
+  private readonly foamMaterial: THREE.ShaderMaterial;
   private readonly anim: AnimInput = {
     time: 0, x: 0, y: 0, z: 0, speed: 0, heading: 0, build: 1, airborne: false, airTime: 0, vy: 0, spinVel: 0, rolling: false, grabbing: false,
     steer: 0, pump: false, brake: false, boosting: false, lean: 0, stunned: false, crashing: false, wiped: false, knockedOut: false, strikeDir: 0,
   };
   private steerIn = 0;
+  /** The steer carried off the water (its sign), and whether a press in the air may spin yet (the steer has been let go or reversed since). */
+  private takeOffSteer = 0;
+  private spinArmed = false;
   private pumpIn = false;
   private brakeIn = false;
+  private slopeDx = 0;
   private slopeDz = 0;
   private landing: Landing | null = null;
   private punchUntil = 0;
@@ -131,7 +161,9 @@ export class Rider {
   private flashFrom = 0;
   private flashUntil = 0;
   private flash = 0;
+  /** Screen-door fade of the body (and shadow) and of the board, which can fly off on its own. */
   private fade = 0;
+  private boardFade = 0;
   /** A hit's shove waits for the attacker's strike to land. */
   private pendingShove = 0;
   private pendingShoveAt = -1;
@@ -144,7 +176,13 @@ export class Rider {
     this.stats = statMultipliers(spec);
     this.shadowMaterial = createPS1Material({ unlit: true, opacity: 0.45, depthWrite: false });
     this.shadow = new THREE.Mesh(colorGeometry(new THREE.CircleGeometry(0.7, 8), PALETTE.deepWater), this.shadowMaterial);
-    this.shadow.rotation.x = -Math.PI / 2;
+    this.shadow.quaternion.copy(FLAT);
+    this.foamMaterial = createFoamMaterial();
+    this.foam = new THREE.Mesh(buildFoamGeometry(spec.id.length + 3), this.foamMaterial);
+    // Undo the shadow's lay-flat turn, so the foam is in the rider's frame on the water, a little above the shadow.
+    this.foam.quaternion.copy(FLAT).invert();
+    this.foam.position.set(0, 0, 0.02);
+    this.shadow.add(this.foam);
     this.model = buildRiderModel(spec);
     this.animator = new RiderAnimator(this.model);
     this.group.add(this.model.board, this.animator.bodyPivot);
@@ -163,7 +201,7 @@ export class Rider {
     this.group.add(this.model.board);
     this.group.scale.setScalar(spec.build);
     this.setFlash(this.flash);
-    this.setNearFade(this.fade);
+    this.applyFade(this.fade, this.boardFade);
   }
 
   /** Put the rider on the water at a course position with default motion. */
@@ -187,6 +225,8 @@ export class Rider {
     this.landing = null;
     this.spin = 0;
     this.spinVel = 0;
+    this.takeOffSteer = 0;
+    this.spinArmed = false;
     this.grabbing = false;
     this.rolling = false;
     this.rollProgress = 0;
@@ -266,24 +306,47 @@ export class Rider {
 
   /** Screen-door transparency, 0 (solid) to 1 (gone), for a rider between the camera and the player. */
   setNearFade(amount: number): void {
-    this.fade = clamp(amount, 0, 1);
-    for (const m of this.model.materials) m.uniforms.uFade.value = this.fade;
-    this.shadowMaterial.uniforms.uFade.value = this.fade;
+    const fade = clamp(amount, 0, 1);
+    this.applyFade(fade, fade);
   }
 
   /**
    * A ready-made near fade for the run to call each frame on riders that
    * are not the player: solid beyond `start` metres from the camera,
-   * screen-doored to 90 % at `full` metres, measured to the rider's chest.
-   * Returns the fade it set.
+   * screen-doored to 90 % at `full` metres. The body is measured at its
+   * middle and the board at the board, so a knocked-out rider's board
+   * skidding past the camera fades on its own. Returns the body's fade.
    */
   fadeNear(camera: THREE.Vector3, start = 3.8, full = 1.8): number {
-    const dx = this.x - camera.x;
-    const dy = this.y + this.spec.build - camera.y;
-    const dz = this.z - camera.z;
-    const fade = 0.9 * clamp((start - Math.sqrt(dx * dx + dy * dy + dz * dz)) / (start - full), 0, 1);
-    if (fade !== this.fade) this.setNearFade(fade);
-    return fade;
+    const b = this.spec.build;
+    const pivot = this.animator.bodyPivot.position;
+    const board = this.model.board.position;
+    const body = nearFadeAt(camera, this.x + pivot.x * b, this.y + (pivot.y + 0.2) * b, this.z + pivot.z * b, start, full);
+    const deck = nearFadeAt(camera, this.x + board.x * b, this.y + board.y * b, this.z + board.z * b, start, full);
+    if (body !== this.fade || deck !== this.boardFade) this.applyFade(body, deck);
+    return body;
+  }
+
+  private applyFade(body: number, board: number): void {
+    this.fade = body;
+    this.boardFade = board;
+    this.model.bodyMaterial.uniforms.uFade.value = body;
+    this.model.boardMaterial.uniforms.uFade.value = board;
+    this.shadowMaterial.uniforms.uFade.value = body;
+    this.foamMaterial.uniforms.uFade.value = body;
+  }
+
+  /** Leave the game for good: forget this rider (punches no longer aim at it) and free its GPU resources. */
+  dispose(): void {
+    const i = RIDERS.indexOf(this);
+    if (i >= 0) RIDERS.splice(i, 1);
+    this.group.removeFromParent();
+    this.shadow.removeFromParent();
+    this.model.dispose();
+    this.shadow.geometry.dispose();
+    this.shadowMaterial.dispose();
+    this.foam.geometry.dispose();
+    this.foamMaterial.dispose();
   }
 
   /** BARREL ROLL: launch (if on the water) and roll a full turn about the board. False if the rider cannot right now. */
@@ -292,8 +355,7 @@ export class Rider {
     if (!this.airborne) {
       this.vy = PHYSICS.jumpVelocity * 0.95 + Math.max(0, this.vy);
       this.y += 0.01;
-      this.airborne = true;
-      this.airTime = 0;
+      this.takeOff();
     }
     this.rolling = true;
     this.rollDir = dir;
@@ -400,7 +462,9 @@ export class Rider {
 
     // Vertical: ride the surface, leave it when the water drops away faster than a ballistic path, or jump.
     const h = ocean.height(this.x, this.z);
-    this.slopeDz = ocean.slope(this.x, this.z).dz;
+    const slope = ocean.slope(this.x, this.z);
+    this.slopeDx = slope.dx;
+    this.slopeDz = slope.dz;
     if (!this.airborne) {
       const surfaceVy = (h - this.y) / dt;
       const ballisticVy = this.vy - PHYSICS.gravity * dt;
@@ -440,7 +504,7 @@ export class Rider {
       this.vy -= PHYSICS.gravity * dt;
       this.y += this.vy * dt;
       this.airTime += dt;
-      this.airSpin(control.steer, dt);
+      this.airSpin(control.steer, ocean, h, dt);
       // Grab with attack; the barrel roll runs its course.
       if (wantsAttack && this.airTime > 0.1) {
         this.grabbing = true;
@@ -489,25 +553,70 @@ export class Rider {
     this.airborne = true;
     this.airTime = 0;
     this.spinVel = 0;
+    // A steer carried off the water (a carve over the lip) does not spin until it is let go or reversed.
+    this.takeOffSteer = Math.abs(this.steerIn) > 0.05 ? Math.sign(this.steerIn) : 0;
+    this.spinArmed = this.takeOffSteer === 0;
   }
 
   /**
-   * The air spin. Held steer builds the rate up to TRICKS.spinRate over
-   * spinRampSeconds, but only after spinDelay in the air (a carve carried
-   * over a crest does not spin). Released, the rider settles towards the
-   * nearest upright (chosen a little ahead, so momentum carries a nearly
-   * complete turn round), so short accidental spins unwind.
+   * The air spin (TRICKS). Only a press made in the air spins, after the
+   * first moment of air; holding it builds the rate up to spinRate, and when
+   * the next upright can still be reached by touchdown only by turning
+   * faster, the spin is helped round (up to spinSettleMul times as fast) so a
+   * 360 held on a big air lands. Released (or not armed), the rider settles
+   * to an upright by the time it lands: the one its momentum points at, or
+   * the other if only that one can still be reached. `water` is the
+   * surface height under the rider, for the time to touchdown.
    */
-  private airSpin(steer: number, dt: number): void {
-    const ramp = (TRICKS.spinRate / TRICKS.spinRampSeconds) * dt;
-    if (this.airTime > TRICKS.spinDelay && Math.abs(steer) > 0.05) {
-      this.spinVel = moveTowards(this.spinVel, steer * TRICKS.spinRate, ramp * (this.spinVel * steer < 0 ? 2 : 1));
+  private airSpin(steer: number, ocean: Ocean, water: number, dt: number): void {
+    const pressed = Math.abs(steer) > 0.05;
+    if (!pressed || Math.sign(steer) !== this.takeOffSteer) this.spinArmed = true;
+    if (!this.spinsInAir && this.spin === 0 && this.spinVel === 0) return;
+    const accel = TRICKS.spinRate / TRICKS.spinRampSeconds;
+    const brake = accel * TRICKS.spinBrakeMul;
+    const fastest = TRICKS.spinRate * TRICKS.spinSettleMul;
+    const toLand = this.timeToLand(ocean, water);
+    const T = Math.max(toLand - TRICKS.spinLandingMargin, 0.06);
+    if (pressed && this.spinArmed && this.spinsInAir && this.airTime > TRICKS.spinDelay) {
+      const dir = Math.sign(steer);
+      let target = steer * TRICKS.spinRate;
+      const ahead = (dir > 0 ? Math.floor(this.spin / TWO_PI + 1e-6) + 1 : Math.ceil(this.spin / TWO_PI - 1e-6) - 1) * TWO_PI;
+      const dist = Math.abs(ahead - this.spin);
+      if (dist / T > TRICKS.spinRate && this.spinShortfall(dist, dir, T, brake, fastest) <= SPIN_AIM) target = dir * Math.min(dist / T, fastest);
+      this.spinVel = moveTowards(this.spinVel, target, (this.spinVel * dir < 0 ? brake : accel) * dt);
     } else {
-      const upright = Math.round((this.spin + this.spinVel * TRICKS.spinSettleLead) / TWO_PI) * TWO_PI;
-      const settle = clamp((upright - this.spin) * TRICKS.spinSettleGain, -TRICKS.spinSettleRate, TRICKS.spinSettleRate);
-      this.spinVel = moveTowards(this.spinVel, settle, ramp * 2);
+      let upright = Math.round((this.spin + this.spinVel * Math.min(toLand, TRICKS.spinSettleLead)) / TWO_PI) * TWO_PI;
+      const d = upright - this.spin;
+      if (Math.abs(d) > 0.07) {
+        const miss = this.spinShortfall(Math.abs(d), Math.sign(d), T, brake, fastest);
+        const other = d > 0 ? upright - TWO_PI : upright + TWO_PI;
+        const od = other - this.spin;
+        if (miss > SPIN_AIM && this.spinShortfall(Math.abs(od), Math.sign(od), T, brake, fastest) < miss) upright = other;
+      }
+      const settle = clamp((upright - this.spin) * Math.max(1 / T, TRICKS.spinSettleGain), -fastest, fastest);
+      this.spinVel = moveTowards(this.spinVel, settle, brake * dt);
     }
     this.spin += this.spinVel * dt;
+  }
+
+  /**
+   * Seconds until the rider meets the water: the fall to the surface under
+   * it, then again to the surface where that fall would carry it (a rising
+   * face ahead lands it sooner; the earlier of the two is kept).
+   */
+  private timeToLand(ocean: Ocean, water: number): number {
+    const t = fallTime(this.vy, this.y - water);
+    const ahead = ocean.height(this.x + (this.speed * Math.sin(this.heading) + this.shoveVx) * t, this.z + this.speed * Math.cos(this.heading) * t);
+    return ahead > water ? fallTime(this.vy, this.y - ahead) : t;
+  }
+
+  /** How far short of turning `dist` radians towards `dir` the spin would fall in `T` seconds, turning as hard as it may. */
+  private spinShortfall(dist: number, dir: number, T: number, accel: number, fastest: number): number {
+    const w = this.spinVel;
+    const top = dir * fastest;
+    const t1 = Math.abs(top - w) / accel;
+    const travel = t1 >= T ? w * T + 0.5 * dir * accel * T * T : ((w + top) / 2) * t1 + top * (T - t1);
+    return Math.max(0, dist - dir * travel);
   }
 
   /** Wiped out or knocked out: no control; the animator plays the fall (and the knockout's flight, which the rider's position follows). */
@@ -610,5 +719,20 @@ export class Rider {
     this.shadow.position.set(this.x, water + 0.04, this.z);
     this.shadow.scale.setScalar(Math.max(0.3, 1 - above * 0.18));
     this.shadow.visible = this.group.visible && !this.wiped;
+    // Shadow and foam lie on the water's slope, turned with the board.
+    _tilt.setFromUnitVectors(UP, _normal.set(-this.slopeDx, 1, -this.slopeDz).normalize());
+    _turn.setFromAxisAngle(UP, this.heading);
+    this.shadow.quaternion.copy(_tilt).multiply(_turn).multiply(FLAT);
+    // Foam while planing: longer with speed (and a boost), heavier off the outside rail in a carve, boiling a little.
+    const foaming = !this.airborne && !this.wiped && this.speed > 4;
+    this.foam.visible = foaming;
+    if (foaming) {
+      const b = this.spec.build;
+      const pace = clamp((this.speed - 5) / 14, 0, 1);
+      const boil = 1 + 0.06 * Math.sin(time * 29 + this.z * 0.9);
+      const surge = time < this.boostUntil ? 1.3 : 1;
+      this.foam.scale.set(b * (1 + 0.3 * Math.abs(this.lean)) * boil, b, b * (0.6 + 0.6 * pace) * surge * (2 - boil));
+      this.foam.position.set(-this.lean * 0.1 * b, 0, 0.02);
+    }
   }
 }

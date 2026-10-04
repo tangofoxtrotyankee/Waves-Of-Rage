@@ -260,7 +260,7 @@ export class RiderAnimator {
     this.flinchK = clamp(strength, 0.2, 1.6);
   }
 
-  /** The knockout launch: thrown up and towards `dir`, the board away the other way. */
+  /** The knockout launch: thrown up and towards `dir`, the board flying off on its own. */
   knockOut(dir: number, input: AnimInput): void {
     this.koActive = true;
     this.koDir = dir >= 0 ? 1 : -1;
@@ -273,8 +273,9 @@ export class RiderAnimator {
     // The flight keeps up with the field (the hit has already slowed the rider), so the tumble plays out beside the attacker, not in the camera's face.
     const forward = Math.max(input.speed, PHYSICS.baseSpeed);
     this.koBodyV.set(this.koDir * RIDER_ANIM.koSide + fx * forward * 0.92, RIDER_ANIM.koUp, fz * forward * 0.92);
-    this.koBoard.set(input.x, input.y, input.z);
-    this.koBoardV.set(-this.koDir * RIDER_ANIM.boardSide + fx * forward, RIDER_ANIM.boardUp, fz * forward);
+    // The board flies out on the shove side too (never back through the attacker), a little slower than the body, flipping.
+    this.koBoard.set(input.x + this.koDir * 0.3 * b, input.y, input.z);
+    this.koBoardV.set(this.koDir * RIDER_ANIM.boardSide + fx * forward * 0.88, RIDER_ANIM.boardUp, fz * forward * 0.88);
     this.koRoll = 0;
     this.koPitch = 0;
     this.koYaw = input.heading;
@@ -331,20 +332,25 @@ export class RiderAnimator {
     this.apply(this.out);
   }
 
-  /** The surf stance: side-on hips (left foot forward), shoulders turned back towards the camera, knees bent, arms out for balance. */
+  /**
+   * The surf stance (the mockup's hero): side-on hips (left foot forward),
+   * shoulders turned back towards the camera, knees well bent, the back
+   * leaning forward over the front foot, and both arms spread wide for
+   * balance, the front one reaching forward, the back one trailing.
+   */
   private stance(p: Pose): void {
     p.fill(0);
-    p[C.crouch] = 0.5;
+    p[C.crouch] = 0.6;
     p[C.hipYaw] = -0.5;
-    p[C.hipPitch] = 0.22;
+    p[C.hipPitch] = 0.3;
     p[C.spineYaw] = 0.14;
-    p[C.spinePitch] = 0.16;
+    p[C.spinePitch] = 0.28;
     p[C.chestYaw] = 0.24;
-    p[C.chestPitch] = 0.24;
+    p[C.chestPitch] = 0.32;
     p[C.headYaw] = 0.12;
-    p[C.headPitch] = -0.55;
-    setArm(p, ARM.l, 0.2, 0.68, 0.1, 0.95);
-    setArm(p, ARM.r, -0.15, 0.62, 0.05, 0.85);
+    p[C.headPitch] = -0.78;
+    setArm(p, ARM.l, 0.45, 1.32, 0.2, 0.6);
+    setArm(p, ARM.r, -0.2, 1.08, 0.0, 0.45);
     p[C.plant] = 1;
   }
 
@@ -367,11 +373,11 @@ export class RiderAnimator {
     // The inside (trailing) hand reaches out and back towards the water; on a hard carve (braking into the turn) it trails in it.
     const inside = L >= 0 ? ARM.l : ARM.r;
     const outside = L >= 0 ? ARM.r : ARM.l;
-    p[inside.roll] += aL * (0.35 + 0.3 * hard);
-    p[inside.pitch] -= aL * (0.15 + 0.3 * hard);
-    p[inside.elbow] -= aL * (0.35 + 0.4 * hard);
-    p[outside.roll] += aL * 0.45;
-    p[outside.elbow] += aL * 0.3;
+    p[inside.roll] += aL * (-0.15 + 0.1 * hard);
+    p[inside.pitch] -= aL * (0.3 + 0.4 * hard);
+    p[inside.elbow] -= aL * (0.35 + 0.3 * hard);
+    p[outside.roll] += aL * 0.35;
+    p[outside.elbow] += aL * 0.35;
     p[C.bank] += hard * 0.22 * Math.sign(L);
 
     // Braking: lean back on the tail, front arm forward.
@@ -524,7 +530,9 @@ export class RiderAnimator {
       const k = easeOut((t - t1) / phases.strike);
       for (let i = 0; i < N; i++) p[i] = lerp(a[i], b[i], k);
     } else if (t < t3) {
-      p.set(b);
+      // Snap past the strike pose and settle back (an overshoot the 60 Hz frames can show), then a shudder on the hold.
+      const o = 0.18 * Math.sin(Math.PI * clamp((t - t2) / (phases.hold * 0.6), 0, 1));
+      for (let i = 0; i < N; i++) p[i] = b[i] + (b[i] - a[i]) * o;
       p[C.chestRoll] += 0.025 * Math.sin(t * 70);
     } else {
       const k = smoothstep(0, 1, (t - t3) / phases.recover);
@@ -554,17 +562,18 @@ export class RiderAnimator {
     // Strike.
     b[C.chestYaw] = base[C.chestYaw] - side * 0.42;
     b[C.spineYaw] = base[C.spineYaw] - side * 0.2;
-    b[C.chestRoll] = base[C.chestRoll] - side * 0.32;
-    b[C.spineRoll] = base[C.spineRoll] - side * 0.1;
-    b[C.hipX] = base[C.hipX] + side * 0.13;
-    b[C.crouch] = base[C.crouch] + 0.04;
-    b[C.headYaw] = base[C.headYaw] + side * 0.35;
+    b[C.chestRoll] = base[C.chestRoll] - side * 0.34;
+    b[C.spineRoll] = base[C.spineRoll] - side * 0.18;
+    b[C.hipX] = base[C.hipX] + side * 0.2;
+    b[C.crouch] = base[C.crouch] + 0.02;
+    b[C.chestPitch] = base[C.chestPitch] - 0.08;
+    b[C.headYaw] = base[C.headYaw] + side * 0.45;
     b[C.headRoll] = base[C.headRoll] + side * 0.15;
-    b[C.bank] = base[C.bank] + side * 0.05;
+    b[C.bank] = base[C.bank] + side * 0.1;
     const yawB = b[C.hipYaw] + b[C.spineYaw] + b[C.chestYaw];
     // Aim the arm 15 degrees forward of straight out to the side, whatever the stance has done to the chest.
     // Raised past horizontal in the chest's frame, as the chest leans into the punch.
-    setArm(b, hit, 0.0, 1.95, 0.26 + side * yawB, 0.0);
+    setArm(b, hit, 0.1, 2.15, 0.26 + side * yawB, 0.0);
     setArm(b, guard, 0.55, 0.45, 0.8 - side * yawB, 2.15);
   }
 
@@ -572,23 +581,27 @@ export class RiderAnimator {
   private bargeKeys(base: Pose, a: Pose, b: Pose, side: number): void {
     const lead = side > 0 ? ARM.l : ARM.r;
     const trail = side > 0 ? ARM.r : ARM.l;
-    a[C.crouch] = base[C.crouch] + 0.28;
-    a[C.hipX] = base[C.hipX] - side * 0.06;
-    a[C.chestRoll] = base[C.chestRoll] + side * 0.18;
-    setArm(a, ARM.l, 0.45, 0.3, 0.35, 1.9);
-    setArm(a, ARM.r, 0.45, 0.3, 0.35, 1.9);
-    // Side-on: the chest square to the course so the leading shoulder points at the target.
+    // Anticipation: lean away from the target, coiling, arms drawn in.
+    a[C.crouch] = base[C.crouch] + 0.18;
+    a[C.hipX] = base[C.hipX] - side * 0.12;
+    a[C.chestRoll] = base[C.chestRoll] + side * 0.3;
+    a[C.bank] = base[C.bank] - side * 0.06;
+    setArm(a, ARM.l, 0.45, 0.35, 0.35, 1.9);
+    setArm(a, ARM.r, 0.45, 0.35, 0.35, 1.9);
+    // Strike: side-on (the chest square to the course so the leading shoulder points at the target), that shoulder
+    // dropped and driven in, the hips lunging across, the lead elbow tucked and pointing at the target.
     b[C.chestYaw] = -(base[C.hipYaw] + base[C.spineYaw]) + side * 0.15;
-    b[C.chestRoll] = -side * 0.55;
-    b[C.spineRoll] = -side * 0.18;
-    b[C.chestPitch] = base[C.chestPitch] + 0.15;
-    b[C.hipX] = base[C.hipX] + side * 0.24;
-    b[C.crouch] = base[C.crouch] + 0.3;
-    b[C.headRoll] = side * 0.3;
-    b[C.headYaw] = side * 0.25;
-    b[C.bank] = base[C.bank] + side * 0.16;
-    setArm(b, lead, 0.25, 0.22, 0.45, 1.75);
-    setArm(b, trail, -0.5, 0.6, -0.3, 1.0);
+    b[C.chestRoll] = -side * 0.4;
+    b[C.spineRoll] = -side * 0.2;
+    b[C.chestPitch] = base[C.chestPitch];
+    b[C.hipX] = base[C.hipX] + side * 0.35;
+    b[C.crouch] = base[C.crouch] + 0.12;
+    b[C.headRoll] = side * 0.25;
+    b[C.headYaw] = side * 0.3;
+    b[C.headPitch] = base[C.headPitch] + 0.1;
+    b[C.bank] = base[C.bank] + side * 0.28;
+    setArm(b, lead, 0.0, 0.95, 0.0, 1.9);
+    setArm(b, trail, -0.3, 0.75, -0.2, 1.1);
   }
 
   /** Layer 4: a hit taken. The head snaps away, the torso twists and bends away, the arms fly up, the board wobbles. */
@@ -628,21 +641,25 @@ export class RiderAnimator {
       board.rotation.set(0, 0, 0);
     }
 
-    // A bad landing: pitched forward over the nose, arms flailing, then back up.
+    // A bad landing: thrown forward over the nose, hands out into the water to catch the fall, then scrambling back up.
     const tc = t - this.crashAt;
     if (s.crashing && tc >= 0 && !s.wiped) {
-      const c = tc < 0.18 ? easeOut(tc / 0.18) : tc < 0.42 ? 1 : 1 - smoothstep(0.42, 0.7, tc);
-      p[C.hipPitch] += 0.35 * c;
-      p[C.spinePitch] += 0.5 * c;
-      p[C.chestPitch] += 0.35 * c;
-      p[C.headPitch] -= 0.4 * c;
-      p[C.crouch] += 0.45 * c;
-      p[C.lPitch] = lerp(p[C.lPitch], 1.6 * Math.sin(t * 15), c);
-      p[C.rPitch] = lerp(p[C.rPitch], 1.6 * Math.sin(t * 15 + 2.5), c);
-      p[C.lRoll] = lerp(p[C.lRoll], 1.1, c);
-      p[C.rRoll] = lerp(p[C.rRoll], 1.1, c);
-      p[C.tilt] += 0.12 * c;
-      if (tc < 0.25 && tc + dt >= 0.25) this.splash(s.x, s.y, s.z + 0.8 * s.build, 0.7);
+      const c = tc < 0.2 ? easeOut(tc / 0.2) : tc < 0.38 ? 1 : 1 - smoothstep(0.38, 0.7, tc);
+      this.bodyPivot.rotation.set(0.85 * c, 0, 0.12 * c * Math.sin(tc * 9));
+      this.bodyPivot.position.set(0, pivot - 0.3 * c, 0.3 * c);
+      p[C.plant] = 1 - 0.7 * c;
+      p[C.lThigh] = 0.9;
+      p[C.rThigh] = 0.2;
+      p[C.lKnee] = 1.5;
+      p[C.rKnee] = 1.1;
+      p[C.spinePitch] += 0.25 * c;
+      p[C.chestPitch] += 0.15 * c;
+      p[C.headPitch] -= 0.6 * c;
+      p[C.crouch] += 0.3 * c;
+      setArm(p, ARM.l, lerp(p[C.lPitch], 1.9 + 0.3 * Math.sin(t * 15), c), lerp(p[C.lRoll], 0.6, c), 0, lerp(p[C.lElbow], 0.3, c));
+      setArm(p, ARM.r, lerp(p[C.rPitch], 1.7 + 0.3 * Math.sin(t * 15 + 2.5), c), lerp(p[C.rRoll], 0.7, c), 0, lerp(p[C.rElbow], 0.4, c));
+      p[C.tilt] += 0.1 * c;
+      if (tc < 0.22 && tc + dt >= 0.22) this.splash(s.x + Math.sin(s.heading) * 0.9 * s.build, s.y, s.z + Math.cos(s.heading) * 0.9 * s.build, 0.8);
     }
 
     // The last heart: pitch forward off the board into the water and float face down.

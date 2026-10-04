@@ -22,6 +22,8 @@ export class Rival extends Rider {
     super(spec);
     this.phase = index * 2.1;
     this.laneOffset = ((index % 4) - 1.5) * 2.2;
+    // The lane-keeping steer is not a trick: rivals ride their air straight and land clean.
+    this.spinsInAir = false;
   }
 
   think(player: Rider, buoys: { x: number; z: number }[], time: number): RiderControl {

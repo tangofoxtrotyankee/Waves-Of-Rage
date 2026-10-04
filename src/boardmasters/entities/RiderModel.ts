@@ -75,12 +75,18 @@ export interface RiderModel {
   readonly bones: THREE.Bone[];
   readonly board: THREE.Mesh;
   readonly dims: RigDims;
+  readonly bodyMaterial: THREE.ShaderMaterial;
+  readonly boardMaterial: THREE.ShaderMaterial;
+  /** Both materials, for uniforms set on the whole rider (flash). */
   readonly materials: THREE.ShaderMaterial[];
   dispose(): void;
 }
 
 type RGB = [number, number, number];
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+/** The baked key and fill light directions in the rider's frame (it faces +z; the chase camera sees its back, -z; +x is screen-left). */
+const KEY = V(-0.6, 0.62, -0.5).normalize();
+const FILL = V(0.8, 0.1, -0.35).normalize();
 
 /** Body proportions per type. */
 interface Proportions {
@@ -166,20 +172,21 @@ class Builder {
   }
 
   /**
-   * Baked light on top of the shader's sun: tops light and warm (the
-   * sunset), undersides dark and cool, faces turned to the camera (the
-   * rider's back) a touch brighter with a warm rim on the upper back and
-   * shoulders, faces turned in towards the body darker.
+   * Baked light on top of the shader's sun, which is ahead of the riders
+   * and so leaves the back the camera sees in ambient: a warm sunset key
+   * from above and behind the right shoulder (the mockup's hero is lit
+   * that way) picks out the facets of the back, shoulders and arms in
+   * orange; a weaker, cooler fill from the left; undersides dark and cool;
+   * faces turned in towards the body darker still.
    */
   private shade(n: THREE.Vector3): RGB {
-    let s = 0.86 + 0.26 * n.y;
-    const back = Math.max(0, -n.z);
-    const up = Math.max(0, n.y);
-    s += 0.16 * back * (n.y > -0.3 ? 1 : 0.3);
-    if (this.side !== 0) s -= 0.16 * Math.max(0, -n.x * this.side);
-    const warm = up * (0.5 + 0.5 * back) + 0.4 * back * (n.y > -0.3 ? 1 : 0);
+    const key = Math.max(0, n.x * KEY.x + n.y * KEY.y + n.z * KEY.z);
+    const fill = Math.max(0, n.x * FILL.x + n.y * FILL.y + n.z * FILL.z);
     const under = Math.max(0, -n.y);
-    return [s + 0.14 * warm - 0.04 * under, s + 0.03 * warm - 0.05 * under, s - 0.07 * warm + 0.05 * under];
+    let s = 0.64 + 0.56 * key + 0.16 * fill + 0.1 * n.y;
+    if (this.side !== 0) s -= 0.16 * Math.max(0, -n.x * this.side);
+    const k = key * key;
+    return [s + 0.26 * k + 0.03 - 0.05 * under, s + 0.04 * k - 0.03 - 0.06 * under, s - 0.14 * k - 0.04 + 0.05 * under + 0.06 * fill];
   }
 
   /**
@@ -301,8 +308,15 @@ function skeletonPositions(dims: RigDims, pr: Proportions): THREE.Vector3[] {
   return [hips, spine, chest, neck, head, hair, shoulderL, elbowL, wristL, shoulderR, elbowR, wristR, hipL, kneeL, ankleL, hipR, kneeR, ankleR];
 }
 
-export function rigDims(look: RiderLook): RigDims {
+/** Body proportions for a look: the body type's, narrowed in the shoulders and arms for a female figure. */
+function proportions(look: RiderLook): Proportions {
   const pr = PROPORTIONS[look.body];
+  if (!look.female) return pr;
+  return { ...pr, shoulderX: pr.shoulderX * 0.84, chestRx: pr.chestRx * 0.86, chestRz: pr.chestRz * 0.95, latRx: pr.latRx * 0.84, arm: pr.arm * 0.85 };
+}
+
+export function rigDims(look: RiderLook): RigDims {
+  const pr = proportions(look);
   const deckY = 0.1;
   const ankle = 0.07;
   const shin = 0.39;
@@ -330,7 +344,7 @@ export function rigDims(look: RiderLook): RigDims {
 /** The body: torso, head and hair, arms, legs, clothes and accessories, one bone per part. */
 function buildBody(spec: RiderSpec, dims: RigDims, J: THREE.Vector3[]): THREE.BufferGeometry {
   const { look, colors } = spec;
-  const pr = PROPORTIONS[look.body];
+  const pr = proportions(look);
   const white = regionUv(ATLAS.white, ATLAS_SIZE, ATLAS_SIZE);
   const faceRect = regionUv(ATLAS.face, ATLAS_SIZE, ATLAS_SIZE);
   const shortsRect = regionUv(ATLAS.shorts, ATLAS_SIZE, ATLAS_SIZE);
@@ -366,10 +380,15 @@ function buildBody(spec: RiderSpec, dims: RigDims, J: THREE.Vector3[]): THREE.Bu
     [0.37, cRx * 0.42, cRz * 0.62, 0, -0.012],
     [0.41, 0.065, 0.06, 0, -0.012],
   ], 8, true);
-  // Pecs: two flat plates on the chest, and the shoulder blades on the back, give the facets something to catch.
+  // Pecs (a bust on a female figure) on the chest, and the shoulder blades on the back, give the facets something to catch.
   for (const sx of [1, -1]) {
     g.paint(BONE.chest, skin, wetsuit ? topRect : null, sx);
-    g.blob(chest.clone().add(V(sx * cRx * 0.42, 0.17, cRz * 0.78)), cRx * 0.42, 0.075, 0.05, 0);
+    if (!look.female) g.blob(chest.clone().add(V(sx * cRx * 0.42, 0.17, cRz * 0.78)), cRx * 0.42, 0.075, 0.05, 0);
+    else if (look.top !== 'bikini') {
+      if (look.top !== 'none' && look.top !== 'wetsuit') g.paint(BONE.chest, look.topColor);
+      g.blob(chest.clone().add(V(sx * 0.068, 0.165, cRz * 0.82)), 0.064, 0.058, 0.05, 0);
+    }
+    g.paint(BONE.chest, skin, wetsuit ? topRect : null, sx);
     g.blob(chest.clone().add(V(sx * cRx * 0.45, 0.2, -cRz * 0.72)), cRx * 0.4, 0.09, 0.045, 0);
   }
   // Neck and trapezius.
@@ -403,7 +422,8 @@ function buildBody(spec: RiderSpec, dims: RigDims, J: THREE.Vector3[]): THREE.Bu
     const el = J[fa];
     const wr = J[hd];
     g.paint(ua, skin, null, sx);
-    g.blob(sh.clone().add(V(sx * 0.03, 0.0, 0)), 0.1 * armK, 0.095 * armK, 0.1 * armK, 1, (p) => {
+    const delt = look.female ? 0.9 : 1;
+    g.blob(sh.clone().add(V(sx * 0.03 * delt, 0.0, 0)), 0.1 * armK * delt, 0.095 * armK * delt, 0.1 * armK * delt, 1, (p) => {
       if (p.y < 0) p.x *= 0.85;
     });
     g.tube(sh.clone().add(V(sx * 0.005, -0.04, 0)), down, fwd, [
@@ -764,11 +784,11 @@ function buildBoard(spec: RiderSpec, deckY: number): THREE.BufferGeometry {
 /** Build a rider's body (skinned) and board for a spec. */
 export function buildRiderModel(spec: RiderSpec): RiderModel {
   const dims = rigDims(spec.look);
-  const pr = PROPORTIONS[spec.look.body];
+  const pr = proportions(spec.look);
   const joints = skeletonPositions(dims, pr);
   const atlas = riderAtlas(spec);
   const deckTex = boardDeckTexture(spec);
-  const bodyMaterial = createPS1Material({ map: atlas, flat: 0.16 });
+  const bodyMaterial = createPS1Material({ map: atlas, flat: 0.22 });
   const boardMaterial = createPS1Material({ map: deckTex, flat: 0.05 });
 
   const geometry = buildBody(spec, dims, joints);
@@ -799,6 +819,8 @@ export function buildRiderModel(spec: RiderSpec): RiderModel {
     bones,
     board,
     dims,
+    bodyMaterial,
+    boardMaterial,
     materials,
     dispose() {
       geometry.dispose();
