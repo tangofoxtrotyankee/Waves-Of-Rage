@@ -65,10 +65,10 @@ export function buildFoamGeometry(seed = 7): THREE.BufferGeometry {
       if (i >= 4 && i % 2 === 1) continue;
       const t0 = i / K;
       const t1 = (i + 1) / K;
-      const x0 = s * (0.18 + 0.7 * t0);
-      const x1 = s * (0.18 + 0.7 * t1);
-      const z0 = -1.06 - 1.35 * t0;
-      const z1 = -1.06 - 1.35 * t1;
+      const x0 = s * (0.18 + 0.55 * t0);
+      const x1 = s * (0.18 + 0.55 * t1);
+      const z0 = -1.06 - 1.05 * t0;
+      const z1 = -1.06 - 1.05 * t1;
       const w0 = 0.14 * (1 - t0) + 0.03;
       const w1 = 0.14 * (1 - t1) + 0.03;
       const j = (i % 2 === 0 ? 0.05 : -0.02) + rng() * 0.03;

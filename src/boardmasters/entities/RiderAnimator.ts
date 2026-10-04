@@ -373,7 +373,7 @@ export class RiderAnimator {
     // The inside (trailing) hand reaches out and back towards the water; on a hard carve (braking into the turn) it trails in it.
     const inside = L >= 0 ? ARM.l : ARM.r;
     const outside = L >= 0 ? ARM.r : ARM.l;
-    p[inside.roll] += aL * (-0.15 + 0.1 * hard);
+    p[inside.roll] += aL * (-0.15 - 0.3 * hard);
     p[inside.pitch] -= aL * (0.3 + 0.4 * hard);
     p[inside.elbow] -= aL * (0.35 + 0.3 * hard);
     p[outside.roll] += aL * 0.35;
@@ -562,7 +562,7 @@ export class RiderAnimator {
     // Strike.
     b[C.chestYaw] = base[C.chestYaw] - side * 0.42;
     b[C.spineYaw] = base[C.spineYaw] - side * 0.2;
-    b[C.chestRoll] = base[C.chestRoll] - side * 0.34;
+    b[C.chestRoll] = base[C.chestRoll] - side * 0.28;
     b[C.spineRoll] = base[C.spineRoll] - side * 0.18;
     b[C.hipX] = base[C.hipX] + side * 0.2;
     b[C.crouch] = base[C.crouch] + 0.02;
@@ -573,7 +573,7 @@ export class RiderAnimator {
     const yawB = b[C.hipYaw] + b[C.spineYaw] + b[C.chestYaw];
     // Aim the arm 15 degrees forward of straight out to the side, whatever the stance has done to the chest.
     // Raised past horizontal in the chest's frame, as the chest leans into the punch.
-    setArm(b, hit, 0.1, 2.15, 0.26 + side * yawB, 0.0);
+    setArm(b, hit, 0.1, 2.4, 0.26 + side * yawB, 0.0);
     setArm(b, guard, 0.55, 0.45, 0.8 - side * yawB, 2.15);
   }
 
