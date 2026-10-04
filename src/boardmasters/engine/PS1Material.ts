@@ -83,9 +83,17 @@ varying vec3 vUvAffine;
 varying float vFog;
 varying float vElevation;
 
+// Skinned riders (Three defines USE_SKINNING for a SkinnedMesh and binds the bone texture).
+#include <skinning_pars_vertex>
+
 void main() {
-  vec4 localPosition = vec4(position, 1.0);
-  vec3 localNormal = normal;
+  vec3 transformed = vec3(position);
+  vec3 objectNormal = vec3(normal);
+  #include <skinbase_vertex>
+  #include <skinnormal_vertex>
+  #include <skinning_vertex>
+  vec4 localPosition = vec4(transformed, 1.0);
+  vec3 localNormal = objectNormal;
   #ifdef USE_INSTANCING
     localPosition = instanceMatrix * localPosition;
     localNormal = mat3(instanceMatrix) * localNormal;
@@ -135,6 +143,7 @@ uniform float uQuantize;
 uniform float uDither;
 uniform float uFlash;
 uniform float uOpacity;
+uniform float uFade;
 
 #ifdef PS1_FLAT
 flat varying vec3 vColor;
@@ -157,6 +166,11 @@ vec3 skyAt(float e) {
 }
 
 void main() {
+  // Screen-door fade (a rider between the camera and the player): drop pixels through a 4x4 Bayer threshold.
+  if (uFade > 0.0) {
+    mat4 door = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0) / 16.0;
+    if (door[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))] + 0.03125 < uFade) discard;
+  }
   vec2 uv = mix(vUvPersp, vUvAffine.xy / vUvAffine.z, uAffine);
   vec3 base = uColor * vColor;
   if (uUseMap > 0.5) base *= texture2D(uMap, uv).rgb;
@@ -200,6 +214,7 @@ export function createPS1Material(options: PS1MaterialOptions = {}): THREE.Shade
       uUseFog: { value: fog ? 1 : 0 },
       uOpacity: { value: opacity },
       uFlash: { value: 0 },
+      uFade: { value: 0 },
       uUvOffset: { value: new THREE.Vector2(0, 0) },
     },
     vertexShader,

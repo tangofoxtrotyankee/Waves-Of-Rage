@@ -84,11 +84,17 @@ export const PHYSICS = {
   slopeGain: 10,
   /** Heading change per second at full steer, radians. */
   carveRate: 2.4,
+  /** How quickly the turn rate follows the steer, per second: a digital press rolls into the carve over a few frames instead of snapping. */
+  carveResponse: 18,
+  /** Steering back across (against the current heading) turns this much faster, so changing line stays quick. */
+  counterCarveMul: 1.4,
   /** Braking tightens the carve. */
   hardCarveMul: 1.6,
   maxHeading: 0.62,
-  /** Heading returns to straight this fast with no input, radians per second. */
-  headingReturn: 4,
+  /** Heading returns to straight at up to this rate with no input, radians per second (eased by carveResponse). */
+  headingReturn: 3.2,
+  /** How far the rider and board bank into a carve at the full turn rate, radians (the visual lean follows the turn rate, not the heading). */
+  carveLean: 0.36,
   /** Steering authority while airborne. */
   airSteer: 0.45,
   jumpVelocity: 6.2,
@@ -157,10 +163,45 @@ export const COMBAT = {
   rivalCheckSeconds: 0.7,
 } as const;
 
-/** In the air: Left/Right spin, X grabs; land within the tolerance or wipe out. */
+/**
+ * In the air: Left/Right spin, X grabs; land within the tolerance or wipe
+ * out. The spin is eased so a phone's digital button is not a full-rate
+ * spin the moment it is touched:
+ *
+ *  - only a press made in the air spins: a steer carried off the water (a
+ *    carve held over a crest) never does until it is let go or reversed, and
+ *    the first moment of air ignores the steer altogether
+ *  - the rate builds while the steer is held, to about 330 degrees a second
+ *  - released, the rider settles to an upright by the time it lands
+ *    (predicted from its height and fall): a short stray spin unwinds, a
+ *    spin with momentum past the half turn completes
+ *  - held on a big enough air (about a second), the spin is helped round to
+ *    land the 360, and a completed 360 that cannot become a 720 in time is
+ *    held there rather than over-rotated
+ *
+ * A spin held into a landing it cannot complete (a half turn off a small
+ * jump) still lands crooked and crashes: that, and pressing too late, are
+ * the risks.
+ */
 export const TRICKS = {
-  /** Radians per second at full steer. */
-  spinRate: (Math.PI * 2) / 0.75,
+  /** Radians per second at full steer, once the rate has built up (330 degrees a second). */
+  spinRate: (Math.PI * 2 * 330) / 360,
+  /** Seconds of holding the steer for the spin rate to build from nothing to full. */
+  spinRampSeconds: 0.25,
+  /** Seconds after leaving the water before a press starts a spin. */
+  spinDelay: 0.1,
+  /** Stopping, reversing and settling a spin is this many times quicker than building one. */
+  spinBrakeMul: 4,
+  /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate... */
+  spinSettleMul: 1.4,
+  /** ...and helping a held spin round, its rate may build this many times faster than spinRampSeconds allows. */
+  spinAssistMul: 2,
+  /** Released, the rider approaches its upright at least this fast (proportional, per second), and faster when the water is close... */
+  spinSettleGain: 6,
+  /** ...and picks it from where the spin would carry it in this many seconds (momentum: past the half turn it completes). */
+  spinSettleLead: 0.35,
+  /** The settle aims to be upright this long before touching down (a little slack for a swell rising to meet the rider). */
+  spinLandingMargin: 0.08,
   /** Points by half-turns landed: 180, 360, 540, 720. */
   spinPoints: [0, 250, 500, 750, 1000] as const,
   grabPoints: 250,
@@ -174,6 +215,35 @@ export const TRICKS = {
   barrelRollPoints: 400,
   /** Land before this much of the roll is done and it is a crash. */
   rollLandingFraction: 0.85,
+} as const;
+
+/**
+ * Rider animation (entities/RiderAnimator.ts): the combat clips' phases in
+ * seconds (anticipation, strike, hold, recovery), how a hit is felt, the
+ * knockout's launch and tumble, and the wipeout. The physics never waits on
+ * these; they only shape what is drawn.
+ */
+export const RIDER_ANIM = {
+  /** The punch's hold is longer than a real one so the fist stays out long enough to read on a phone. */
+  punch: { windup: 0.07, strike: 0.08, hold: 0.12, recover: 0.2 },
+  barge: { windup: 0.06, strike: 0.08, hold: 0.1, recover: 0.2 },
+  /** A punch or barge connects this long after it starts (mid-strike): the victim's shove and flinch wait for the fist. */
+  impactDelay: 0.09,
+  /** The flinch's length, and how long the board wobbles after a hit. */
+  flinchSeconds: 0.5,
+  /** The deep knee bend on landing. */
+  landSeconds: 0.22,
+  /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the same side, lower and slower, flipping. */
+  koUp: 6,
+  koSide: 2.6,
+  koTumble: 8,
+  boardUp: 4.2,
+  boardSide: 1.2,
+  boardTumble: 11,
+  /** Floating after the splash, the body sinks this far over the respawn wait. */
+  koSink: 0.55,
+  /** The last heart: pitch forward over the board into the water over this long. */
+  wipeoutFall: 0.45,
 } as const;
 
 /** BOOST (UP UP): a burst of speed, on a cooldown. */
