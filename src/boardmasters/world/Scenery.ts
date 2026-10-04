@@ -364,27 +364,46 @@ function cliffStack(b: Builder, side: number, u0: number, z: number, rng: () => 
   return { ledges, top };
 }
 
-/** A waterfall down the cliff face from `top` metres into the sea, with mist where it lands. */
+/**
+ * A waterfall down the cliff face from `top` metres into the sea, with mist
+ * where it lands: a main sheet with narrower side columns that start lower
+ * down in a second, bluer shade, so the edges step and the fall reads as
+ * ragged water rather than one even slab. Narrower at the lip, spreading as
+ * it falls.
+ */
 function waterfall(b: Builder, u: number, top: number, z: number, rng: () => number): void {
   const width = 3 + rng() * 2.5;
   const x = u - 0.6;
   const ry = -Math.PI / 2 - 0.75; // facing the course and the camera coming up the coast
-  const g = new THREE.PlaneGeometry(width, top + 1, 1, 3);
-  const pos = g.getAttribute('position');
-  const uv = g.getAttribute('uv');
-  for (let i = 0; i < pos.count; i++) {
-    const t = (pos.getY(i) + (top + 1) / 2) / (top + 1);
-    // Narrower at the lip, spreading as it falls.
-    pos.setX(i, pos.getX(i) * (0.65 + (1 - t) * 0.5));
-    uv.setXY(i, uv.getX(i) * (width / 4), uv.getY(i) * ((top + 1) / 5));
+  // Its own variation (the shared rng's sequence is left as it was, so the coast is unchanged).
+  const own = mulberry32(Math.floor(z * 7) + 13);
+  const white: Rgb = [1, 1, 1];
+  const blue: Rgb = [0.72, 0.88, 1];
+  const columns: { cx: number; w: number; from: number; shade: Rgb; depth: number }[] = [
+    { cx: 0, w: 0.5, from: 1, shade: white, depth: 0 },
+    { cx: -0.36, w: 0.3, from: 0.62 + own() * 0.2, shade: blue, depth: -0.12 },
+    { cx: 0.37, w: 0.28, from: 0.7 + own() * 0.2, shade: blue, depth: -0.12 },
+    { cx: 0.12 + own() * 0.1, w: 0.1, from: 0.85 + own() * 0.1, shade: white, depth: 0.08 },
+    { cx: -0.58, w: 0.12, from: 0.35 + own() * 0.2, shade: blue, depth: -0.2 },
+  ];
+  for (const col of columns) {
+    const h = (top + 1) * col.from;
+    const g = new THREE.PlaneGeometry(width * col.w, h, 1, 3);
+    const pos = g.getAttribute('position');
+    const uv = g.getAttribute('uv');
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) + h / 2 - 1; // metres above the sea
+      const t = clamp((y + 1) / (top + 1), 0, 1);
+      pos.setXYZ(i, (pos.getX(i) + col.cx * width) * (0.65 + (1 - t) * 0.5), y, col.depth);
+      uv.setXY(i, (uv.getX(i) * col.w + col.cx) * (width / 4), (y + 1) / 5);
+    }
+    g.rotateY(ry);
+    g.translate(x, 0, z);
+    b.add('falls', finish(g, (_x, py) => mixRgb(col.shade, mixRgb(col.shade, [0.8, 0.9, 1], 0.5), clamp(py / top, 0, 1) * 0.6)));
   }
-  g.translate(0, (top + 1) / 2 - 1, 0);
-  g.rotateY(ry);
-  g.translate(x, 0, z);
-  b.add('falls', finish(g, (_x, py) => mixRgb([1, 1, 1], [0.8, 0.9, 1], clamp(py / top, 0, 1) * 0.3)));
-  // Mist: pale blobs where it hits the water.
+  // Mist: big pale blobs where it hits the water.
   for (let i = 0; i < 4; i++) {
-    const r = 1.4 + rng() * 1.6;
+    const r = (1.4 + rng() * 1.6) * 1.5;
     const blob = new THREE.IcosahedronGeometry(r, 0);
     blob.scale(1.3, 0.75, 1.1);
     blob.translate(x - 1 - rng() * 2.5, 0.6 + rng() * 1.6 + i * 0.4, z + (rng() - 0.5) * width * 1.4);
