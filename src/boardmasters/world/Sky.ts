@@ -1,6 +1,6 @@
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-import { colorGeometry, createPS1Material, paintGeometry, skyColorAt } from '../engine/PS1Material';
+import { createPS1Material, paintGeometry, skyColorAt } from '../engine/PS1Material';
 import { clamp, mixRgb, mulberry32, rgb, smoothstep } from '../engine/math';
 import { THREE } from '../engine/three';
 import { CAMERA, FOG, PALETTE, SUN } from '../game/constants';
@@ -181,6 +181,10 @@ function clouds(): THREE.BufferGeometry {
       const h = r * thick;
       pieces.push(paintGeometry(blob, (_x, y) => mixRgb(under, top, clamp((y + h) / (2 * h) - 0.1, 0, 1))));
     }
+    // Bands across the top half of the sun are left out (the rng still runs, so the rest of the deck is unchanged): the
+    // disc shows bright and clear above, with the low bands and its own stripes crossing its foot, as in the mockup.
+    const sunE = Math.asin(SUN.dir[1] / Math.hypot(...SUN.dir));
+    if (Math.abs(azimuth) < length / CLOUD_R / 2 + SUN_RADIUS * 0.6 && elevation > sunE - 0.01 && elevation < sunE + SUN_RADIUS * 1.6) continue;
     const cloud = mergeGeometries(pieces.map((g) => g.toNonIndexed()));
     onSphere(azimuth, elevation, CLOUD_R, p);
     m.lookAt(p, centre.set(0, p.y, 0), up);
@@ -189,6 +193,53 @@ function clouds(): THREE.BufferGeometry {
     parts.push(cloud);
   }
   return mergeGeometries(parts);
+}
+
+/** The sun's angular radius (radians): the disc is 11 units across at 92. */
+const SUN_RADIUS = 11 / 92;
+
+/**
+ * The sun's disc, 11 units in radius: horizontal strips from a hot yellow
+ * top to an orange foot, with the retro sunset's gaps cut across its lower
+ * half (thin up top, wider towards the horizon).
+ */
+function sunDisc(): THREE.BufferGeometry {
+  const r = 11;
+  const top = rgb(0xfff27a);
+  const foot = rgb(0xff8a2e);
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const width = (y: number) => Math.sqrt(Math.max(0, r * r - y * y));
+  const strip = (y0: number, y1: number) => {
+    const w0 = width(y0);
+    const w1 = width(y1);
+    const c0 = mixRgb(top, foot, (r - y0) / (2 * r));
+    const c1 = mixRgb(top, foot, (r - y1) / (2 * r));
+    const v: [number, number, number, Rgb][] = [
+      [-w0, y0, 0, c0], [-w1, y1, 0, c1], [w1, y1, 0, c1],
+      [-w0, y0, 0, c0], [w1, y1, 0, c1], [w0, y0, 0, c0],
+    ];
+    for (const [x, y, z, c] of v) {
+      positions.push(x, y, z);
+      colors.push(...c);
+    }
+  };
+  // The top half in a few strips (one shape), then bands and gaps.
+  for (let y = r; y > 0.01; y -= r / 4) strip(y, Math.max(0, y - r / 4));
+  let y = 0;
+  let gap = 0.35;
+  while (y > -r) {
+    const band = Math.max(0.9, 2.2 - gap);
+    strip(y, Math.max(-r, y - band));
+    y -= band + gap;
+    gap += 0.3;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(positions.length).fill(0), 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Array((positions.length / 3) * 2).fill(0), 2));
+  return g;
 }
 
 /**
@@ -217,19 +268,23 @@ export class Sky {
     // The sun: slowly turning rays and the disc, sized for a 92 m distance and scaled out to SUN.distance.
     this.sun = new THREE.Group();
     this.sun.scale.setScalar(SUN.distance / 92);
-    const disc = new THREE.Mesh(colorGeometry(new THREE.CircleGeometry(11, 14), PALETTE.sun), createPS1Material({ unlit: true, fog: false }));
+    const disc = new THREE.Mesh(sunDisc(), createPS1Material({ unlit: true, fog: false, side: THREE.DoubleSide }));
     const rayParts: THREE.BufferGeometry[] = [];
+    const glow = rgb(PALETTE.sun);
     for (let i = 0; i < 9; i++) {
       const ray = new THREE.BufferGeometry();
-      // A thin wedge: narrow at the disc, wider at the tip.
-      ray.setAttribute('position', new THREE.Float32BufferAttribute([-1, 12, 0, 1, 12, 0, 4.5, 85, 0, -1, 12, 0, 4.5, 85, 0, -4.5, 85, 0], 3));
+      // A thin wedge: narrow at the disc, wider at the tip, and black (nothing, added) at the tip so it fades out short of the purple.
+      ray.setAttribute('position', new THREE.Float32BufferAttribute([-1, 12, 0, 1, 12, 0, 3, 45, 0, -1, 12, 0, 3, 45, 0, -3, 45, 0], 3));
       ray.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(18).fill(0), 3));
       ray.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(12).fill(0), 2));
       ray.rotateZ((i / 9) * Math.PI * 2 + (i % 2) * 0.2);
-      rayParts.push(colorGeometry(ray, PALETTE.sun));
+      rayParts.push(paintGeometry(ray, (x, y) => (Math.hypot(x, y) > 30 ? [0, 0, 0] : glow)));
     }
-    // The rays are blended, so drawn with the transparent things after everything opaque (behind the clouds and the world).
-    this.rays = new THREE.Mesh(mergeGeometries(rayParts), createPS1Material({ unlit: true, fog: false, depthWrite: false, opacity: 0.16, side: THREE.DoubleSide }));
+    // The rays add light (so they warm the sky rather than greying it), drawn with the transparent things after everything
+    // opaque (behind the clouds and the world).
+    const rayMaterial = createPS1Material({ unlit: true, fog: false, depthWrite: false, opacity: 0.2, side: THREE.DoubleSide });
+    rayMaterial.blending = THREE.AdditiveBlending;
+    this.rays = new THREE.Mesh(mergeGeometries(rayParts), rayMaterial);
     this.rays.position.z = -1;
     this.rays.renderOrder = -3;
     disc.renderOrder = AFTER_WORLD + 1;
