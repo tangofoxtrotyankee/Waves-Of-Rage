@@ -84,11 +84,17 @@ export const PHYSICS = {
   slopeGain: 10,
   /** Heading change per second at full steer, radians. */
   carveRate: 2.4,
+  /** How quickly the turn rate follows the steer, per second: a digital press rolls into the carve over a few frames instead of snapping. */
+  carveResponse: 18,
+  /** Steering back across (against the current heading) turns this much faster, so changing line stays quick. */
+  counterCarveMul: 1.4,
   /** Braking tightens the carve. */
   hardCarveMul: 1.6,
   maxHeading: 0.62,
-  /** Heading returns to straight this fast with no input, radians per second. */
-  headingReturn: 4,
+  /** Heading returns to straight at up to this rate with no input, radians per second (eased by carveResponse). */
+  headingReturn: 3.2,
+  /** How far the rider and board bank into a carve at the full turn rate, radians (the visual lean follows the turn rate, not the heading). */
+  carveLean: 0.36,
   /** Steering authority while airborne. */
   airSteer: 0.45,
   jumpVelocity: 6.2,
@@ -157,10 +163,27 @@ export const COMBAT = {
   rivalCheckSeconds: 0.7,
 } as const;
 
-/** In the air: Left/Right spin, X grabs; land within the tolerance or wipe out. */
+/**
+ * In the air: Left/Right spin, X grabs; land within the tolerance or wipe
+ * out. The spin is eased so a tap on a phone's digital button is not a full
+ * 300-degree-a-second spin: the rate builds while the steer is held, the
+ * first moment of air ignores the steer (a carve carried over a crest does
+ * not spin), and on release the rider settles to the nearest upright, so a
+ * short accidental spin unwinds and a nearly complete 360 completes.
+ */
 export const TRICKS = {
-  /** Radians per second at full steer. */
-  spinRate: (Math.PI * 2) / 0.75,
+  /** Radians per second at full steer, once the rate has built up (about 315 degrees a second). */
+  spinRate: (Math.PI * 2) / 1.15,
+  /** Seconds of holding the steer for the spin rate to build from nothing to full. */
+  spinRampSeconds: 0.28,
+  /** Seconds after leaving the water before the steer starts a spin. */
+  spinDelay: 0.12,
+  /** With the steer released the rider settles towards the nearest upright at up to this rate, radians per second... */
+  spinSettleRate: 3.4,
+  /** ...approaching it at this rate per second (proportional), so it eases in rather than stopping dead... */
+  spinSettleGain: 6,
+  /** ...and picks that upright from where the spin would carry it in this many seconds (momentum). */
+  spinSettleLead: 0.12,
   /** Points by half-turns landed: 180, 360, 540, 720. */
   spinPoints: [0, 250, 500, 750, 1000] as const,
   grabPoints: 250,
@@ -174,6 +197,35 @@ export const TRICKS = {
   barrelRollPoints: 400,
   /** Land before this much of the roll is done and it is a crash. */
   rollLandingFraction: 0.85,
+} as const;
+
+/**
+ * Rider animation (entities/RiderAnimator.ts): the combat clips' phases in
+ * seconds (anticipation, strike, hold, recovery), how a hit is felt, the
+ * knockout's launch and tumble, and the wipeout. The physics never waits on
+ * these; they only shape what is drawn.
+ */
+export const RIDER_ANIM = {
+  /** The punch's hold is longer than a real one so the fist stays out long enough to read on a phone. */
+  punch: { windup: 0.07, strike: 0.08, hold: 0.12, recover: 0.2 },
+  barge: { windup: 0.06, strike: 0.08, hold: 0.1, recover: 0.2 },
+  /** A punch or barge connects this long after it starts (mid-strike): the victim's shove and flinch wait for the fist. */
+  impactDelay: 0.09,
+  /** The flinch's length, and how long the board wobbles after a hit. */
+  flinchSeconds: 0.5,
+  /** The deep knee bend on landing. */
+  landSeconds: 0.22,
+  /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the other way. */
+  koUp: 5.2,
+  koSide: 3.4,
+  koTumble: 8,
+  boardUp: 3.6,
+  boardSide: 2.2,
+  boardTumble: 11,
+  /** Floating after the splash, the body sinks this far over the respawn wait. */
+  koSink: 0.55,
+  /** The last heart: pitch forward over the board into the water over this long. */
+  wipeoutFall: 0.45,
 } as const;
 
 /** BOOST (UP UP): a burst of speed, on a cooldown. */

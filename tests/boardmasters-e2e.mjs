@@ -174,7 +174,7 @@ try {
   const barged = await strike(3, -1.0, 2, 'Shift');
   check('a barge shoves a rival hard and takes a health point', !!barged && barged.peak > 4 && barged.health === 1, JSON.stringify(barged));
 
-  // --- tricks: a full spin lands clean and scores; a half spin crashes ---
+  // --- tricks: a full spin lands clean and scores; a half spin held into the landing crashes; stray steering in the air does not ---
   const trick = async (spin) => {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
@@ -193,11 +193,68 @@ try {
   const spun = await trick(Math.PI * 2);
   check('a 360 landed clean scores air, spin and landing', !!spun && spun.clean && spun.points >= 850, JSON.stringify(spun));
   await wait(400);
+  // Released, a spin settles towards the nearest upright, so the half spin is held into the landing: the steer
+  // stays down (no settling) and the spin is kept at 180 through the descent.
+  const halfSpin = async () => {
+    for (let tries = 0; tries < 5; tries++) {
+      await grounded();
+      await ev(() => { window.bm.run.lastLanding = null; });
+      await page.keyboard.press('Space'); await wait(60);
+      if (!(await surfer()).airborne) { await wait(300); continue; }
+      await page.keyboard.down('ArrowLeft');
+      let landing = null;
+      for (let i = 0; i < 80 && !landing; i++) {
+        await ev(() => { const s = window.bm.run.surfer; if (s.airborne && s.vy < 0) { s.spin = Math.PI; s.spinVel = 0; } });
+        await wait(30);
+        landing = await ev(() => window.bm.run.lastLanding);
+      }
+      await page.keyboard.up('ArrowLeft');
+      if (landing) return landing;
+    }
+    return null;
+  };
+  await ev(() => { window.bm.run.health = 3; });
   const hp = await ev(() => window.bm.run.health);
-  const crashed = await trick(Math.PI);
+  const crashed = await halfSpin();
   const hpAfter = await ev(() => window.bm.run.health);
-  check('a 180 is a bad landing: no points, one heart lost', !!crashed && !crashed.clean && crashed.points === 0 && hpAfter === hp - 1, `${JSON.stringify(crashed)} health ${hp}->${hpAfter}`);
-  await ev(() => { window.bm.run.health = 3; }); // the course's own buoys are still out there
+  check('a 180 held into the landing is a bad landing: no points, one heart lost', !!crashed && !crashed.clean && crashed.points === 0 && hpAfter === hp - 1, `${JSON.stringify(crashed)} health ${hp}->${hpAfter}`);
+  await ev(() => { window.bm.run.health = 3; });
+  await wait(900);
+  // A short tap of the steer in mid-air (a phone's digital button) builds only a little spin, which settles back upright.
+  const tapInAir = async () => {
+    for (let tries = 0; tries < 5; tries++) {
+      await grounded();
+      await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 3; });
+      await page.keyboard.press('Space');
+      // Past the first moment of air (where the steer is ignored for spinning), then a tap of about a tenth of a second.
+      if (!(await until(() => window.bm.run.surfer.airborne && window.bm.run.surfer.airTime > 0.16, 1000))) { await wait(300); continue; }
+      await page.keyboard.down('ArrowRight'); await wait(140); await page.keyboard.up('ArrowRight');
+      const peakDeg = await ev(() => Math.abs(window.bm.run.surfer.spin) * 180 / Math.PI);
+      for (let i = 0; i < 60; i++) {
+        await wait(50);
+        const landing = await ev(() => window.bm.run.lastLanding);
+        if (landing) return { landing, peakDeg: +peakDeg.toFixed(1), health: await ev(() => window.bm.run.health) };
+      }
+    }
+    return null;
+  };
+  const tapped = await tapInAir();
+  check('a short steer tap in the air settles back upright: clean landing, no heart lost', !!tapped && tapped.peakDeg > 1 && tapped.landing.clean && tapped.landing.spinDeg < 30 && tapped.health === 3, JSON.stringify(tapped));
+  // A carve held over the lip: the steer is ignored for spinning in the first moment of air.
+  let carried = null;
+  for (let tries = 0; tries < 5 && !carried; tries++) {
+    await grounded();
+    await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 3; });
+    await page.keyboard.down('ArrowLeft'); await wait(150);
+    await page.keyboard.press('Space'); await wait(70);
+    const early = await ev(() => ({ air: window.bm.run.surfer.airborne, airTime: window.bm.run.surfer.airTime, spinDeg: Math.abs(window.bm.run.surfer.spin) * 180 / Math.PI }));
+    await page.keyboard.up('ArrowLeft');
+    if (!early.air) { await wait(300); continue; }
+    if (await until(() => window.bm.run.lastLanding !== null, 3000)) carried = { early, landing: await ev(() => window.bm.run.lastLanding) };
+  }
+  check('a carve held into a jump does not start a spin', !!carried && (carried.early.airTime > 0.12 || carried.early.spinDeg < 0.5) && carried.landing.clean, JSON.stringify(carried));
+  // The course's own buoys are still out there; and these landings feed the RAGE meter, which the RAGE check wants empty and idle.
+  await ev(() => { const r = window.bm.run; r.health = 3; r.rage = 0; r.rageUntil = 0; });
   await wait(1500);
 
   // --- RAGE: a knockout on a nearly full meter starts it ---
