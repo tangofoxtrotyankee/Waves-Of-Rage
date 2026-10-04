@@ -1,4 +1,4 @@
-import { CAMERA, FOG, RENDER_BLEED_MAX, RENDER_SCALE, RENDER_SCALE_FORCED, RENDER_SCALES, VIEW } from '../game/constants';
+import { CAMERA, FOG, RENDER_BLEED_MAX, RENDER_PIXEL_BUDGET, RENDER_SCALE, RENDER_SCALE_FORCED, RENDER_SCALES, VIEW } from '../game/constants';
 import { THREE } from './three';
 
 /**
@@ -102,31 +102,29 @@ export class Renderer {
     hud.left = `${this.offsetX}px`;
     hud.top = `${this.offsetY}px`;
 
-    // The world's scale: the first of RENDER_SCALES that gives a whole number of device pixels per world pixel.
-    let rs = RENDER_SCALE_FORCED ?? RENDER_SCALES[0];
+    // The world's scale: the first of RENDER_SCALES that lands every world pixel on a whole number (2 or more) of
+    // device pixels within the pixel budget; otherwise the first (1.5), whose pixels may then come out uneven.
+    const devPerView = useWhole ? Math.round(whole * dpr) : 0;
+    let rs: number = RENDER_SCALE_FORCED ?? RENDER_SCALES[0];
     if (RENDER_SCALE_FORCED === null && useWhole) {
-      const devPerView = Math.round(whole * dpr);
+      let found = false;
       for (const s of RENDER_SCALES) {
         const d = devPerView / s;
-        if (Math.abs(d - Math.round(d)) < 1e-6) {
-          rs = s;
-          break;
-        }
+        if (d < 2 || Math.abs(d - Math.round(d)) > 1e-6) continue;
+        if (this.layoutWorld(s, scale, pw, ph, w, h) > RENDER_PIXEL_BUDGET) continue;
+        rs = s;
+        found = true;
+        break;
       }
+      // A small window (2 device pixels per VIEW pixel): 1x keeps even 2-pixel cells where 1.5 would band.
+      if (!found && devPerView === 2) rs = 1;
     }
     this.renderScale = rs;
     const rw = Math.round(this.width * rs);
     const rh = Math.round(this.height * rs);
-    // The bleed: whole world pixels past each side of the HUD rectangle, up to the parent's edges.
     const px = scale / rs;
-    const maxX = Math.floor(((RENDER_BLEED_MAX.x - 1) * rw) / 2);
-    const maxY = Math.floor(((RENDER_BLEED_MAX.y - 1) * rh) / 2);
-    const left = Math.min(maxX, Math.max(0, Math.ceil(this.offsetX / px - 0.01)));
-    const right = Math.min(maxX, Math.max(0, Math.ceil((pw - this.offsetX - w) / px - 0.01)));
-    const top = Math.min(maxY, Math.max(0, Math.ceil(this.offsetY / px - 0.01)));
-    const bottom = Math.min(maxY, Math.max(0, Math.ceil((ph - this.offsetY - h) / px - 0.01)));
-    this.renderWidth = rw + left + right;
-    this.renderHeight = rh + top + bottom;
+    this.layoutWorld(rs, scale, pw, ph, w, h);
+    const { left, top } = this.bleed;
     this.gl.setSize(this.renderWidth, this.renderHeight, false);
     const world = this.canvas.style;
     world.width = `${this.renderWidth * px}px`;
@@ -137,6 +135,31 @@ export class Renderer {
     this.camera.setViewOffset(rw, rh, -left, -top, this.renderWidth, this.renderHeight);
     VIEW.snapGrid.x = this.renderWidth / 2;
     VIEW.snapGrid.y = this.renderHeight / 2;
+  }
+
+  /** The world canvas's bleed past the HUD rectangle, in world pixels per side (layoutWorld fills it). */
+  private readonly bleed = { left: 0, right: 0, top: 0, bottom: 0 };
+
+  /**
+   * Work out the bleed for render scale `rs` (whole world pixels past each
+   * side of the HUD rectangle, up to the parent's edges and
+   * RENDER_BLEED_MAX), set renderWidth/renderHeight and return the buffer's
+   * pixel count.
+   */
+  private layoutWorld(rs: number, scale: number, pw: number, ph: number, w: number, h: number): number {
+    const rw = Math.round(this.width * rs);
+    const rh = Math.round(this.height * rs);
+    const px = scale / rs;
+    const maxX = Math.floor(((RENDER_BLEED_MAX.x - 1) * rw) / 2);
+    const maxY = Math.floor(((RENDER_BLEED_MAX.y - 1) * rh) / 2);
+    const b = this.bleed;
+    b.left = Math.min(maxX, Math.max(0, Math.ceil(this.offsetX / px - 0.01)));
+    b.right = Math.min(maxX, Math.max(0, Math.ceil((pw - this.offsetX - w) / px - 0.01)));
+    b.top = Math.min(maxY, Math.max(0, Math.ceil(this.offsetY / px - 0.01)));
+    b.bottom = Math.min(maxY, Math.max(0, Math.ceil((ph - this.offsetY - h) / px - 0.01)));
+    this.renderWidth = rw + b.left + b.right;
+    this.renderHeight = rh + b.top + b.bottom;
+    return this.renderWidth * this.renderHeight;
   }
 
   /** Client (CSS) coordinates to internal pixels. */

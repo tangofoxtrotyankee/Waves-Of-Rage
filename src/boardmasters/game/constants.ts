@@ -37,6 +37,8 @@ export const RENDER_SCALE_FORCED: number | null = RES_SCALE >= 1 && RES_SCALE <=
 export const RENDER_SCALES = [1.5, 2, 2.5] as const;
 /** The render scale before the first fit. */
 export const RENDER_SCALE = RENDER_SCALE_FORCED ?? RENDER_SCALES[0];
+/** The most world pixels (bleed included) Renderer.fit takes on for whole device pixels: phones stay near 1.5x (about 280k to 360k), desktops may go to 2x or 2.5x. */
+export const RENDER_PIXEL_BUDGET = IS_PORTRAIT ? 420_000 : 1_200_000;
 /** How far the world may bleed past the HUD rectangle, as a multiple of its size per axis (past that the page shows black). */
 export const RENDER_BLEED_MAX = { x: 2.2, y: 1.6 } as const;
 const VIEW_W = IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE;
