@@ -185,6 +185,13 @@ export const CAMERA = {
   /** How "in the way" (0..1) maps to the rider's screen-door fade: solid below fadeFrom, gone at fadeTo. */
   fadeFrom: 0.15,
   fadeTo: 0.9,
+  /**
+   * The rival the surfer is punching or barging stays solid through the blow
+   * and its flinch: no sight-line rule, and only this tighter lens rule
+   * (metres from the camera: solid beyond `start`, gone at `full`) instead
+   * of the rider's own 3.6 to 1.5.
+   */
+  strikeNear: { start: 2.4, full: 1.2 },
 } as const;
 
 /** Short draw distance: linear fog to the sunset colour. The sky dome meets the same colour at the horizon. */

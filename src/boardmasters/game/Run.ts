@@ -106,6 +106,9 @@ export class Run {
   private impact: { at: number; kind: ImpactKind; label: string; color: string; scale: number; target: Rider } | null = null;
   /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
   hitStop = 0;
+  /** The rival the surfer's last blow is aimed at, and the run time until which its reaction must stay in sight (updateNearFade). */
+  private strikeTarget: Rival | null = null;
+  private strikeUntil = 0;
   private snapCamera = true;
   /** Camera and look-at offsets from the surfer, eased; the surfer's own motion is followed exactly. */
   private readonly camOffset = new THREE.Vector3();
@@ -191,6 +194,8 @@ export class Run {
     this.bumpCooldown = 0;
     this.impact = null;
     this.hitStop = 0;
+    this.strikeTarget = null;
+    this.strikeUntil = 0;
     this.wake.reset();
     this.spray.reset();
     this.snapCamera = true;
@@ -495,6 +500,9 @@ export class Run {
         // The word waits for the blow too, over the victim: HIT!, BARGE!, or the knockout with its points.
         const out = target.takeHit(damage, shove, this.time);
         const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false) : barge ? 'BARGE!' : 'HIT!';
+        // Keep the victim in sight through its flinch: the camera's near fade must not screen-door it out as the blow lands.
+        this.strikeTarget = target;
+        this.strikeUntil = this.time + RIDER_ANIM.impactDelay + RIDER_ANIM.flinchSeconds;
         this.impact = {
           at: this.time + RIDER_ANIM.impactDelay,
           kind: out ? 'knockout' : barge ? 'barge' : 'punch',
@@ -832,16 +840,25 @@ export class Run {
    * Near-camera occlusion: for each rival, how much it is in the way, 0..1,
    * from how close it is to the camera and whether it sits on the sight line
    * from the camera to the surfer, short of the surfer. Allocation-free.
+   *
+   * The rival the surfer is hitting (strikeTarget, until its flinch is over)
+   * is exempt: the blow and the reaction must read, so only a tighter lens
+   * rule (CAMERA.strikeNear) can thin it, when it is right at the lens.
    */
   private updateNearFade(): void {
     const cam = this.renderer.camera.position;
     const s = this.surfer;
+    const struck = this.time < this.strikeUntil ? this.strikeTarget : null;
     // The sight line: camera to the surfer's chest.
     const lx = s.x - cam.x;
     const ly = s.y + 1.0 - cam.y;
     const lz = s.z - cam.z;
     const len2 = lx * lx + ly * ly + lz * lz;
     for (const r of this.rivals) {
+      if (r === struck && !r.knockedOut) {
+        r.fadeNear(cam, CAMERA.strikeNear.start, CAMERA.strikeNear.full);
+        continue;
+      }
       const rx = r.x - cam.x;
       const ry = r.y + 0.9 - cam.y;
       const rz = r.z - cam.z;
