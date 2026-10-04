@@ -24,13 +24,16 @@
         -webkit-tap-highlight-color: transparent;
       }
 
-      /* The 2D HUD canvas is drawn at the internal resolution and the 3D canvas
-         at a multiple of it (RENDER_SCALE); both are given the same CSS size and
-         offset and scaled up with nearest-neighbour sampling
+      /* The 2D HUD canvas is drawn at the internal resolution and fitted inside
+         the safe area (the padding below); the 3D canvas renders at a multiple
+         of it on the same pixel grid and bleeds past it to the screen edges.
+         Both are scaled up with nearest-neighbour sampling
          (src/boardmasters/engine/Renderer.ts positions them). */
       #game {
         position: absolute;
-        inset: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        inset: 0;
+        box-sizing: border-box;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         overflow: hidden;
         touch-action: none;
       }

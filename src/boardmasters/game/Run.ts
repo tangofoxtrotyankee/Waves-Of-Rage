@@ -555,26 +555,46 @@ export class Run {
    * widening its FOV with speed, BOOST and RAGE, and shaking on demand
    * (shake()). The offsets ease; the surfer's travel along the water is
    * followed exactly, so no speed leaves it behind, while its height is
-   * followed loosely in the air so jumps rise in frame. Ends by fading
+   * followed loosely in the air so jumps rise in frame (within CAMERA.airLag).
+   * The title screen has its own framing (CAMERA.title) that a run glides
+   * out of; a rival right alongside eases the camera back a little
+   * (crowdAmount); pausing freezes the camera. Ends by fading
    * rivals that come between the camera and the surfer or right up to the
    * lens (updateNearFade).
    */
   private updateCamera(dt: number): void {
+    // Paused: the camera stays exactly where it was (no shake, no FOV settling on the frozen frame).
+    if (this.state === 'paused') return;
     const s = this.surfer;
     const sinH = Math.sin(s.heading);
+    const title = this.state === 'title';
+    // A rival right alongside: ease back and up a little so a fight frames both riders rather than one big body.
+    const crowd = title ? 0 : this.crowdAmount();
+    if (this.snapCamera && !this.camWasTitle) this.camCrowd = crowd;
+    else this.camCrowd += (crowd - this.camCrowd) * damp(CAMERA.crowdRate, dt);
+    const back = CAMERA.back + (title ? CAMERA.title.back : 0) + this.camCrowd * CAMERA.crowdBack;
     const camX = s.x - sinH * CAMERA.side;
-    const camZ = s.z - CAMERA.back;
-    // The camera's own idea of the surfer's height: tight on the water, lagging in the air so a jump rises in frame.
+    const camZ = s.z - back;
+    // The camera's own idea of the surfer's height: tight on the water, lagging in the air so a jump rises in
+    // frame, but never more than CAMERA.airLag below the surfer (big airs stay in frame) and never above them
+    // (no hanging on the way down, no jolt on landing).
     if (this.snapCamera) this.followY = s.y;
-    else this.followY += (s.y - this.followY) * damp(s.airborne ? CAMERA.airFollowRate : CAMERA.waterFollowRate, dt);
+    else {
+      this.followY += (s.y - this.followY) * damp(s.airborne ? CAMERA.airFollowRate : CAMERA.waterFollowRate, dt);
+      this.followY = Math.max(s.y - CAMERA.airLag, Math.min(this.followY, s.y));
+    }
     const water = this.ocean.height(camX, camZ);
-    const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(CAMERA.height, water + CAMERA.clearance + 0.3 - this.followY), -CAMERA.back);
-    const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight, CAMERA.lookAhead);
+    const height = CAMERA.height + (title ? CAMERA.title.height : 0) + this.camCrowd * CAMERA.crowdUp;
+    const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(height, water + CAMERA.clearance + 0.3 - this.followY), -back);
+    const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight + (title ? CAMERA.title.lookHeight : 0), CAMERA.lookAhead);
     const roll = (-s.heading / PHYSICS.maxHeading) * CAMERA.roll;
     // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
     const speedUp = Math.min(1, Math.max(0, (s.speed - PHYSICS.baseSpeed) / (PHYSICS.maxSpeed - PHYSICS.baseSpeed)));
     const kick = speedUp * CAMERA.speedFov + (this.time < s.boostUntil ? CAMERA.boostFov : 0) + (this.raging ? CAMERA.rageFov : 0);
-    if (this.snapCamera) {
+    // A run started from the title glides from the title framing into the gameplay one; any other reset snaps.
+    const glide = this.snapCamera && this.camWasTitle && !title;
+    this.camWasTitle = title;
+    if (this.snapCamera && !glide) {
       this.camOffset.copy(desired);
       this.lookOffset.copy(look);
       this.camRoll = roll;
@@ -582,6 +602,11 @@ export class Run {
       this.shakeLeft = 0;
       this.snapCamera = false;
     } else {
+      if (glide) {
+        this.fovKick = 0;
+        this.shakeLeft = 0;
+        this.snapCamera = false;
+      }
       this.camOffset.lerp(desired, damp(CAMERA.followRate, dt));
       this.lookOffset.lerp(look, damp(CAMERA.lookRate, dt));
       this.camRoll += (roll - this.camRoll) * damp(CAMERA.rollRate, dt);
@@ -618,6 +643,10 @@ export class Run {
   private followY = 0;
   private camRoll = 0;
   private fovKick = 0;
+  /** Whether the last camera update framed the title screen (a run started from it glides rather than snaps). */
+  private camWasTitle = false;
+  /** Eased crowdAmount(): how far the camera has pulled back for a rival alongside. */
+  private camCrowd = 0;
   /** The current camera shake: strength, length and seconds left, and its own clock for the wobble. */
   private shakeAmount = 0;
   private shakeSeconds = 1;
@@ -641,6 +670,23 @@ export class Run {
   }
 
   /**
+   * How much a rival rides right alongside the surfer, 0..1 (full within
+   * CAMERA.crowdFull metres to the side, none past crowdNone, counted only
+   * from a little behind to a little ahead). Allocation-free.
+   */
+  private crowdAmount(): number {
+    const s = this.surfer;
+    let amount = 0;
+    for (const r of this.rivals) {
+      if (r.knockedOut) continue;
+      const dz = r.z - s.z;
+      if (dz < CAMERA.crowdBehind || dz > CAMERA.crowdAhead) continue;
+      amount = Math.max(amount, 1 - Run.step(CAMERA.crowdFull, CAMERA.crowdNone, Math.abs(r.x - s.x)));
+    }
+    return amount;
+  }
+
+  /**
    * Near-camera occlusion: for each rival, how much it is in the way, 0..1,
    * from how close it is to the camera and whether it sits on the sight line
    * from the camera to the surfer, short of the surfer. Allocation-free.
@@ -657,14 +703,16 @@ export class Run {
       const rx = r.x - cam.x;
       const ry = r.y + 0.9 - cam.y;
       const rz = r.z - cam.z;
-      const near = 1 - Run.step(CAMERA.nearFull, CAMERA.nearNone, Math.sqrt(rx * rx + ry * ry + rz * rz));
+      // A rival dropping back past the surfer only fills the bottom of the frame, so it fades from further out.
+      const shift = CAMERA.behindShift * Run.step(0, 1, s.z - r.z);
+      const near = 1 - Run.step(CAMERA.nearFull + shift, CAMERA.nearNone + shift, Math.sqrt(rx * rx + ry * ry + rz * rz));
       let between = 0;
       const t = (rx * lx + ry * ly + rz * lz) / len2;
       if (t > 0 && t < 1) {
         const px = rx - lx * t;
         const py = ry - ly * t;
         const pz = rz - lz * t;
-        between = (1 - Run.step(CAMERA.lineFull, CAMERA.lineNone, Math.sqrt(px * px + py * py + pz * pz))) * (1 - Run.step(0.85, 1, t));
+        between = (1 - Run.step(CAMERA.lineFull, CAMERA.lineNone, Math.sqrt(px * px + py * py + pz * pz))) * (1 - Run.step(CAMERA.lineEnd, 1, t));
       }
       this.applyNearFade(r, r.knockedOut ? 0 : Math.max(near, between));
     }
@@ -674,11 +722,12 @@ export class Run {
    * Fade a rival that is in the camera's way. The lead switches this to
    * Rider.setNearFade(amount) (screen-door transparency, on the rider
    * branch) at merge; until then the rival and its shadow are hidden outright
-   * past 0.8. Never used on the surfer (simulate flashes it while
-   * invulnerable).
+   * past 0.5 (about 3.6 m from the lens). setNearFade should start dithering
+   * out at about 0.15 so the 3.0 to 4.2 m band reads as a fade. Never used
+   * on the surfer (simulate flashes it while invulnerable).
    */
   private applyNearFade(rider: Rival, amount: number): void {
-    const visible = amount <= 0.8;
+    const visible = amount <= 0.5;
     if (rider.group.visible === visible) return;
     rider.group.visible = visible;
     rider.shadow.visible = visible && !rider.wiped;
