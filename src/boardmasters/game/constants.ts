@@ -10,37 +10,135 @@ const params = typeof window === 'undefined' ? new URLSearchParams() : new URLSe
 export const IS_PORTRAIT = usePortraitLayout();
 
 /**
- * Internal render resolution: 426x240 keeps the PlayStation's 240 lines at
- * 16:9 (240x426 upright). `?res=320` renders at the original game's 320x180
- * for comparison.
+ * Internal resolution: 426x240 keeps the PlayStation's 240 lines at 16:9
+ * (240x426 upright). The HUD canvas, touch buttons and pointer mapping work
+ * in these VIEW pixels. `?res=320` uses the original game's 320x180 (the
+ * world at 1x too) for comparison.
+ *
+ * The 3D world renders at a multiple of VIEW, the render scale: 1.5 by
+ * default (639x360 / 360x639, the 300 to 470 world pixels across a phone
+ * that the gameplay mockup reads as), so silhouettes and far detail come out
+ * sharper while the textures, dither, 5-bit quantise and vertex snap keep
+ * the PlayStation grain. Renderer.fit picks the scale per screen from
+ * RENDER_SCALES so a world pixel covers a whole number of device pixels
+ * (3 device pixels per VIEW pixel: 1.5; 4: 2; 5: 2.5), and lets the world
+ * bleed past the HUD's 16:9 rectangle to the screen edges, so tall phones
+ * get no letterbox bars. `?res=1` to `?res=4` force a scale (`?res=1` is
+ * the old 1x world).
  */
-const LOW_RES = params.get('res') === '320';
+const RES = params.get('res');
+const LOW_RES = RES === '320';
 const LONG_SIDE = LOW_RES ? 320 : 426;
 const SHORT_SIDE = LOW_RES ? 180 : 240;
+const RES_SCALE = RES !== null && !LOW_RES ? Number(RES) : NaN;
+/** A forced render scale (`?res=N`; 1 under `?res=320`), or null to let Renderer.fit choose one. */
+export const RENDER_SCALE_FORCED: number | null = RES_SCALE >= 1 && RES_SCALE <= 4 ? RES_SCALE : LOW_RES ? 1 : null;
+/** Render scales Renderer.fit may choose, in order of preference; the first is also the fallback when none lands on whole device pixels. */
+export const RENDER_SCALES = [1.5, 2, 2.5] as const;
+/** The render scale before the first fit. */
+export const RENDER_SCALE = RENDER_SCALE_FORCED ?? RENDER_SCALES[0];
+/** The most world pixels (bleed included) Renderer.fit takes on for whole device pixels: phones stay near 1.5x (about 280k to 360k), desktops may go to 2x or 2.5x. */
+export const RENDER_PIXEL_BUDGET = IS_PORTRAIT ? 420_000 : 1_200_000;
+/** How far the world may bleed past the HUD rectangle, as a multiple of its size per axis (past that the page shows black). */
+export const RENDER_BLEED_MAX = { x: 2.2, y: 1.6 } as const;
+const VIEW_W = IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE;
+const VIEW_H = IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE;
 export const VIEW = {
-  width: IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE,
-  height: IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE,
+  width: VIEW_W,
+  height: VIEW_H,
+  /**
+   * The vertex snap grid, in cells per half clip space per axis: half the
+   * world buffer's pixel size, so vertices land on rendered pixels (polygons
+   * still jitter as they move). Renderer.fit keeps it in step with the
+   * buffer; PS1Material.syncLook reads it.
+   */
+  snapGrid: { x: (VIEW_W * RENDER_SCALE) / 2, y: (VIEW_H * RENDER_SCALE) / 2 } as { x: number; y: number },
 } as const;
 
 /** `?character=kai` picks a rider from CHARACTERS; the character select comes later. */
 export const CHARACTER_PARAM = params.get('character');
 
-/** Chase camera: behind the surfer at about waist height, looking a little way ahead. */
+/**
+ * Chase camera, framed like the gameplay mockup: behind and above the
+ * surfer, looking down on their head and shoulders, with a narrower FOV than
+ * before so the surfer fills the lower middle of the screen (about 47 % to
+ * 91 % of the HUD rectangle on an upright phone) while the horizon sits about
+ * 38 % from the top. On a phone taller than 16:9 the world bleeds past the
+ * HUD rectangle (Renderer.fit), which puts the horizon at about 40 % and the
+ * board's tail at about 83 % of the whole screen, as in the mockup.
+ * Run.updateCamera uses all of it.
+ */
 export const CAMERA = {
-  fov: IS_PORTRAIT ? 72 : 62,
-  near: 0.4,
+  /** Vertical field of view in degrees at cruising speed. */
+  fov: IS_PORTRAIT ? 64 : 52,
+  near: 0.3,
   far: 130,
-  /** Metres behind and above the surfer. Upright phones sit closer and higher, looking further down the course (the gameplay mockup's framing). */
-  back: IS_PORTRAIT ? 4.2 : 4.8,
-  height: IS_PORTRAIT ? 2.0 : 1.5,
-  /** The look-at point, metres ahead of and above the surfer. */
-  lookAhead: IS_PORTRAIT ? 10 : 7,
-  lookHeight: IS_PORTRAIT ? 0.2 : 0.5,
-  /** Exponential easing rates per second for position and look target. */
+  /** Metres behind and above the surfer (the e2e test expects 3 to 7 m behind and more than 0.8 m above). */
+  back: IS_PORTRAIT ? 4.3 : 4.8,
+  height: IS_PORTRAIT ? 2.4 : 2.1,
+  /** Metres beside the surfer, against the heading, at full carve: the camera swings out a little to show the line. */
+  side: 1.0,
+  /** Least height over the water under the camera itself, after easing and shake. */
+  clearance: 0.6,
+  /** The look-at point, metres ahead of and above the surfer, and how far it leads the carve. */
+  lookAhead: IS_PORTRAIT ? 12 : 11,
+  lookHeight: IS_PORTRAIT ? 0 : 0.1,
+  lookSide: 1.2,
+  /**
+   * The title screen's framing, added to the above and eased like the rest
+   * (starting a run glides into the gameplay framing): on an upright phone a
+   * lower camera a little further back, pitched up, puts the horizon about
+   * 55 % down and the surfer between the character stats and the control
+   * hints, as in the title concept. Landscape keeps the gameplay framing.
+   */
+  title: IS_PORTRAIT ? { back: 1.3, height: -0.2, lookHeight: 3.2 } : { back: 0, height: 0, lookHeight: 0 },
+  /** Exponential easing rates per second for position, look target and roll. */
   followRate: 6,
+  /** ...and for following the surfer's height: tight on the water, loose in the air so jumps rise in frame. */
+  waterFollowRate: 12,
+  airFollowRate: 4,
+  /** The most the camera's idea of the surfer's height may lag below the surfer in the air (metres), so big airs never leave the frame. */
+  airLag: IS_PORTRAIT ? 0.7 : 0.5,
+  /**
+   * Combat framing: with a rival right alongside (within `crowdFull` to
+   * `crowdNone` metres to the side, from `crowdBehind` to `crowdAhead`
+   * metres along), the camera eases back and up this much so a fight shows
+   * both riders rather than one body filling the side of the screen.
+   */
+  crowdBack: IS_PORTRAIT ? 1.0 : 0.5,
+  crowdUp: IS_PORTRAIT ? 0.3 : 0.15,
+  crowdFull: 1.4,
+  crowdNone: 2.6,
+  crowdBehind: -2.0,
+  crowdAhead: 2.5,
+  crowdRate: 2.5,
   lookRate: 8,
-  /** Roll into a carve, radians at full heading. */
-  roll: 0.09,
+  rollRate: 4,
+  /** Roll into a carve, radians at full heading (eased; kept small so carves do not read as spinning). */
+  roll: 0.035,
+  /** FOV kick in degrees: up to `speedFov` from cruising to top speed, plus `boostFov` while a BOOST lasts and `rageFov` while raging. */
+  speedFov: 4,
+  boostFov: 5,
+  rageFov: 3,
+  /** Easing rates per second for the kick: quick to widen, slow to settle. */
+  fovIn: 7,
+  fovOut: 2,
+  /** Run.shake: metres of offset per unit of amount and radians of roll per unit, decaying quadratically over the shake's seconds. */
+  shakeMove: 0.12,
+  shakeRoll: 0.03,
+  /**
+   * Near-camera occlusion: a rival this close to the camera (metres, full
+   * to none), or within `lineFull` to `lineNone` metres of the sight line
+   * from the camera to the surfer and short of the surfer (up to
+   * `lineEnd` of the way there), fades out (Run.applyNearFade).
+   */
+  nearFull: 3.0,
+  nearNone: 4.2,
+  lineFull: 0.6,
+  lineNone: 1.1,
+  lineEnd: 0.92,
+  /** ...and the near band moves this much further out for a rival a metre or more behind the surfer. */
+  behindShift: 0.5,
 } as const;
 
 /** Short draw distance: linear fog to the sunset colour. The sky dome meets the same colour at the horizon. */

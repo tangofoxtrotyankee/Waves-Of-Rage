@@ -19,7 +19,7 @@ import { THREE } from './three';
  * Every geometry must carry a `color` attribute (see colorGeometry).
  */
 export const sharedUniforms = {
-  uSnap: { value: new THREE.Vector2(VIEW.width / 2, VIEW.height / 2) },
+  uSnap: { value: new THREE.Vector2(VIEW.snapGrid.x, VIEW.snapGrid.y) },
   uAffine: { value: 1 },
   uQuantize: { value: 1 },
   uDither: { value: 1 },
@@ -49,9 +49,9 @@ export const waterUniforms = {
   uFoamShade: { value: new THREE.Color(WATER.foamShade) },
 };
 
-/** Push the LOOK toggles into the shared uniforms (called every frame; cheap). */
+/** Push the LOOK toggles into the shared uniforms (called every frame; cheap). Vertices snap to one rendered pixel of the world buffer (VIEW.snapGrid, kept by Renderer.fit). */
 export function syncLook(): void {
-  sharedUniforms.uSnap.value.set(LOOK.snap ? VIEW.width / 2 : 0, LOOK.snap ? VIEW.height / 2 : 0);
+  sharedUniforms.uSnap.value.set(LOOK.snap ? VIEW.snapGrid.x : 0, LOOK.snap ? VIEW.snapGrid.y : 0);
   sharedUniforms.uAffine.value = LOOK.affine ? 1 : 0;
   sharedUniforms.uQuantize.value = LOOK.quantize ? 1 : 0;
   sharedUniforms.uDither.value = LOOK.dither ? 1 : 0;
