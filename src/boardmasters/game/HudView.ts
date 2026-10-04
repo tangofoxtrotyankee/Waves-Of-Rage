@@ -169,20 +169,12 @@ export class HudView {
     this.hud.loadImage('logo-big', 'assets/boardmasters/logo-236x118.png');
     const W = this.W;
     this.field = `/${run.rivals.length + 1}`;
+    // HEALTH and POS from the left, SCORE and DIST from the right, the pause button between (240 wide upright: 1/55/131/181).
     this.bar = IS_PORTRAIT
-      ? { hx: 1, hw: 52, px: 55, pw: 38, dx: 131, dw: 48, sx: 181, sw: 58 }
-      : {
-          hx: 4,
-          hw: 58,
-          px: 66,
-          pw: 44,
-          dx: W - 4 - 66 - 4 - 56,
-          dw: 56,
-          sx: W - 4 - 66,
-          sw: 66,
-        };
-    const barW = IS_PORTRAIT ? 132 : 150;
-    const barX = IS_PORTRAIT ? 86 : Math.round(W / 2 - 40);
+      ? { hx: 1, hw: 52, px: 55, pw: 38, dx: W - 109, dw: 48, sx: W - 59, sw: 58 }
+      : { hx: 4, hw: 58, px: 66, pw: 44, dx: W - 130, dw: 56, sx: W - 70, sw: 66 };
+    const barW = IS_PORTRAIT ? Math.min(132, W - 108) : 150;
+    const barX = IS_PORTRAIT ? W - barW - 22 : Math.round(W / 2 - 40);
     this.rage = {
       x: barX,
       y: 30,

@@ -1,6 +1,17 @@
 import { FONT_CHARS } from '../../game/constants';
 import { hex } from './math';
 
+/** `#rrggbb` per colour number, cached: the HUD fills rects every frame and should not build strings to do it. */
+const HEX = new Map<number, string>();
+const css = (color: number): string => {
+  let s = HEX.get(color);
+  if (s === undefined) {
+    s = hex(color);
+    HEX.set(color, s);
+  }
+  return s;
+};
+
 const GLYPH = 8;
 const PER_ROW = 16;
 const SHADOW = '#1a0b2e';
@@ -101,11 +112,34 @@ export function gradientFill(canvas: HTMLCanvasElement, stops: Stops, top = 0, b
   ctx.restore();
 }
 
+let scratch: CanvasRenderingContext2D | null = null;
+
+/**
+ * The pixels of `canvas`, read through one shared scratch canvas made for
+ * readback (willReadFrequently), so the sprite canvases themselves stay
+ * GPU-friendly and the browser does not warn about repeated readbacks.
+ */
+function readPixels(canvas: HTMLCanvasElement): ImageData {
+  if (!scratch) {
+    const c = document.createElement('canvas');
+    scratch = c.getContext('2d', { willReadFrequently: true });
+    if (!scratch) throw new Error('2D canvas unavailable');
+  }
+  const c = scratch.canvas;
+  if (c.width < canvas.width || c.height < canvas.height) {
+    c.width = Math.max(c.width, canvas.width);
+    c.height = Math.max(c.height, canvas.height);
+  }
+  scratch.clearRect(0, 0, canvas.width, canvas.height);
+  scratch.drawImage(canvas, 0, 0);
+  return scratch.getImageData(0, 0, canvas.width, canvas.height);
+}
+
 /** Alpha to 0 or 1 at `threshold` (0..255): canvas text and arcs lose their soft edges. */
 export function hardenAlpha(canvas: HTMLCanvasElement, threshold = 110): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const img = readPixels(canvas);
   const d = img.data;
   for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= threshold ? 255 : 0;
   ctx.putImageData(img, 0, 0);
@@ -187,7 +221,7 @@ export class Hud2D {
 
   rect(x: number, y: number, w: number, h: number, color: number, alpha = 1): void {
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = hex(color);
+    this.ctx.fillStyle = css(color);
     this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
     this.ctx.globalAlpha = 1;
   }
@@ -199,7 +233,7 @@ export class Hud2D {
   }
 
   frame(x: number, y: number, w: number, h: number, color: number): void {
-    this.ctx.strokeStyle = hex(color);
+    this.ctx.strokeStyle = css(color);
     this.ctx.lineWidth = 1;
     this.ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
   }
@@ -218,7 +252,7 @@ export class Hud2D {
   /** A filled disc with hard pixel edges. */
   disc(x: number, y: number, r: number, color: number, alpha = 1): void {
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = hex(color);
+    this.ctx.fillStyle = css(color);
     const cx = Math.round(x);
     const cy = Math.round(y);
     for (let dy = -r; dy < r; dy++) {
@@ -230,7 +264,7 @@ export class Hud2D {
 
   circle(x: number, y: number, r: number, color: number, alpha = 1): void {
     this.ctx.globalAlpha = alpha;
-    this.ctx.fillStyle = hex(color);
+    this.ctx.fillStyle = css(color);
     this.ctx.beginPath();
     this.ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2);
     this.ctx.fill();
@@ -238,7 +272,7 @@ export class Hud2D {
   }
 
   ring(x: number, y: number, r: number, color: number, width = 2): void {
-    this.ctx.strokeStyle = hex(color);
+    this.ctx.strokeStyle = css(color);
     this.ctx.lineWidth = width;
     this.ctx.beginPath();
     this.ctx.arc(Math.round(x), Math.round(y), r, 0, Math.PI * 2);
@@ -288,7 +322,7 @@ export class Hud2D {
     const left = Math.round(align === 'left' ? x : align === 'center' ? x - width / 2 : x - width);
     const top = Math.round(y);
     if (outline) {
-      for (const [dx, dy] of OUTLINE) this.draw(this.ctx, text, left + dx, top + dy, SHADOW, scale, tight);
+      for (let i = 0; i < OUTLINE.length; i++) this.draw(this.ctx, text, left + OUTLINE[i][0], top + OUTLINE[i][1], SHADOW, scale, tight);
     } else if (shadow) this.draw(this.ctx, text, left + 1, top + 1, SHADOW, scale, tight);
     this.draw(this.ctx, text, left, top, color, scale, tight);
   }
@@ -374,7 +408,7 @@ export class Hud2D {
       const rows = EXTRA_GLYPHS[EXTRA_CHARS[i]];
       for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) if (rows[y][x] === '#') ctx.fillRect(i * GLYPH + x, 3 * GLYPH + y, 1, 1);
     }
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const data = readPixels(canvas).data;
     for (let index = 0; index < 4 * PER_ROW; index++) {
       const sx = (index % PER_ROW) * GLYPH;
       const sy = Math.floor(index / PER_ROW) * GLYPH;
@@ -408,9 +442,7 @@ function inkBox(canvas: HTMLCanvasElement): {
   w: number;
   h: number;
 } {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return { x: 0, y: 0, w: canvas.width, h: canvas.height };
-  const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const d = readPixels(canvas).data;
   let x0 = canvas.width;
   let y0 = canvas.height;
   let x1 = -1;

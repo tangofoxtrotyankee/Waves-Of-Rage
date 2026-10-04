@@ -226,7 +226,8 @@ const BIG_CELL = 8;
 export class BigDigits {
   /** Height of a drawn line including the outline. */
   static readonly height = BIG_H + 2;
-  private readonly sheets = new Map<string, HTMLCanvasElement>();
+  /** One baked sheet per gradient (keyed by the stops array itself, so lookups build no string). */
+  private readonly sheets = new Map<Stops, HTMLCanvasElement>();
 
   /** Width of `text` as drawn (characters it lacks count as nothing). */
   width(text: string): number {
@@ -253,18 +254,17 @@ export class BigDigits {
   }
 
   private sheet(stops: Stops): HTMLCanvasElement {
-    const key = stops.join();
-    let sheet = this.sheets.get(key);
+    let sheet = this.sheets.get(stops);
     if (sheet) return sheet;
     const { canvas, ctx } = makeCanvas(BIG_CHARS.length * BIG_CELL, BIG_H + 2);
-    // Outlines first (all glyphs), then the fills, so neighbouring outlines never cover a fill.
+    // Each glyph with its 1px outline in its own cell; drawn glyphs overlap by that outline column only, never a fill.
     BIG_CHARS.forEach((c, i) => {
       const fill = paint(BIG_GLYPHS[c], { '#': '#ffffff' });
       gradientFill(fill, stops);
       ctx.drawImage(outlined(fill, HUD_COLORS.ink, 1, 0), i * BIG_CELL, 0);
     });
     sheet = canvas;
-    this.sheets.set(key, sheet);
+    this.sheets.set(stops, sheet);
     return sheet;
   }
 }

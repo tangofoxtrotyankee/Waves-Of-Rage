@@ -26,7 +26,7 @@ export const TITLE = IS_PORTRAIT
       playY: 144,
       rowY: 172,
     }
-  : { logoX: 4, logoY: 30, columnX: 334, columnW: 176, playY: 30, rowY: 62 };
+  : { logoX: 4, logoY: 30, columnX: VIEW.width - 92, columnW: 176, playY: 30, rowY: 62 };
 
 /** Y of the character name row on the title (the arrows' tap zones are centred on it). */
 export function titleRow(): number {
