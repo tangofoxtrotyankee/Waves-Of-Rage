@@ -350,8 +350,8 @@ export class Run {
       if (r.z < camZ - 2 || r.z > camZ + 60) continue;
       const boost = this.time < r.boostUntil;
       const amount = (i < 0 ? 1 : 0.45) * (0.8 + pace * 1.2 + carve * 3 + (boost ? 2.5 : 0));
-      // The local surfer's clumps stay smaller: they fly close past the camera.
-      const maxSize = i < 0 ? 1.4 : 2.2;
+      // Clumps stay small (a rival's big ones read as white tiles over the riders); the surfer's fly close past the camera.
+      const maxSize = i < 0 ? 1.4 : 1.25;
       let bursts = Math.floor(amount);
       if (Math.random() < amount - bursts) bursts++;
       const outward = r.heading > 0 ? -1 : 1; // the outside of the turn (heading > 0 carves towards +x)

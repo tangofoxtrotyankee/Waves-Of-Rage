@@ -177,7 +177,7 @@ export class Rider {
   constructor(spec: RiderSpec) {
     this.spec = spec;
     this.stats = statMultipliers(spec);
-    this.shadowMaterial = createPS1Material({ unlit: true, opacity: 0.45, depthWrite: false });
+    this.shadowMaterial = createPS1Material({ unlit: true, opacity: 0.45, depthWrite: false, fade: true });
     this.shadow = new THREE.Mesh(colorGeometry(new THREE.CircleGeometry(0.7, 8), PALETTE.deepWater), this.shadowMaterial);
     this.shadow.quaternion.copy(FLAT);
     this.foamMaterial = createFoamMaterial();

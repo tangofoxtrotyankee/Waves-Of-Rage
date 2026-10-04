@@ -99,6 +99,12 @@ varying vec3 vUvAffine;
 varying float vFog;
 varying float vElevation;
 
+#ifdef PS1_DISSOLVE
+// Instanced spray: each clump's own screen-door amount (0 solid, 1 gone), so it dissolves rather than shrinking to a dot.
+attribute float dissolve;
+varying float vDissolve;
+#endif
+
 // Skinned riders (Three defines USE_SKINNING for a SkinnedMesh and binds the bone texture).
 #include <skinning_pars_vertex>
 
@@ -207,6 +213,9 @@ void main() {
     vLight *= 1.0 + (facet - 0.5) * uFacet * (1.0 - smoothstep(18.0, 60.0, depth));
   #endif
   vColor = color;
+  #ifdef PS1_DISSOLVE
+    vDissolve = dissolve;
+  #endif
   #ifdef PS1_WATER
     waterVertex(worldPosition.xyz, worldNormal, depth);
   #endif
@@ -239,6 +248,9 @@ varying vec2 vUvPersp;
 varying vec3 vUvAffine;
 varying float vFog;
 varying float vElevation;
+#ifdef PS1_DISSOLVE
+varying float vDissolve;
+#endif
 
 #ifdef PS1_WATER
 uniform float uTime;
@@ -308,11 +320,19 @@ vec3 skyAt(float e) {
 }
 
 void main() {
-  // Screen-door fade (a rider between the camera and the player): drop pixels through a 4x4 Bayer threshold.
-  if (uFade > 0.0) {
-    mat4 door = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0) / 16.0;
-    if (door[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))] + 0.03125 < uFade) discard;
-  }
+  // Screen-door fade (a rider between the camera and the player, a dying clump of spray): drop pixels through a 4x4 Bayer
+  // threshold. Compiled only into the materials that fade (the fade option): a shader that can discard loses early depth
+  // rejection on tile-based phone GPUs, so the sea and the scenery must not carry it.
+  #ifdef PS1_FADE
+    float fade = uFade;
+    #ifdef PS1_DISSOLVE
+      fade = max(fade, vDissolve);
+    #endif
+    if (fade > 0.0) {
+      mat4 door = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0) / 16.0;
+      if (door[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))] + 0.03125 < fade) discard;
+    }
+  #endif
   vec2 uv = mix(vUvPersp, vUvAffine.xy / vUvAffine.z, uAffine);
   vec3 base = uColor * vColor;
   if (uUseMap > 0.5) base *= texture2D(uMap, uv).rgb;
@@ -343,14 +363,29 @@ export interface PS1MaterialOptions {
   depthWrite?: boolean;
   /** Faceted: one colour and shade per triangle, with this much brightness variation between facets (0 for none). */
   flat?: number;
+  /**
+   * Screen-door fade through the `uFade` uniform (PS1_FADE): only for the
+   * materials that fade (riders, their shadows and foam, buoys, spray), so
+   * every other shader stays free of `discard`.
+   */
+  fade?: boolean;
+  /** Per-instance screen door from a float `dissolve` attribute (PS1_DISSOLVE, implies `fade`): the instanced spray. */
+  dissolve?: boolean;
   /** The PS1_WATER block: 'sea' (distance tint, glitter, dithered whitewater) or 'foam' (dithered foam on the water, discarding where thin). Needs a float `foam` attribute. */
   water?: 'sea' | 'foam';
 }
 
 export function createPS1Material(options: PS1MaterialOptions = {}): THREE.ShaderMaterial {
-  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true, flat, water } = options;
+  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true, flat, water, dissolve = false } = options;
+  const fade = dissolve || options.fade === true;
   return new THREE.ShaderMaterial({
-    defines: { ...(flat !== undefined ? { PS1_FLAT: 1 } : {}), ...(water ? { PS1_WATER: 1 } : {}), ...(water === 'foam' ? { PS1_FOAM: 1 } : {}) },
+    defines: {
+      ...(flat !== undefined ? { PS1_FLAT: 1 } : {}),
+      ...(water ? { PS1_WATER: 1 } : {}),
+      ...(water === 'foam' ? { PS1_FOAM: 1 } : {}),
+      ...(fade ? { PS1_FADE: 1 } : {}),
+      ...(dissolve ? { PS1_DISSOLVE: 1 } : {}),
+    },
     uniforms: {
       uFacet: { value: flat ?? 0 },
       ...sharedUniforms,

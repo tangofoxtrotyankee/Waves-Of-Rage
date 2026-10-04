@@ -86,5 +86,5 @@ export function buildFoamGeometry(seed = 7): THREE.BufferGeometry {
 
 /** The foam's material: unlit (it is lit by its own whiteness), faceted so the patches sparkle a little. */
 export function createFoamMaterial(): THREE.ShaderMaterial {
-  return createPS1Material({ unlit: true, flat: 0.14 });
+  return createPS1Material({ unlit: true, flat: 0.14, fade: true });
 }

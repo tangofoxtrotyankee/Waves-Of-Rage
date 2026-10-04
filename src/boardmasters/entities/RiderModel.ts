@@ -788,8 +788,8 @@ export function buildRiderModel(spec: RiderSpec): RiderModel {
   const joints = skeletonPositions(dims, pr);
   const atlas = riderAtlas(spec);
   const deckTex = boardDeckTexture(spec);
-  const bodyMaterial = createPS1Material({ map: atlas, flat: 0.22 });
-  const boardMaterial = createPS1Material({ map: deckTex, flat: 0.05 });
+  const bodyMaterial = createPS1Material({ map: atlas, flat: 0.22, fade: true });
+  const boardMaterial = createPS1Material({ map: deckTex, flat: 0.05, fade: true });
 
   const geometry = buildBody(spec, dims, joints);
   const bones: THREE.Bone[] = [];

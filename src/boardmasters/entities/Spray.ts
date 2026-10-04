@@ -1,8 +1,9 @@
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-import { colorGeometry, createPS1Material } from '../engine/PS1Material';
+import { createPS1Material, paintGeometry } from '../engine/PS1Material';
+import { rgb } from '../engine/math';
 import { THREE } from '../engine/three';
-import { PALETTE } from '../game/constants';
+import { PALETTE, WATER } from '../game/constants';
 
 interface Particle {
   x: number;
@@ -39,9 +40,12 @@ const NEAR_SKIP = 1.2;
 const NEAR_FADE = 2.5;
 
 /**
- * Crunchy spray: a pool of white camera-facing pixel clumps (a big square
- * with a smaller satellite, so every particle reads as a chunk of
- * whitewater) thrown from the boards, drawn as one instanced mesh; plus a
+ * Crunchy spray: a pool of small camera-facing pixel clumps (a square,
+ * white on top shading to the foam's pale cyan underneath, with a smaller
+ * satellite, so every particle reads as a droplet of whitewater rather than
+ * a tile) thrown from the boards, drawn as one instanced mesh. A clump bursts
+ * to full size and then dissolves through the screen door (a per-instance
+ * `dissolve` amount, PS1_DISSOLVE) instead of shrinking to a dot. Plus a
  * small pool of expanding foam rings on the water for big splashes
  * (`splash`), drawn as a second mesh with the PS1_WATER foam block so they
  * dissolve into dithered pixels. Two draw calls, no allocations per frame.
@@ -55,15 +59,25 @@ export class Spray {
   private readonly ringPositions: Float32Array;
   private readonly ringFoam: Float32Array;
   private readonly ringGeometry: THREE.BufferGeometry;
+  /** Whether any ring was drawn last step (its buffers then need one more upload, to clear it). */
+  private ringsLive = true;
+  private readonly dissolve: Float32Array;
+  private readonly dissolveAttribute: THREE.InstancedBufferAttribute;
   private readonly matrix = new THREE.Matrix4();
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3();
 
-  constructor(count = 192) {
-    const big = colorGeometry(new THREE.PlaneGeometry(0.13, 0.13), PALETTE.foam);
-    const a = colorGeometry(new THREE.PlaneGeometry(0.06, 0.06).translate(0.11, 0.06, 0), 0xc8f2ff);
+  constructor(count = 256) {
+    // White on top, the foam's pale cyan underneath: a droplet catching the light, not a flat tile.
+    const top = rgb(PALETTE.foam);
+    const under = rgb(WATER.foamShade);
+    const big = paintGeometry(new THREE.PlaneGeometry(0.13, 0.13), (_x, y) => (y > 0 ? top : under));
+    const a = paintGeometry(new THREE.PlaneGeometry(0.06, 0.06).translate(0.11, 0.06, 0), (_x, y) => (y > 0.06 ? top : under));
     const geometry = mergeGeometries([big, a]);
-    const material = createPS1Material({ unlit: true });
+    this.dissolve = new Float32Array(count);
+    this.dissolveAttribute = new THREE.InstancedBufferAttribute(this.dissolve, 1).setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('dissolve', this.dissolveAttribute);
+    const material = createPS1Material({ unlit: true, dissolve: true });
     this.mesh = new THREE.InstancedMesh(geometry, material, count);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false;
@@ -111,16 +125,21 @@ export class Spray {
     p.size = size * (0.7 + Math.random() * 0.8);
   }
 
-  /** A big splash on the water at (x, y, z): a radial burst of large clumps and an expanding foam ring. `size` about 1 for a landing, 2 for a knockout. */
+  /**
+   * A big splash on the water at (x, y, z): a radial burst of many small
+   * clumps (about 5 to 25 cm, emit's own jitter included, so the riders in
+   * it stay visible) and an expanding foam ring. `size` about 1 for a
+   * landing, 2 for a knockout.
+   */
   splash(x: number, y: number, z: number, size = 1): void {
-    const n = Math.min(48, Math.round(18 * size));
+    const n = Math.min(64, Math.round(30 * size));
     for (let i = 0; i < n; i++) {
       const angle = (i / n) * Math.PI * 2 + Math.random() * 0.4;
       const out = (1.5 + Math.random() * 3) * size;
-      this.emit(x + Math.cos(angle) * 0.4 * size, y + 0.1, z + Math.sin(angle) * 0.4 * size, Math.cos(angle) * out, (3 + Math.random() * 4.5) * Math.sqrt(size), Math.sin(angle) * out, 1.4 + Math.random() * 1.2 * size);
+      this.emit(x + Math.cos(angle) * 0.4 * size, y + 0.1, z + Math.sin(angle) * 0.4 * size, Math.cos(angle) * out, (3 + Math.random() * 4.5) * Math.sqrt(size), Math.sin(angle) * out, 0.5 + Math.random() * (0.3 + 0.15 * size));
     }
     // A column in the middle.
-    for (let i = 0; i < Math.round(6 * size); i++) this.emit(x + (Math.random() - 0.5) * 0.6, y + 0.2, z + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.5, 6 + Math.random() * 4 * size, (Math.random() - 0.5) * 1.5, 1.8 + Math.random() * size);
+    for (let i = 0; i < Math.round(8 * size); i++) this.emit(x + (Math.random() - 0.5) * 0.6, y + 0.2, z + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.5, 6 + Math.random() * 4 * size, (Math.random() - 0.5) * 1.5, 0.65 + Math.random() * 0.4);
     const r = this.rings[this.nextRing];
     this.nextRing = (this.nextRing + 1) % RINGS;
     r.x = x;
@@ -158,20 +177,25 @@ export class Spray {
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < NEAR_SKIP * NEAR_SKIP) continue;
       const near = d2 < (NEAR_SKIP + NEAR_FADE) * (NEAR_SKIP + NEAR_FADE) ? (Math.sqrt(d2) - NEAR_SKIP) / NEAR_FADE : 1;
-      // Grows as it bursts, then shrinks away.
+      // Grows as it bursts, then holds its size and dissolves through the screen door (and so does one close to the lens).
       const f = p.life / p.maxLife;
-      const size = p.size * near * (f > 0.75 ? 0.6 + (1 - f) * 1.6 : 0.35 + f * 0.85);
+      const size = p.size * near * (f > 0.75 ? 0.7 + (1 - f) * 1.2 : 1);
       this.matrix.compose(this.position.set(p.x, p.y, p.z), camera.quaternion, this.scale.set(size, size, size));
+      this.dissolve[n] = Math.max(Math.min(1, (0.6 - f) / 0.6), (1 - near) * 0.75);
       this.mesh.setMatrixAt(n++, this.matrix);
     }
+    if (n > 0 || this.mesh.count > 0) {
+      this.mesh.instanceMatrix.needsUpdate = true;
+      this.dissolveAttribute.needsUpdate = true;
+    }
     this.mesh.count = n;
-    this.mesh.instanceMatrix.needsUpdate = true;
     this.updateRings(dt);
   }
 
   private updateRings(dt: number): void {
     const pos = this.ringPositions;
     const foam = this.ringFoam;
+    let live = false;
     for (let i = 0; i < RINGS; i++) {
       const r = this.rings[i];
       const v = i * RING_SEGMENTS * 4;
@@ -182,6 +206,7 @@ export class Spray {
         }
         continue;
       }
+      live = true;
       r.age += dt;
       const t = Math.min(1, r.age / RING_LIFE);
       const radius = r.size * (0.5 + 2.6 * Math.sqrt(t));
@@ -202,7 +227,11 @@ export class Spray {
       }
       foam.fill(f, v, v + RING_SEGMENTS * 4);
     }
-    this.ringGeometry.getAttribute('position').needsUpdate = true;
-    this.ringGeometry.getAttribute('foam').needsUpdate = true;
+    // Upload only while a ring is drawn, and once more as the last one ends (its cleared band).
+    if (live || this.ringsLive) {
+      this.ringGeometry.getAttribute('position').needsUpdate = true;
+      this.ringGeometry.getAttribute('foam').needsUpdate = true;
+    }
+    this.ringsLive = live;
   }
 }
