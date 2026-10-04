@@ -4,7 +4,7 @@ import { createPS1Material } from '../engine/PS1Material';
 import { clamp, mixRgb, mulberry32, rgb, smoothstep } from '../engine/math';
 import { ATLAS, festivalAtlas, waterfallTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
-import { PALETTE } from '../game/constants';
+import { CAMERA, PALETTE } from '../game/constants';
 
 type Rgb = [number, number, number];
 type Kind = 'solid' | 'glow' | 'atlas' | 'falls';
@@ -13,8 +13,10 @@ const KINDS: readonly Kind[] = ['solid', 'glow', 'atlas', 'falls'];
 /** Metres of coastline built at once; two copies leapfrog ahead of the camera so it never ends. */
 const SPAN = 1200;
 /** Each span is merged in chunks this long, so the camera's frustum drops what is out of range. */
-const CHUNK = 150;
+const CHUNK = 100;
 const CHUNKS = SPAN / CHUNK;
+/** How far a chunk's parts can reach beyond its stretch of coast (a cliff stack's length, a stage). */
+const CHUNK_SPILL = 25;
 /** The cliffs rise at world +x (screen-left), their foot this far from the centre line. */
 const CLIFF_X = 20;
 /** The pier runs along world -x (screen-right): its centre line, width, deck height and extent along each span. */
@@ -104,6 +106,14 @@ class Builder {
     this.add(kind, z, solid(g, color));
   }
 
+  /** A square post, sides only (no caps): pilings, poles, truss towers. */
+  post(kind: Kind, w: number, h: number, x: number, y: number, z: number, color: Rgb): void {
+    const g = new THREE.CylinderGeometry(w * 0.7071, w * 0.7071, h, 4, 1, true);
+    g.rotateY(Math.PI / 4);
+    g.translate(x, y, z);
+    this.add(kind, z, solid(g, color));
+  }
+
   merged(): { kind: Kind; chunk: number; geometry: THREE.BufferGeometry }[] {
     const out: { kind: Kind; chunk: number; geometry: THREE.BufferGeometry }[] = [];
     for (const kind of KINDS) {
@@ -132,12 +142,16 @@ function atlasQuad(w: number, h: number, region: readonly [number, number, numbe
   return finish(g, () => [1, 1, 1]);
 }
 
-/** A palm: a curved, tapering trunk and drooping two-tone fronds. About 60 triangles. */
+/** Lit things drawn with the unlit (double-sided) material take this much of their colour, so they sit with the lit ones. */
+const SHADE = 0.82;
+const shade = (c: Rgb, k = SHADE): Rgb => [c[0] * k, c[1] * k, c[2] * k];
+
+/** A palm: a curved, tapering trunk and drooping two-tone fronds (double-sided, so in the unlit pile). About 34 triangles. */
 function palm(b: Builder, x: number, y: number, z: number, rng: () => number, scale = 1): void {
   const height = (6 + rng() * 4) * scale;
   const leanX = (rng() - 0.5) * 3 * scale;
   const leanZ = (rng() - 0.5) * 2 * scale;
-  const trunk = new THREE.CylinderGeometry(0.2 * scale, 0.36 * scale, height, 5, 3, true);
+  const trunk = new THREE.CylinderGeometry(0.2 * scale, 0.36 * scale, height, 3, 2, true);
   const pos = trunk.getAttribute('position');
   for (let i = 0; i < pos.count; i++) {
     const t = (pos.getY(i) + height / 2) / height;
@@ -149,37 +163,31 @@ function palm(b: Builder, x: number, y: number, z: number, rng: () => number, sc
   const tz = z + leanZ;
   const points: number[] = [];
   const colors: Rgb[] = [];
-  const fronds = 7;
+  const dark = shade(C.palm);
+  const lit = shade(C.palmLit);
+  const fronds = 6;
   for (let f = 0; f < fronds; f++) {
-    const a = (f / fronds) * Math.PI * 2 + rng() * 0.5;
+    const a = (f / fronds) * Math.PI * 2 + rng() * 0.6;
     const len = (3 + rng() * 1.4) * scale;
     const ca = Math.cos(a);
     const sa = Math.sin(a);
-    // Along the frond (base, mid, tip), with the mid point raised and the tip drooping; width across it.
-    const along = [0, len * 0.5, len];
-    const lift = [0, len * 0.18, -len * 0.42];
-    const half = [0.1 * scale, 0.6 * scale, 0.05 * scale];
-    const p = (k: number, side: number): [number, number, number] => [tx + ca * along[k] - sa * half[k] * side, ty + lift[k], tz + sa * along[k] + ca * half[k] * side];
-    const quad = (k: number) => {
-      const a0 = p(k, -1);
-      const a1 = p(k, 1);
-      const b0 = p(k + 1, -1);
-      const b1 = p(k + 1, 1);
-      points.push(...a0, ...a1, ...b1, ...a0, ...b1, ...b0);
-      const c0 = k === 0 ? C.palm : C.palmLit;
-      const c1 = k === 0 ? C.palmLit : C.palm;
-      colors.push(c0, c0, c1, c0, c1, c1);
-    };
-    quad(0);
-    quad(1);
+    // Base, a raised and widest middle, a drooping tip.
+    const at = (along: number, lift: number, half: number): [number, number, number] => [tx + ca * along - sa * half, ty + lift, tz + sa * along + ca * half];
+    const b0 = at(0, 0, -0.1 * scale);
+    const b1 = at(0, 0, 0.1 * scale);
+    const m0 = at(len * 0.5, len * 0.18, -0.6 * scale);
+    const m1 = at(len * 0.5, len * 0.18, 0.6 * scale);
+    const tip = at(len, -len * 0.42, 0);
+    points.push(...b0, ...b1, ...m1, ...b0, ...m1, ...m0, ...m0, ...m1, ...tip);
+    colors.push(dark, dark, lit, dark, lit, lit, lit, lit, dark);
   }
-  b.add('solid', z, triangles(points, colors));
+  b.add('glow', z, triangles(points, colors));
 }
 
 /** Little string lights: a sagging line of bulbs (crossed quads, unlit) from a to b. */
 function stringLights(b: Builder, ax: number, ay: number, az: number, bx: number, by: number, bz: number, sag: number, rng: () => number): void {
   const length = Math.hypot(bx - ax, by - ay, bz - az);
-  const n = Math.max(2, Math.floor(length / 1.4));
+  const n = Math.max(2, Math.floor(length / 2));
   const points: number[] = [];
   const colors: Rgb[] = [];
   const s = 0.17;
@@ -203,8 +211,8 @@ function person(points: number[], colors: Rgb[], x: number, y: number, z: number
   const cx = Math.cos(ry);
   const sx = Math.sin(ry);
   const at = (u: number, v: number): [number, number, number] => [x + cx * u, y + v, z - sx * u];
-  const shirt = SHIRTS[Math.floor(rng() * SHIRTS.length)];
-  const skin = SKINS[Math.floor(rng() * SKINS.length)];
+  const shirt = shade(SHIRTS[Math.floor(rng() * SHIRTS.length)], 0.9);
+  const skin = shade(SKINS[Math.floor(rng() * SKINS.length)]);
   const legs: Rgb = rng() < 0.5 ? skin : C.outline;
   const top = h - 0.34;
   points.push(...at(-w, 0), ...at(w, 0), ...at(w, top), ...at(-w, 0), ...at(w, top), ...at(-w, top));
@@ -225,7 +233,7 @@ function crowd(b: Builder, x: number, y: number, z: number, hx: number, hz: numb
   const points: number[] = [];
   const colors: Rgb[] = [];
   for (let i = 0; i < count; i++) person(points, colors, x + (rng() * 2 - 1) * hx, y, z + (rng() * 2 - 1) * hz, ry + (rng() - 0.5) * 0.5, rng);
-  b.add('solid', z, triangles(points, colors));
+  b.add('glow', z, triangles(points, colors));
 }
 
 /** A tent: a box body and a four-sided pointed roof striped in two colours. */
@@ -257,9 +265,9 @@ function house(b: Builder, side: number, x: number, y: number, z: number, rng: (
   const faceX = x - side * (w / 2 + 0.05);
   for (let i = 0; i < 2; i++) {
     const wz = z + (i - 0.5) * d * 0.45;
-    if (rng() < 0.85) b.box('glow', 0.12, 0.6, 0.5, faceX, y + h * 0.55, wz, win);
+    if (rng() < 0.85) b.add('glow', z, solid(new THREE.PlaneGeometry(0.5, 0.6).rotateY(Math.PI / 2).translate(faceX, y + h * 0.55, wz), win));
     const wx = x + (i - 0.5) * w * 0.45;
-    if (rng() < 0.85) b.box('glow', 0.5, 0.6, 0.12, wx, y + h * 0.55, z - d / 2 - 0.05, win);
+    if (rng() < 0.85) b.add('glow', z, solid(new THREE.PlaneGeometry(0.5, 0.6).translate(wx, y + h * 0.55, z - d / 2 - 0.05), win));
   }
 }
 
@@ -287,11 +295,15 @@ function cliffStack(b: Builder, side: number, u0: number, z: number, rng: () => 
   for (let i = 0; i < layers; i++) {
     const h = ((i === 0 ? 10 : 6) + rng() * 7) * scale;
     const depth = (16 + rng() * 14) * scale;
-    const length = (20 + rng() * 14) * scale;
+    const length = (24 + rng() * 16) * scale;
     const zc = z + (rng() - 0.5) * 6;
     const sides = 6 + Math.floor(rng() * 2);
     const taper = 0.86 + rng() * 0.22; // over 1 is an overhang
     const prism = new THREE.CylinderGeometry(taper, 1, h, sides, 1, false);
+    // Drop the bottom cap (groups: sides, top, bottom); nobody sees under a cliff.
+    const keep = prism.groups[1].start + prism.groups[1].count;
+    prism.setIndex(Array.from(prism.getIndex()!.array).slice(0, keep));
+    prism.clearGroups();
     prism.rotateY(rng() * Math.PI);
     prism.scale(depth / 2, 1, length / 2);
     prism.translate(side * (u + depth / 2), y + h / 2, zc);
@@ -367,12 +379,14 @@ function waterfall(b: Builder, u: number, top: number, z: number, rng: () => num
  * string lights and two stages with light rigs under a big BOARDMASTERS
  * banner, then a beach with palms and lower hills behind. Built once,
  * merged per material (lit, glowing, the festival atlas, the scrolling
- * falls) and per 150 m chunk, and shared by two spans that leapfrog ahead
+ * falls) and per 100 m chunk, and shared by two spans that leapfrog ahead
  * of the camera, so the endless course always has a shore.
  */
 export class Scenery {
   readonly group = new THREE.Group();
   private readonly spans: THREE.Group[] = [];
+  /** Every chunk mesh with its span and where its stretch of coast starts within the span. */
+  private readonly chunks: { span: THREE.Group; mesh: THREE.Mesh; start: number }[] = [];
   private readonly falls: THREE.ShaderMaterial;
 
   constructor() {
@@ -383,7 +397,7 @@ export class Scenery {
     this.buildBeach(b, rng);
     this.falls = createPS1Material({ map: waterfallTexture(), unlit: true, side: THREE.DoubleSide });
     const materials: Record<Kind, THREE.ShaderMaterial> = {
-      solid: createPS1Material({ side: THREE.DoubleSide }),
+      solid: createPS1Material(),
       glow: createPS1Material({ unlit: true, side: THREE.DoubleSide }),
       atlas: createPS1Material({ map: festivalAtlas(), unlit: true, side: THREE.DoubleSide }),
       falls: this.falls,
@@ -396,7 +410,13 @@ export class Scenery {
     const merged = b.merged();
     for (let copy = 0; copy < 2; copy++) {
       const span = new THREE.Group();
-      for (const { kind, geometry } of merged) span.add(new THREE.Mesh(geometry, materials[kind]));
+      for (const { kind, chunk, geometry } of merged) {
+        const mesh = new THREE.Mesh(geometry, materials[kind]);
+        // Culled by the stretch of coast in range below; the bounding spheres are too wide (cliffs to hills) to drop much.
+        mesh.frustumCulled = false;
+        span.add(mesh);
+        this.chunks.push({ span, mesh, start: chunk * CHUNK });
+      }
       span.position.z = copy * SPAN;
       this.spans.push(span);
       this.group.add(span);
@@ -406,16 +426,16 @@ export class Scenery {
   /** Cliffs all along +x, with their villages, lights, palms and waterfalls, and the sand and rocks at their foot. */
   private buildCliffs(b: Builder, rng: () => number): void {
     let fallsDue = FIRST_FALLS_Z;
-    for (let z = -10; z < SPAN + 10; z += 13 + rng() * 9) {
+    for (let z = -10; z < SPAN + 10; z += 18 + rng() * 12) {
       const u0 = CLIFF_X + rng() * 4;
       const layers = 4 + Math.floor(rng() * 3);
       const { ledges, top } = cliffStack(b, 1, u0, z, rng, layers);
       // A second, taller wall behind, for depth.
-      if (rng() < 0.55) cliffStack(b, 1, top.u + 8 + rng() * 10, z + (rng() - 0.5) * 10, rng, 3 + Math.floor(rng() * 2), 1.2);
+      if (rng() < 0.4) cliffStack(b, 1, top.u + 8 + rng() * 10, z + (rng() - 0.5) * 10, rng, 3 + Math.floor(rng() * 2), 1.2);
       for (const ledge of ledges) {
-        if (ledge.depth >= 3 && rng() < 0.5) {
+        if (ledge.depth >= 3 && rng() < 0.38) {
           // A village: a row of houses near the lip, string lights in front of them.
-          const n = 2 + Math.floor(rng() * 3);
+          const n = 2 + Math.floor(rng() * 2);
           for (let i = 0; i < n; i++) house(b, 1, ledge.u + 1.6 + rng() * Math.min(3, ledge.depth - 2.5), ledge.y - 0.4, ledge.z + ((i + 0.5) / n - 0.5) * ledge.length * 0.6, rng);
           stringLights(b, ledge.u + 0.6, ledge.y + 2.4, ledge.z - ledge.length * 0.32, ledge.u + 0.6, ledge.y + 2.4, ledge.z + ledge.length * 0.32, 0.9, rng);
         } else if (ledge.depth >= 2 && rng() < 0.6) {
@@ -423,7 +443,7 @@ export class Scenery {
         }
       }
       // Palms on the top.
-      for (let i = 0; i < 1 + Math.floor(rng() * 3); i++) palm(b, top.u + 1.5 + rng() * 5, top.y - 0.4, top.z + (rng() - 0.5) * top.length * 0.5, rng);
+      for (let i = 0; i < 1 + Math.floor(rng() * 2); i++) palm(b, top.u + 1.5 + rng() * 5, top.y - 0.4, top.z + (rng() - 0.5) * top.length * 0.5, rng);
       if (z >= fallsDue && ledges.length > 1) {
         const ledge = ledges[Math.min(ledges.length - 1, 1 + Math.floor(rng() * (ledges.length - 1)))];
         waterfall(b, u0, ledge.y, ledge.z - ledge.length * 0.1, rng);
@@ -432,24 +452,24 @@ export class Scenery {
     }
     // Sand and rocks at the waterline, palms and lamp posts with string lights on the sand.
     for (let z = -10; z < SPAN + 10; z += 30) {
-      for (let k = 0; k < 3; k++) {
+      for (let k = 0; k < 2; k++) {
         // Ragged pieces of beach, so the waterline is not one straight edge.
-        const sand = new THREE.BoxGeometry(8 + rng() * 4, 3, 10.6);
+        const sand = new THREE.BoxGeometry(8 + rng() * 4, 3, 15.6);
         sand.rotateZ(0.1 + rng() * 0.06); // low at the water, rising to the cliffs
         sand.rotateY((rng() - 0.5) * 0.16);
-        sand.translate(CLIFF_X - 1 + rng() * 1.5, -0.35 + rng() * 0.3, z + 5 + k * 10);
-        b.add('solid', z + 5 + k * 10, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((px - CLIFF_X + 3) / 4 + (py > 0.8 ? 0.3 : 0), 0, 1))));
+        sand.translate(CLIFF_X - 1 + rng() * 1.5, -0.35 + rng() * 0.3, z + 7.5 + k * 15);
+        b.add('solid', z + 7.5 + k * 15, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((px - CLIFF_X + 3) / 4 + (py > 0.8 ? 0.3 : 0), 0, 1))));
       }
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const r = 0.8 + rng() * 1.6;
-        const rock = new THREE.IcosahedronGeometry(r, 0);
+        const rock = new THREE.OctahedronGeometry(r, 0);
         rock.scale(1, 0.7, 1.2);
         rock.translate(CLIFF_X - 2 + rng() * 3, 0.5, z + rng() * 30);
         b.add('solid', z, finish(rock, (_x, _y, _z, _nx, ny) => mixRgb(C.rock, C.cliffLit, clamp(ny, 0, 1) * 0.5)));
       }
       if (rng() < 0.7) palm(b, CLIFF_X + rng() * 2, 1.4, z + rng() * 30, rng, 0.9);
       // Lamp posts every 30 m with lights strung between them.
-      b.box('solid', 0.15, 4, 0.15, CLIFF_X - 0.5, 2.6, z, C.darkWood);
+      b.post('solid', 0.15, 4, CLIFF_X - 0.5, 2.6, z, C.darkWood);
       stringLights(b, CLIFF_X - 0.5, 4.5, z, CLIFF_X - 0.5, 4.5, z + 30, 0.8, rng);
     }
   }
@@ -460,11 +480,11 @@ export class Scenery {
     const inner = px + width / 2; // the course-facing edge (the less negative x)
     const outer = px - width / 2;
     const stageAt = (z: number) => STAGES.some((s) => Math.abs(z - s) < 13);
-    for (let z = start; z < end; z += 5) {
-      for (const x of [inner - 0.4, px, outer + 0.4]) b.box('solid', 0.55, 9, 0.55, x, deck - 4.5, z, C.darkWood);
-      b.box('solid', width, 0.4, 0.4, px, deck - 0.6, z, C.darkWood);
-      // A rail post and a pole for the lights every 10 m.
-      b.box('solid', 0.14, 1.1, 0.14, inner - 0.2, deck + 0.75, z, C.darkWood);
+    for (let z = start; z < end; z += 6) {
+      const bent = (z - start) % 12 === 0; // a full bent of three pilings and a cross beam every 12 m
+      for (const x of bent ? [inner - 0.4, px, outer + 0.4] : [inner - 0.4, outer + 0.4]) b.post('solid', 0.55, 9, x, deck - 4.5, z, C.darkWood);
+      if (bent) b.box('solid', width, 0.4, 0.4, px, deck - 0.6, z, C.darkWood);
+      b.post('solid', 0.14, 1.1, inner - 0.2, deck + 0.75, z, C.darkWood); // rail post
     }
     for (let z = start; z < end; z += 30) {
       const len = Math.min(30, end - z);
@@ -474,7 +494,7 @@ export class Scenery {
     }
     // String lights on poles along the rail.
     for (let z = start; z + 12 <= end; z += 12) {
-      b.box('solid', 0.16, 6, 0.16, inner - 0.3, deck + 3, z, C.outline);
+      b.post('solid', 0.16, 6, inner - 0.3, deck + 3, z, C.outline);
       stringLights(b, inner - 0.3, deck + 5.8, z, inner - 0.3, deck + 5.8, z + 12, 1.1, rng);
     }
     // The crowd: three ranks on stepped bleachers behind the rail, as atlas strips turned a little towards the camera; people at the rail.
@@ -483,10 +503,14 @@ export class Scenery {
       for (let rank = 0; rank < 3; rank++) {
         const x = inner - 1.6 - rank * 2.2;
         const y = deck + 0.2 + rank * 0.9;
-        if (rank > 0) b.box('solid', 2.2, rank * 0.9, 4, x, deck + 0.2 + (rank * 0.9) / 2, z, C.darkWood);
         b.add('atlas', z, atlasQuad(4.1, 2.2, ATLAS.crowd, x, y, z, Math.PI / 2 + 0.45));
       }
       if (rng() < 0.8) crowd(b, inner - 0.7, deck + 0.2, z, 0.3, 1.8, 3, Math.PI / 2 + 0.4, rng);
+    }
+    // The bleachers' risers, in 12 m runs.
+    for (let z = start; z + 12 <= end; z += 12) {
+      if (stageAt(z + 1) || stageAt(z + 6) || stageAt(z + 11)) continue;
+      for (let rank = 1; rank < 3; rank++) b.box('solid', 2.2, rank * 0.9, 12, inner - 1.6 - rank * 2.2, deck + 0.2 + (rank * 0.9) / 2, z + 6, C.darkWood);
     }
     // Tents behind the bleachers, flags along the rail.
     let t = 0;
@@ -496,7 +520,7 @@ export class Scenery {
     }
     for (let z = start + 6; z < end; z += 22) {
       if (stageAt(z)) continue;
-      b.box('solid', 0.12, 9, 0.12, inner - 0.5, deck + 4.5, z, C.outline);
+      b.post('solid', 0.12, 9, inner - 0.5, deck + 4.5, z, C.outline);
       b.add('atlas', z, atlasQuad(1.5, 4.6, ATLAS.flag, inner - 1.3, deck + 4.2, z, Math.PI / 2 + 0.6));
     }
     for (const s of STAGES) this.buildStage(b, s, rng);
@@ -511,7 +535,7 @@ export class Scenery {
     b.box('solid', 0.4, 12, 22, px - width / 2 + 1.2, floor + 7, z, rgb(0x3a2066)); // backdrop
     const top = floor + 15;
     for (const tz of [z - 11, z + 11]) {
-      for (const tx of [inner - 0.8, px - width / 2 + 1]) b.box('solid', 0.5, top - floor, 0.5, tx, floor + (top - floor) / 2, tz, rgb(0x8a8aa0));
+      for (const tx of [inner - 0.8, px - width / 2 + 1]) b.post('solid', 0.5, top - floor, tx, floor + (top - floor) / 2, tz, rgb(0x8a8aa0));
       b.box('solid', width - 1, 0.5, 0.5, px, top, tz, rgb(0x8a8aa0));
     }
     for (const tx of [inner - 0.8, px - width / 2 + 1]) b.box('solid', 0.5, 0.5, 22.5, tx, top, z, rgb(0x8a8aa0));
@@ -529,7 +553,7 @@ export class Scenery {
     // Tall feather flags behind the stage, and the crowd packed in front of it.
     for (let i = 0; i < 3; i++) {
       const fz = z - 9 + i * 9;
-      b.box('solid', 0.18, 22, 0.18, px - width / 2 - 1, floor + 11, fz, C.outline);
+      b.post('solid', 0.18, 22, px - width / 2 - 1, floor + 11, fz, C.outline);
       b.add('atlas', fz, atlasQuad(2.2, 6.8, ATLAS.flag, px - width / 2 - 2.2, floor + 14.5, fz, Math.PI / 2 + 0.6));
     }
     crowd(b, inner - 1, floor, z, 0.6, 10, 26, Math.PI / 2 + 0.3, rng);
@@ -543,33 +567,38 @@ export class Scenery {
       sand.rotateZ(-0.06); // rising inland
       sand.translate(-51, -1, z + 15);
       b.add('solid', z + 15, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((-px - 19) / 4 + (py > 0.5 ? 0.3 : 0), 0, 1))));
-      for (let k = 0; k < 3; k++) {
-        const front = new THREE.BoxGeometry(6 + rng() * 3, 3, 10.6);
+      for (let k = 0; k < 2; k++) {
+        const front = new THREE.BoxGeometry(6 + rng() * 3, 3, 15.6);
         front.rotateZ(-0.1 - rng() * 0.05);
         front.rotateY((rng() - 0.5) * 0.16);
-        front.translate(-22 - rng() * 1.5, -0.6 + rng() * 0.3, z + 5 + k * 10);
-        b.add('solid', z + 5 + k * 10, finish(front, (px, py) => mixRgb(C.wetSand, C.sand, clamp((-px - 19) / 4 + (py > 0.5 ? 0.3 : 0), 0, 1))));
+        front.translate(-22 - rng() * 1.5, -0.6 + rng() * 0.3, z + 7.5 + k * 15);
+        b.add('solid', z + 7.5 + k * 15, finish(front, (px, py) => mixRgb(C.wetSand, C.sand, clamp((-px - 19) / 4 + (py > 0.5 ? 0.3 : 0), 0, 1))));
       }
       const onPier = z + 30 > PIER.start && z < PIER.end;
       // Palms, sparser behind the pier.
-      for (let i = 0; i < (onPier ? 2 : 4); i++) palm(b, -(onPier ? 33 : 20) - rng() * 18, 1.0, z + rng() * 30, rng, 0.9 + rng() * 0.3);
+      for (let i = 0; i < (onPier ? 2 : 3); i++) palm(b, -(onPier ? 33 : 20) - rng() * 18, 1.0, z + rng() * 30, rng, 0.9 + rng() * 0.3);
       if (!onPier) {
         if (rng() < 0.6) tent(b, -23 - rng() * 8, 0.8, z + rng() * 30, 3 + rng(), TENTS[Math.floor(rng() * TENTS.length)]);
         crowd(b, -21 - rng() * 4, 0.7, z + 15, 2.5, 13, 10 + Math.floor(rng() * 14), Math.PI / 2 + 0.3, rng);
-        b.box('solid', 0.15, 4, 0.15, -19.5, 2.2, z, C.darkWood);
+        b.post('solid', 0.15, 4, -19.5, 2.2, z, C.darkWood);
         stringLights(b, -19.5, 4.1, z, -19.5, 4.1, z + 30, 0.8, rng);
       }
     }
     // Hills behind, lower than the cliffs, with a few houses lit up.
-    for (let z = -10; z < SPAN + 10; z += 24 + rng() * 16) {
+    for (let z = -10; z < SPAN + 10; z += 34 + rng() * 18) {
       const { ledges, top } = cliffStack(b, -1, 50 + rng() * 14, z, rng, 2 + Math.floor(rng() * 2), 0.9);
-      for (const ledge of ledges) if (ledge.depth >= 3 && rng() < 0.5) house(b, -1, -(ledge.u + 2), ledge.y - 0.4, ledge.z, rng);
+      for (const ledge of ledges) if (ledge.depth >= 3 && rng() < 0.35) house(b, -1, -(ledge.u + 2), ledge.y - 0.4, ledge.z, rng);
       if (rng() < 0.7) palm(b, -(top.u + 3), top.y - 0.4, top.z, rng);
     }
   }
 
   update(cameraZ: number): void {
     for (const span of this.spans) if (span.position.z + SPAN < cameraZ - 60) span.position.z += SPAN * 2;
+    // Only the coast from the camera to the far plane is drawn (the camera looks down +z; parts reach CHUNK_SPILL past their chunk).
+    for (const c of this.chunks) {
+      const start = c.span.position.z + c.start;
+      c.mesh.visible = start - CHUNK_SPILL < cameraZ + CAMERA.far && start + CHUNK + CHUNK_SPILL > cameraZ;
+    }
     // The waterfalls pour: the texture scrolls down (scenery has no clock of its own, so the page's).
     (this.falls.uniforms.uUvOffset.value as THREE.Vector2).set(0, (performance.now() / 1000) * 0.9);
   }

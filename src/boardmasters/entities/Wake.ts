@@ -6,8 +6,8 @@ import type { Ocean } from '../world/Ocean';
 const LIFE = 1.5;
 /** A new stretch is laid each time a rider has moved this far (metres) since its last one. */
 const SPACING = 0.7;
-/** Stretches in the ring buffer: enough for eight riders at full speed for LIFE seconds. */
-const POOL = 448;
+/** Stretches in the ring buffer: enough for eight riders at a good pace for LIFE seconds (at top speed the oldest go a little early). */
+const POOL = 320;
 /** Strips per stretch: the two arms of the V and the churned trail between them. Each strip is two quads across (6 vertices), foamy down the middle and clear at the edges, so it dithers out softly. */
 const PARTS = 3;
 const VERTS = 6;
@@ -42,7 +42,8 @@ interface Tracker {
  * churned central trail that widens), foamy down the middle and clear at
  * the edges, drawn with the PS1_WATER foam block so they dissolve into
  * dithered pixels as they age instead of blending. A ring
- * buffer of stretches; dead ones collapse to zero area. `emit` is called per
+ * buffer of stretches; the live ones are packed into the front of the
+ * buffers each step and only they are drawn. `emit` is called per
  * rider per step and lays a stretch every SPACING metres (riders are told
  * apart by position), `update` ages them and re-seats them on the swell.
  */
@@ -129,20 +130,16 @@ export class Wake {
 
   update(dt: number, ocean: Ocean): void {
     this.clock += dt;
-    const pos = this.positions;
-    const foam = this.foam;
+    // Live stretches are packed at the front of the buffers and only those are drawn.
+    let live = 0;
     for (let i = 0; i < POOL; i++) {
       const s = this.stretches[i];
-      const v = i * PARTS * VERTS;
-      if (s.age >= LIFE) {
-        if (foam[v + 1] !== 0 || pos[v * 3] !== 0) {
-          pos.fill(0, v * 3, (v + PARTS * VERTS) * 3);
-          foam.fill(0, v, v + PARTS * VERTS);
-        }
-        continue;
-      }
+      if (s.age >= LIFE) continue;
       s.age += dt;
-      const life = s.age >= LIFE ? 0 : 1 - s.age / LIFE;
+      if (s.age >= LIFE) continue;
+      const v = live * PARTS * VERTS;
+      live++;
+      const life = 1 - s.age / LIFE;
       const age = s.age;
       // Forward along the heading and across it (right-handed: +x is screen-left).
       const fx = s.sin;
@@ -167,7 +164,13 @@ export class Wake {
       const trailHalfW = 0.4 + age * 0.45;
       this.strip(v + 2 * VERTS, s.x, y, s.z, fx, fz, rx, rz, half * 1.1, trailHalfW, 0, Math.min(1.2, s.strength) * life * life * life);
     }
-    for (const name of DYNAMIC) this.geometry.getAttribute(name).needsUpdate = true;
+    this.geometry.setDrawRange(0, live * PARTS * 12);
+    for (const name of DYNAMIC) {
+      const attribute = this.geometry.getAttribute(name) as THREE.BufferAttribute;
+      attribute.clearUpdateRanges();
+      attribute.addUpdateRange(0, live * PARTS * VERTS * attribute.itemSize);
+      attribute.needsUpdate = true;
+    }
   }
 
   /** Write one strip (6 vertices) centred on (cx, y, cz), `half` along the heading and `halfW` across, its back end shifted `outB` across; foam `f` down the middle, none at the edges. */

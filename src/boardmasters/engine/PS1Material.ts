@@ -203,16 +203,21 @@ flat varying vec3 vNormalW;
 varying vec3 vNormalW;
 #endif
 
-float waterHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// A cheap hash without a sine (Dave Hoskins' hash12): the CPU rasterisers some phones fall back to pay for every transcendental.
+float waterHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 
-// Chunky whitewater: the foam amount against a world-space cell hash plus the screen's 4x4 Bayer order, so foam breaks up into pixel clumps.
+// Chunky whitewater: the foam amount against a world-space cell hash plus a fixed screen-space order (interleaved gradient
+// noise, cheaper than indexing a Bayer matrix), so foam breaks up into pixel clumps.
 float foamPattern() {
-  mat4 bayer = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0) / 16.0;
-  float b = bayer[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))];
-  // Cells shrink in steps with distance so a clump stays a few screen pixels across near and far.
-  float level = clamp(floor(log2(max(vDepth, 1.0) / 5.0)), 0.0, 3.0);
-  float cells = waterHash(floor(vWorld.xz * vec2(5.0, 3.4) / exp2(level) + vec2(level * 17.0, floor(uTime * 3.0) * 0.37)));
-  return 0.08 + 0.7 * cells + 0.22 * b;
+  float order = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  // Cells grow in steps with distance so a clump stays a few screen pixels across near and far.
+  float level = max(1.0, floor(vDepth / 6.0));
+  float cells = waterHash(floor(vWorld.xz * vec2(5.0, 3.4) / level) + vec2(level * 17.0, floor(uTime * 3.0) * 7.0));
+  return 0.08 + 0.7 * cells + 0.22 * order;
 }
 
 vec3 waterShade(vec3 lit) {
@@ -222,24 +227,29 @@ vec3 waterShade(vec3 lit) {
     if (vFoam < pattern) discard;
     return mix(uFoamShade, uFoamColor, step(pattern + 0.18, vFoam));
   #else
+    // Whitewater on crests and breaking faces.
+    if (vFoam > pattern) return mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);
     // Turquoise and cyan close to the camera, deep blue further out.
     vec3 col = lit * mix(uWaterNear, uWaterFar, smoothstep(5.0, 60.0, vDepth));
     // The sun's glitter: the view reflected off each facet, jittered per cell and per moment so it breaks into sparkles near the
     // camera, a smooth bright path towards the horizon (where cells would be smaller than a pixel).
     vec3 v = normalize(vWorld - cameraPosition);
-    vec2 cell = floor(vWorld.xz * vec2(1.6, 0.9));
-    float flick = floor(uTime * 7.0);
-    vec3 jitter = vec3(waterHash(cell + flick) - 0.5, 0.0, waterHash(cell.yx + flick * 1.3) - 0.5) * 0.34;
-    float near = 1.0 - smoothstep(30.0, 70.0, vDepth);
-    float close = smoothstep(4.0, 14.0, vDepth); // none right under the camera
-    vec3 n = normalize(vNormalW + jitter * near);
-    float g = max(dot(reflect(v, n), uGlintDir), 0.0);
-    float sparkle = pow(g, 90.0) * (near > 0.0 ? step(0.45, waterHash(floor(gl_FragCoord.xy * 0.5) + flick)) * 1.6 : 1.0);
-    float path = pow(max(dot(reflect(v, vec3(0.0, 1.0, 0.0)), uGlintDir), 0.0), 220.0) * (1.0 - near * 0.7);
-    float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) * close + path, 0.0, 1.0);
-    col = mix(col, uGlintColor, glint);
-    // Whitewater on crests and breaking faces.
-    if (vFoam > pattern) col = mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);
+    // Only the water roughly towards the sun can glitter: skip the work everywhere else.
+    vec2 toSun = normalize(uGlintDir.xz);
+    vec2 across = normalize(v.xz);
+    if (abs(across.x * toSun.y - across.y * toSun.x) < 0.4 && dot(across, toSun) > 0.0) {
+      vec2 cell = floor(vWorld.xz * vec2(1.6, 0.9));
+      float flick = floor(uTime * 7.0);
+      vec3 jitter = vec3(waterHash(cell + flick) - 0.5, 0.0, waterHash(cell.yx + flick * 1.3) - 0.5) * 0.34;
+      float near = 1.0 - smoothstep(30.0, 70.0, vDepth);
+      float close = smoothstep(4.0, 14.0, vDepth); // none right under the camera
+      vec3 n = normalize(vNormalW + jitter * near);
+      float g = max(dot(reflect(v, n), uGlintDir), 0.0);
+      float sparkle = pow(g, 90.0) * (near > 0.0 ? step(0.45, waterHash(floor(gl_FragCoord.xy * 0.5) + flick)) * 1.6 : 1.0);
+      float path = pow(max(dot(reflect(v, vec3(0.0, 1.0, 0.0)), uGlintDir), 0.0), 220.0) * (1.0 - near * 0.7);
+      float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) * close + path, 0.0, 1.0);
+      col = mix(col, uGlintColor, glint);
+    }
     return col;
   #endif
 }

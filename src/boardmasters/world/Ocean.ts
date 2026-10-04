@@ -46,6 +46,8 @@ const EDGE = { rise: 1.6, fade: 6 };
 const SHORE = { from: 19, to: 34, damp: 0.7 };
 
 const ATTRIBUTES = ['position', 'normal', 'color', 'foam'] as const;
+/** The foam's lateral break-up and drifting patches, as sines of x (per column, fixed) times sines of z (per row): sin(a + b) = sin a cos b + cos a sin b. */
+const FOAM_WAVES = [0.9, 0.43, 0.17].map((k) => ({ sin: COLUMN_X.map((x) => Math.sin(x * k)), cos: COLUMN_X.map((x) => Math.cos(x * k)) }));
 const DEEP = rgb(PALETTE.deepWater);
 const MID = rgb(PALETTE.water);
 const LIGHT = rgb(PALETTE.lightWater);
@@ -192,6 +194,13 @@ export class Ocean {
       const row = (r + 1) * GW;
       // Foam fades out towards the horizon, where the facets are a pixel wide and would sparkle.
       const far = 1 - smoothstep(22, 70, r);
+      const zz = z + SWELL.speed * time;
+      const s1 = Math.sin(zz * 0.35);
+      const c1 = Math.cos(zz * 0.35);
+      const s2 = Math.sin(zz * 0.19);
+      const c2 = Math.cos(zz * 0.19);
+      const s3 = Math.sin(1.7 - zz * 0.31);
+      const c3 = Math.cos(1.7 - zz * 0.31);
       for (let c = 0; c <= COLS; c++) {
         const gc = c + 1;
         const g = row + gc;
@@ -202,7 +211,7 @@ export class Ocean {
         // Normals flatten towards the horizon too, so the low sun does not light every distant facet differently.
         const ndx = dx * far;
         const ndz = dz * far;
-        const nl = 1 / Math.hypot(ndx, 1, ndz);
+        const nl = 1 / Math.sqrt(ndx * ndx + 1 + ndz * ndz);
         this.positions[p] = x;
         this.positions[p + 1] = h;
         this.positions[p + 2] = z;
@@ -220,12 +229,11 @@ export class Ocean {
         const a = low ? DEEP : MID;
         const b = low ? MID : LIGHT;
         // Whitewater: crests, the faces travelling towards the rider, steep ramps, the edges and drifting patches, broken up along the crest.
-        const zz = z + SWELL.speed * time;
-        const lateral = 0.55 + 0.45 * Math.sin(x * 0.9 + zz * 0.35);
-        const patch = Math.sin(x * 0.43 + zz * 0.19) * Math.sin(x * 0.17 - zz * 0.31 + 1.7);
+        const lateral = 0.55 + 0.45 * (FOAM_WAVES[0].sin[c] * c1 + FOAM_WAVES[0].cos[c] * s1);
+        const patch = (FOAM_WAVES[1].sin[c] * c2 + FOAM_WAVES[1].cos[c] * s2) * (FOAM_WAVES[2].sin[c] * c3 + FOAM_WAVES[2].cos[c] * s3);
         let foam =
           (smoothstep(WATER.crest, WATER.crestFull, h) + smoothstep(WATER.face, WATER.faceFull, dz) * smoothstep(0.1, 1.0, h)) * lateral +
-          smoothstep(0.7, 1.15, Math.hypot(dx, dz)) +
+          smoothstep(0.7, 1.15, Math.sqrt(dx * dx + dz * dz)) +
           smoothstep(0.1, 0.8, edge) * 0.7 +
           WATER.patches * smoothstep(0.3, 0.85, patch);
         foam = (foam > 1 ? 1 : foam) * far;

@@ -44,7 +44,7 @@ function mountains(): THREE.BufferGeometry {
       const peaks = Math.pow(Math.abs(Math.sin(a * (7 + li * 3) + li * 1.3)), 3);
       const e = 0.008 + layer.rise * climb * (0.7 + 0.3 * peaks) + layer.jag * (rng() - 0.3) * Math.min(1, side * 4);
       if (i > 0) {
-        const bottom = -0.06;
+        const bottom = -0.03;
         const quad: [number, number][] = [
           [prevA, bottom],
           [a, bottom],
@@ -102,7 +102,7 @@ function clouds(): THREE.BufferGeometry {
     const pieces: THREE.BufferGeometry[] = [];
     for (let b = 0; b < blobs; b++) {
       const r = 3 + rng() * 4;
-      const blob = new THREE.SphereGeometry(r, 6, 3);
+      const blob = new THREE.SphereGeometry(r, 6, 2);
       blob.scale(length / (blobs * r) * 1.4, 0.4 + rng() * 0.2, 0.6);
       blob.translate(((b + 0.5) / blobs - 0.5) * length, (rng() - 0.5) * 1.2, (rng() - 0.5) * 3);
       const h = r * 0.5;
@@ -122,10 +122,11 @@ function clouds(): THREE.BufferGeometry {
  * The sunset: a vertex-coloured dome that follows the camera, painted with
  * the same elevation ramp the shader's fog uses (fog orange at and below
  * the horizon, a yellow glow, orange, purple overhead) so fogged things
- * blend into it at every elevation; the sun dead ahead (SUN.dir, which the
- * sea's glitter path also uses) with a glow halo and slowly turning rays;
+ * blend into it at every elevation, with the sun's glow halo painted in; the
+ * sun dead ahead (SUN.dir, which the sea's glitter path also uses) with
+ * slowly turning rays;
  * banded sunset clouds lit from below; and distant mountains closing the bay
- * at the vanishing point. Six draw calls.
+ * at the vanishing point. Five draw calls.
  */
 export class Sky {
   readonly group = new THREE.Group();
@@ -137,18 +138,25 @@ export class Sky {
   private readonly sunOffset = new THREE.Vector3(...SUN.dir).normalize().multiplyScalar(SUN.distance);
 
   constructor() {
-    // Enough latitude rows (48 over 180 degrees) for the narrow glow band above the horizon to exist.
-    const domeGeometry = paintGeometry(new THREE.SphereGeometry(100, 16, 48), (_x, y) => skyColorAt(y / 100));
+    // Enough latitude rows (28 over 100 degrees) for the narrow glow band above the horizon to exist, and enough
+    // longitudes (48) for the sun's glow halo, painted into the dome round the sun's direction (one pass, no blending).
+    const sunDir = new THREE.Vector3(...SUN.dir).normalize();
+    const glowNear = rgb(0xfff0b0);
+    const glowFar = rgb(PALETTE.horizon);
+    // Only down to a little below the horizon: the sea and the clear colour (the fog's) cover the rest, so it is not filled twice.
+    const domeGeometry = paintGeometry(new THREE.SphereGeometry(100, 48, 28, 0, Math.PI * 2, 0, Math.PI * 0.56), (x, y, z) => {
+      const angle = Math.acos(clamp((x * sunDir.x + y * sunDir.y + z * sunDir.z) / 100, -1, 1));
+      const glow = 0.5 * Math.pow(1 - smoothstep(0, 0.6, angle), 1.6) + 0.2 * (1 - smoothstep(0.1, 0.3, angle));
+      return mixRgb(skyColorAt(y / 100), mixRgb(glowFar, glowNear, 1 - smoothstep(0.1, 0.45, angle)), glow);
+    });
     this.dome = new THREE.Mesh(domeGeometry, createPS1Material({ unlit: true, fog: false, side: THREE.BackSide, depthWrite: false }));
     this.dome.renderOrder = -4;
     this.dome.frustumCulled = false;
     this.group.add(this.dome);
 
-    // The sun: a glow halo (stacked translucent discs), slowly turning rays, the disc.
+    // The sun: slowly turning rays and the disc.
     this.sun = new THREE.Group();
     const disc = new THREE.Mesh(colorGeometry(new THREE.CircleGeometry(11, 14), PALETTE.sun), createPS1Material({ unlit: true, fog: false, depthWrite: false }));
-    const haloParts = [34, 24, 16.5].map((r, i) => colorGeometry(new THREE.CircleGeometry(r, 16).translate(0, 0, -0.1 * (3 - i)), i === 2 ? 0xfff0b0 : PALETTE.horizon));
-    const halo = new THREE.Mesh(mergeGeometries(haloParts), createPS1Material({ unlit: true, fog: false, depthWrite: false, opacity: 0.14 }));
     const rayParts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < 9; i++) {
       const ray = new THREE.BufferGeometry();
@@ -161,9 +169,8 @@ export class Sky {
     }
     this.rays = new THREE.Mesh(mergeGeometries(rayParts), createPS1Material({ unlit: true, fog: false, depthWrite: false, opacity: 0.16, side: THREE.DoubleSide }));
     this.rays.renderOrder = -3;
-    halo.renderOrder = -3;
     disc.renderOrder = -2;
-    this.sun.add(this.rays, halo, disc);
+    this.sun.add(this.rays, disc);
     this.group.add(this.sun);
 
     this.clouds = new THREE.Mesh(clouds(), createPS1Material({ unlit: true, fog: false, depthWrite: false, flat: 0.12, side: THREE.DoubleSide }));
@@ -174,7 +181,7 @@ export class Sky {
     this.mountains = new THREE.Mesh(mountains(), createPS1Material({ unlit: true, fog: false, side: THREE.DoubleSide, flat: 0.08 }));
     this.mountains.renderOrder = -1;
     this.group.add(this.mountains);
-    for (const child of [this.sun, this.rays, halo, disc, this.clouds, this.mountains]) child.frustumCulled = false;
+    for (const child of [this.sun, this.rays, disc, this.clouds, this.mountains]) child.frustumCulled = false;
   }
 
   update(camera: THREE.Camera, time: number): void {
