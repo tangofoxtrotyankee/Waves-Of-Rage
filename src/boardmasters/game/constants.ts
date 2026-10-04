@@ -139,9 +139,9 @@ export const CAMERA = {
   followRate: 6,
   /** ...and for following the surfer's height: tight on the water, loose in the air so jumps rise in frame. */
   waterFollowRate: 12,
-  airFollowRate: 4,
+  airFollowRate: IS_PORTRAIT ? 2.5 : 4,
   /** The most the camera's idea of the surfer's height may lag below the surfer in the air (metres), so big airs never leave the frame. */
-  airLag: IS_PORTRAIT ? 0.7 : 0.5,
+  airLag: IS_PORTRAIT ? 1.5 : 0.8,
   /**
    * Combat framing: with a rival right alongside (within `crowdFull` to
    * `crowdNone` metres to the side, from `crowdBehind` to `crowdAhead`
