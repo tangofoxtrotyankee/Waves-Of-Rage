@@ -122,12 +122,9 @@ varying float vDepth;
 varying vec3 vTint;
 // The glitter column (x), the warm halo round it (y), and how much the column breaks into twinkles close by (z).
 varying vec3 vGlint;
-// Sparkle off each facet turned to the sun: one value per facet on the faceted sea.
-#ifdef PS1_FLAT
-flat varying float vSparkle;
-#else
+// Sparkle off the facets turned to the sun, interpolated (even on the faceted sea) so it gathers round the brightest vertices
+// as sparse points rather than filling whole triangles.
 varying float vSparkle;
-#endif
 float waterHashV(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -148,7 +145,7 @@ void waterVertex(vec3 world, vec3 worldNormal, float depth) {
   vec2 toSun = normalize(uGlintDir.xz);
   vec2 across = normalize(v.xz);
   float side = abs(across.x * toSun.y - across.y * toSun.x);
-  if (side < 0.2 && depth > 2.0 && dot(across, toSun) > 0.0) {
+  if (side < 0.12 && depth > 2.0 && dot(across, toSun) > 0.0) {
     float near = 1.0 - smoothstep(30.0, 70.0, depth);
     float rise = abs(-v.y - uGlintDir.y);
     vGlint = vec3(
@@ -262,11 +259,7 @@ varying vec3 vWorld;
 varying float vDepth;
 varying vec3 vTint;
 varying vec3 vGlint;
-#ifdef PS1_FLAT
-flat varying float vSparkle;
-#else
 varying float vSparkle;
-#endif
 
 // A cheap hash without a sine (Dave Hoskins' hash12): the CPU rasterisers some phones fall back to pay for every transcendental.
 float waterHash(vec2 p) {
@@ -285,7 +278,7 @@ float foamPattern() {
   vec2 cell = floor((vWorld.xz + vec2(0.0, uTime * 3.0)) * vec2(5.0, 3.4) / level);
   float churn = floor(uTime * 2.0 + fract(dot(cell, vec2(0.371, 0.613))) * 4.0);
   float cells = waterHash(cell + vec2(level * 17.0, churn * 7.0));
-  return 0.08 + 0.7 * cells + 0.22 * order;
+  return 0.08 + 0.82 * cells + 0.1 * order;
 }
 
 vec3 waterShade(vec3 lit) {
@@ -298,13 +291,14 @@ vec3 waterShade(vec3 lit) {
     // Whitewater on crests and breaking faces.
     if (vFoam > pattern) return mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);
     vec3 col = lit * vTint;
-    // The sun's glitter (worked out per vertex): a warm halo, the column breaking into twinkling pixels close by, and
-    // sparkles off the facets turned to the sun.
+    // The sun's glitter (worked out per vertex): a warm halo, the column breaking into sparse twinkling points close by
+    // (about 3 rendered pixels each), and sparkles off the facets turned to the sun. The cream never fully covers the water,
+    // so the path stays a warm sheen with bright points on it rather than a slab of noise.
     if (vGlint.y + vSparkle > 0.004) {
-      float twinkle = waterHash(floor(gl_FragCoord.xy * 0.5) + floor(uTime * 7.0));
-      float column = vGlint.x * mix(1.0, 0.25 + 1.1 * step(0.45, twinkle), vGlint.z);
+      float twinkle = waterHash(floor(gl_FragCoord.xy * 0.34) + floor(uTime * 7.0));
+      float column = vGlint.x * mix(1.0, 0.15 + 1.6 * step(0.82, twinkle), vGlint.z);
       col = mix(col, col * vec3(1.35, 1.05, 0.8) + vec3(0.1, 0.04, 0.0), vGlint.y * 0.6);
-      col = mix(col, uGlintColor, clamp(column * 0.95 + vSparkle * mix(0.6, step(0.3, twinkle), vGlint.z), 0.0, 1.0));
+      col = mix(col, uGlintColor, clamp(column * 0.95 + vSparkle * mix(0.3, step(0.9, twinkle), vGlint.z), 0.0, 0.75));
     }
     return col;
   #endif
