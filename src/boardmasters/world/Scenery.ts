@@ -567,7 +567,7 @@ export class Scenery {
       b.box('lamp', 0.5, 0.45, 0.45, inner - 0.8, top - 0.5, lz, BULBS[i % BULBS.length]);
     }
     // The banner across the front, turned towards the riders coming up the course; speakers either side.
-    b.add('atlas', atlasQuad(24, 6, ATLAS.banner, inner - 0.2, floor + 7.5, z, Math.PI / 2 + 0.5));
+    b.add('atlas', atlasQuad(24, 6, ATLAS.banner, inner - 0.2, floor + 7.5, z, Math.PI / 2 + 0.65));
     for (const sz of [z - 13, z + 13]) {
       b.box('solid', 2, 4.5, 2, inner - 1.8, floor + 2.25, sz, C.outline);
       b.box('lamp', 0.1, 0.5, 1.4, inner - 0.75, floor + 3.6, sz, rgb(0xff4fa3));

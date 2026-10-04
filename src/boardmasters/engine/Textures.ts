@@ -167,10 +167,13 @@ export const ATLAS = {
  * The festival atlas, 512 by 256 px, so the pier's textured parts share one
  * material: the BOARDMASTERS banner (slanted, outlined lettering on dark
  * cloth, like the title), a strip of dense crowd and the blue feather flag
- * with the wave logo.
+ * with the wave logo. Mipmapped (nearest within a level): the banner is seen
+ * from 50 to 150 m, about 4 texels to a screen pixel, where single nearest
+ * samples drop whole strokes and the word reads as garbage. The cells sit
+ * on 32-texel boundaries, so the mip levels that matter do not bleed.
  */
 export function festivalAtlas(): THREE.CanvasTexture {
-  return pixelTexture(512, (ctx) => {
+  const texture = pixelTexture(512, (ctx) => {
     // Banner, canvas rows 0..63 across the full 512 columns (the lettering needs the width to stay legible).
     fill(ctx, 0x2a1652, 0, 0, 512, 64);
     fill(ctx, 0x3a2270, 0, 6, 512, 52);
@@ -210,6 +213,9 @@ export function festivalAtlas(): THREE.CanvasTexture {
     fill(ctx, PALETTE.foam, 4, 178, 24, 2);
     fill(ctx, 0x7ff6ff, 7, 184, 18, 2);
   }, 256);
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.NearestMipmapNearestFilter;
+  return texture;
 }
 
 /** Falling water: streaks of white and pale cyan on blue, scrolled down by the scenery. */
