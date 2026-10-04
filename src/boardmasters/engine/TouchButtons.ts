@@ -15,8 +15,8 @@ export interface TouchButton {
   key: ComboKey;
   /** The word on the pill under (or over) the button; the CARVE pair shares one, drawn by the left button. */
   caption: string;
-  /** Where the caption pill sits: below the button, above it, or none. */
-  captionAt: 'below' | 'above' | 'none';
+  /** Where the caption sits: on a pill below the button or above it, lettered inside the disc's lower rim, or none. */
+  captionAt: 'below' | 'above' | 'inside' | 'none';
 }
 
 const R = 18;
@@ -33,7 +33,7 @@ export const TOUCH_BUTTONS: TouchButton[] = [
   { id: 'carveLeft', x: 28, y: ROW, r: R, label: '<', color: 0xc8d2e8, key: 'L', caption: 'CARVE', captionAt: 'below' },
   { id: 'carveRight', x: 76, y: ROW, r: R, label: '>', color: 0xc8d2e8, key: 'R', caption: '', captionAt: 'none' },
   { id: 'forward', x: 52, y: ROW2, r: R, label: 'UP', color: PALETTE.gold, key: 'F', caption: 'PUMP', captionAt: 'above' },
-  { id: 'jump', x: VIEW.width - 34, y: ROW, r: 22, label: 'JUMP', color: PALETTE.foam, key: 'J', caption: 'JUMP', captionAt: 'below' },
+  { id: 'jump', x: VIEW.width - 34, y: ROW, r: 22, label: 'JUMP', color: PALETTE.foam, key: 'J', caption: 'JUMP', captionAt: 'inside' },
   { id: 'attack', x: VIEW.width - 84, y: ROW, r: R, label: 'HIT', color: PALETTE.red, key: 'H', caption: 'ATTACK', captionAt: 'below' },
   { id: 'barge', x: VIEW.width - 59, y: ROW2, r: R, label: 'BRG', color: 0x3aa8ff, key: 'B', caption: 'BARGE', captionAt: 'above' },
 ];

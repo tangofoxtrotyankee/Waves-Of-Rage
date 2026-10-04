@@ -353,20 +353,20 @@ export class Hud2D {
   /**
    * A word in a heavy italic canvas font, thresholded so its pixels stay
    * hard, filled with a gradient and outlined: the mockup's brush lettering
-   * (RAGE, WIPEOUT, PAUSED). Allocates; callers cache it.
+   * (RAGE, WIPEOUT, PAUSED, trick text). `squeeze` below 1 narrows the
+   * letters without making them shorter, so a long word fits a narrow slot
+   * and stays legible. Allocates; callers cache it.
    */
-  heavyText(text: string, px: number, stops: Stops, outline = 1, outlineColor = SHADOW): HTMLCanvasElement {
-    const font = `italic 900 ${px}px "Arial Black", "Arial Bold", Impact, "Helvetica Neue", Arial, sans-serif`;
-    const probe = makeCanvas(1, 1);
-    probe.ctx.font = font;
-    const w = Math.ceil(probe.ctx.measureText(text).width + px * 0.4);
+  heavyText(text: string, px: number, stops: Stops, outline = 1, outlineColor = SHADOW, squeeze = 1): HTMLCanvasElement {
+    const font = heavyFont(px);
+    const w = Math.ceil(heavyWidth(text, px) * squeeze + px * 0.7);
     const h = Math.ceil(px * 1.2);
     const { canvas, ctx } = makeCanvas(w, h);
     ctx.font = font;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#ffffff';
     // A little extra shear on top of the italic, for the mockup's forward lean.
-    ctx.setTransform(1, 0, -0.12, 1, px * 0.15, 0);
+    ctx.setTransform(squeeze, 0, -0.12, 1, px * 0.15, 0);
     ctx.fillText(text, 1, Math.round(px * 0.95));
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     hardenAlpha(canvas);
@@ -433,6 +433,16 @@ export class Hud2D {
     this.tints.set(color, sheet);
     return sheet;
   }
+}
+
+const heavyFont = (px: number): string => `italic 900 ${px}px "Arial Black", "Arial Bold", Impact, "Helvetica Neue", Arial, sans-serif`;
+let probe: CanvasRenderingContext2D | null = null;
+
+/** The advance width of `text` in heavyText's font at `px` (no outline or lean): cheap, for fitting text before baking it. */
+export function heavyWidth(text: string, px: number): number {
+  probe ??= makeCanvas(1, 1).ctx;
+  probe.font = heavyFont(px);
+  return probe.measureText(text).width;
 }
 
 /** The bounding box of a canvas's opaque pixels. */

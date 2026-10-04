@@ -1,9 +1,9 @@
-import { type Hud2D, hardenAlpha, makeCanvas, outlined, type Stops } from '../engine/Hud2D';
+import { type Hud2D, hardenAlpha, heavyWidth, makeCanvas, outlined, type Stops } from '../engine/Hud2D';
 import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
 import { IS_PORTRAIT, SCORING } from './constants';
-import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
+import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import type { FloatingText, Run } from './Run';
 
@@ -19,6 +19,13 @@ const STRIP_BEHIND = 24;
 /** Distance milestones on the endless course, shown as the strip's flag. */
 const MILESTONE = 500;
 const BIG = new BigDigits();
+/**
+ * The title logo, fetched as soon as this module is evaluated (with the
+ * bundle, alongside the font) rather than when the first frame is drawn.
+ */
+const LOGO = new Image();
+LOGO.onerror = () => console.error('HUD image failed to load', LOGO.src);
+LOGO.src = 'assets/boardmasters/logo-236x118.png';
 /** Text option objects shared by every call (no per-frame allocation). */
 const TIGHT = { tight: true } as const;
 const TIGHT_RIGHT = { tight: true, align: 'right' } as const;
@@ -29,6 +36,7 @@ const TIGHT_CENTER_OUTLINE = {
   align: 'center',
   outline: true,
 } as const;
+const TIGHT_RIGHT_OUTLINE = { tight: true, align: 'right', outline: true } as const;
 const INK = { tight: true, shadow: false } as const;
 const INK_BIG = { tight: true, scale: 2, shadow: false } as const;
 const INK_RIGHT = { tight: true, align: 'right', shadow: false } as const;
@@ -107,7 +115,9 @@ export class HudView {
   private readonly heartArt = hearts();
   private readonly marks = stripMarkers();
   private readonly pauseButton = pauseArt();
+  /** Button sprites; a button lettered inside its disc is baked again once the font has loaded. */
   private readonly buttons: ButtonArt[] = TOUCH_BUTTONS.map((b) => buttonArt(b));
+  private buttonsLettered = false;
   private readonly captions: (HTMLCanvasElement | null)[] = TOUCH_BUTTONS.map(() => null);
   private readonly floatArt = new WeakMap<FloatingText, HTMLCanvasElement>();
   /** Panels and other art by a fixed key (literal strings only, so lookups allocate nothing). */
@@ -132,6 +142,8 @@ export class HudView {
   private readonly kos = new Memo((v) => String(v));
   private readonly pauseLine = new Memo(() => `DIST ${this.dist.get(this.run.distance)}M   SCORE ${this.score.get(this.run.score)}`);
   private readonly field: string;
+  private trail = '';
+  private trailSig = 0;
   /** Top bar panels: x and width each. */
   private readonly bar: {
     hx: number;
@@ -166,7 +178,6 @@ export class HudView {
     this.hud = run.hud;
     this.W = this.hud.width;
     this.H = this.hud.height;
-    this.hud.loadImage('logo-big', 'assets/boardmasters/logo-236x118.png');
     const W = this.W;
     this.field = `/${run.rivals.length + 1}`;
     // HEALTH and POS from the left, SCORE and DIST from the right, the pause button between (240 wide upright: 1/55/131/181).
@@ -200,7 +211,7 @@ export class HudView {
     this.bake('score', this.bar.sw, top, 4);
     this.panels.set(
       'strip',
-      brushPanel(18, sh, HUD_COLORS.panel, 0.5, {
+      brushPanel(22, sh, HUD_COLORS.panel, 0.5, {
         slant: 0,
         ragged: 2,
         seed: 6,
@@ -294,7 +305,7 @@ export class HudView {
     const valueY = top + 11;
     // HEALTH: big hearts, the lost ones dark; the one just lost flashes while invulnerable.
     // On touch screens the MENU corner takes its place outside play.
-    if (!run.input.touch || run.state === 'playing') {
+    if (!run.input.touch || run.state === 'playing' || (run.state === 'wipeout' && run.stateTime <= SCORING.wipeoutSeconds)) {
       hud.blit(this.panels.get('health') as HTMLCanvasElement, b.hx, top);
       hud.text(b.hx + 6, top + 2, 'HEALTH', HUD_COLORS.label, TIGHT);
       const flashing = run.time < run.invulnerableTill && Math.floor(run.time * 10) % 2 === 0;
@@ -359,7 +370,7 @@ export class HudView {
 
   private stripX(z: number, worldX: number): number {
     // A gentle wiggle anchored to the water, plus the lateral position (world +x is screen-left).
-    return this.strip.x + 8 + Math.round(Math.sin(z * 0.021) * 3 + Math.sin(z * 0.0071 + 1) * 1.5) - Math.round(worldX / 12) * 2;
+    return this.strip.x + 10 + Math.round(Math.sin(z * 0.012) * 5 + Math.sin(z * 0.031 + 1) * 1.5) - Math.round(worldX / 12) * 2;
   }
 
   private inStrip(z: number): boolean {
@@ -375,12 +386,19 @@ export class HudView {
     const st = this.strip;
     st.z = s.z;
     hud.blit(this.panels.get('strip') as HTMLCanvasElement, st.x, st.y);
-    // Dots anchored to the water, so they stream down as the surfer goes.
-    const step = 5 / st.perM;
-    for (let z = Math.ceil((s.z - STRIP_BEHIND) / step) * step; z < s.z + STRIP_AHEAD; z += step) {
+    // An S-curved dotted path anchored to the water, so it streams down as the surfer goes, with a round node every fourth dot like the mockup's map.
+    const step = 3 / st.perM;
+    for (let n = Math.ceil((s.z - STRIP_BEHIND) / step); n * step < s.z + STRIP_AHEAD; n++) {
+      const z = n * step;
       const py = this.stripY(z);
-      if (py < st.y + 2 || py > st.y + st.h - 3) continue;
-      hud.rect(this.stripX(z, 0), py, 2, 2, z < s.z ? 0x5a6a8a : 0x9fe8ff, 0.9);
+      if (py < st.y + 3 || py > st.y + st.h - 4) continue;
+      const px = this.stripX(z, 0);
+      const behind = z < s.z;
+      if (n % 5 === 0) {
+        hud.rect(px - 1, py, 4, 2, 0x0d0820, 0.9);
+        hud.rect(px, py - 1, 2, 4, 0x0d0820, 0.9);
+        hud.rect(px, py, 2, 2, behind ? 0x8a92aa : 0xd8dcec, 1);
+      } else hud.rect(px, py, 2, 2, behind ? 0x5a6a8a : 0x5fe3ff, 0.9);
     }
     const m = this.marks;
     for (const c of run.chevrons) if (c.active && this.inStrip(c.z)) hud.blit(m.gate, this.stripX(c.z, c.x) - 2, this.stripY(c.z) - 2);
@@ -390,75 +408,102 @@ export class HudView {
     const next = (Math.floor(run.distance / MILESTONE) + 1) * MILESTONE;
     const fy = Math.max(st.y + 1, this.stripY(next) - 8);
     hud.blit(m.flag, this.stripX(next, 0) - 1, fy);
-    hud.text(st.x + 17, fy + 1, this.milestone.get(next), '#ffffff', TIGHT_OUTLINE);
+    hud.text(st.x + 21, fy + 1, this.milestone.get(next), '#ffffff', TIGHT_OUTLINE);
     hud.blit(m.arrow, this.stripX(s.z, s.x) - 3, st.playerY - 4);
   }
 
-  /** Floating trick text: big gradient lettering with a dark outline, popping in, stacked beside the surfer (newest lowest) and fading. */
+  /** Floating trick text: heavy brush lettering with a dark outline, popping in, stacked beside the surfer (newest lowest) and fading. */
   private drawFloats(): void {
     const list = this.run.floats;
-    const anchorX = IS_PORTRAIT ? this.W - 4 : Math.round(this.W * 0.6);
-    // Beside the surfer: upright, right of his head and shoulders; landscape, right of him.
-    const baseY = Math.round(this.H * (IS_PORTRAIT ? 0.6 : 0.62));
+    const anchorX = IS_PORTRAIT ? this.W - 3 : Math.round(this.W * 0.6);
+    // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
+    const baseY = Math.round(this.H * (IS_PORTRAIT ? 0.5 : this.run.input.touch ? 0.62 : 0.8));
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
       const c = this.floatArt.get(f) ?? this.bakeFloat(f);
       if (!c) continue;
+      const top = baseY - c.height - stack - Math.round(f.age * 10);
+      // Only the entries that would cover the RAGE row give way; the rest still show.
+      if (top < FLOAT_TOP) continue;
       const pop = f.age < FLOAT_POP ? 1 + 0.6 * (1 - f.age / FLOAT_POP) ** 2 : 1;
       const alpha = Math.min(1, (FLOAT_LIFE - f.age) / FLOAT_FADE);
-      const top = baseY - c.height - stack - Math.round(f.age * 10);
-      if (top < FLOAT_TOP) break; // older texts give way rather than cover the RAGE row
       this.hud.blit(c, IS_PORTRAIT ? anchorX - c.width : anchorX, top, alpha, pop);
-      stack += c.height + 1;
+      stack += c.height;
     }
   }
 
+  /**
+   * `text` in the heavy brush lettering at `px`, made to fit `maxW`: first
+   * narrowed (down to 72% width, which keeps the letters tall and legible),
+   * then smaller, but not below `minPx`. Fitted by measuring, so each line
+   * is baked once.
+   */
+  private heavyFit(text: string, px: number, minPx: number, maxW: number, stops: Stops): HTMLCanvasElement {
+    // The baked sprite is about the advance width plus the outline and a little lean.
+    const room = maxW - 4;
+    const w = heavyWidth(text, px);
+    if (w <= room) return this.hud.heavyText(text, px, stops, 1);
+    const squeeze = Math.max(0.72, room / w);
+    const size = w * squeeze <= room ? px : Math.max(minPx, Math.floor((px * room) / (w * squeeze)));
+    return this.hud.heavyText(text, size, stops, 1, undefined, squeeze);
+  }
+
   private bakeFloat(f: FloatingText): HTMLCanvasElement | null {
-    const hud = this.hud;
     const stops = stopsFor(f.color);
-    const maxW = IS_PORTRAIT ? 100 : this.W * 0.4 - 8;
-    const line = (text: string, scale: number): HTMLCanvasElement | null => {
-      const big = hud.styledText(text, { scale, stops, italic: scale > 1 ? 6 : 4, outline: 1 });
-      if (!big || big.width <= maxW || scale === 1) return big;
-      return hud.styledText(text, { scale: 1, stops, italic: 4, outline: 1 });
-    };
+    // Upright the stack sits right of the surfer's head, above his outstretched arm (the mockup's "+250 CARVE" sits at x 180..232 of 240).
+    const maxW = IS_PORTRAIT ? 96 : Math.round(this.W * 0.4 - 8);
+    const big = IS_PORTRAIT ? 18 : 20;
     const match = POINTS.exec(f.text);
-    let canvas: HTMLCanvasElement | null;
+    let canvas: HTMLCanvasElement;
     if (match && match[1]) {
-      // "+250" over "CARVE", like the mockup.
-      const points = line(match[2], 2);
-      const name = line(match[1], f.scale >= 2 ? 2 : 1);
-      if (!points || !name) return null;
-      const w = Math.max(points.width, name.width + 2);
+      // "+250" over "CARVE", like the mockup: both in the heavy lettering, the name a little smaller and set back.
+      const points = this.heavyFit(match[2], big, 14, maxW, stops);
+      const name = this.heavyFit(match[1], f.scale >= 2 ? big - 1 : big - 3, 14, maxW - 4, stops);
+      const shift = 4;
+      const w = Math.max(points.width, name.width + shift);
+      // The name goes on last, so the points' outline never hides the tops of its letters (a T's bar).
       const made = makeCanvas(w, points.height + name.height - 2);
-      made.ctx.drawImage(points, IS_PORTRAIT ? w - points.width : 0, 0);
-      made.ctx.drawImage(name, IS_PORTRAIT ? w - name.width - 2 : 2, points.height - 2);
+      made.ctx.drawImage(points, IS_PORTRAIT ? w - points.width : shift, 0);
+      made.ctx.drawImage(name, IS_PORTRAIT ? w - name.width - shift : 0, points.height - 2);
       canvas = made.canvas;
     } else {
       const impact = IMPACT.test(f.text);
-      const text = line(f.text, f.scale >= 2 || impact ? 2 : 1);
-      if (!text) return null;
-      canvas = impact ? withBurst(text) : text;
+      const text = this.heavyFit(f.text, f.scale >= 2 || impact ? big - 1 : big - 3, 14, maxW - (impact ? 16 : 0), stops);
+      canvas = impact ? withBurst(text, stops === HUD_COLORS.red) : text;
     }
     this.floatArt.set(f, canvas);
     return canvas;
   }
 
-  /** The combo reader's held presses, so moves can be learnt by watching. */
+  /** The combo reader's held presses, so moves can be learnt by watching. The string is rebuilt only when the presses change. */
   private drawTrail(): void {
     const run = this.run;
     const recent = run.combos.recent(run.time);
     if (recent.length === 0) return;
-    let trail = '';
-    for (const k of recent) trail += (trail ? ' ' : '') + KEY_LABELS[k];
-    const y = run.input.touch ? (IS_PORTRAIT ? 312 : this.H - 92) : this.H - 22;
-    this.hud.text(this.W / 2, y, trail, '#b8fbff', TIGHT_CENTER_OUTLINE);
+    let sig = recent.length;
+    for (let i = 0; i < recent.length; i++) sig = (sig * 31 + recent[i].charCodeAt(0)) | 0;
+    if (sig !== this.trailSig) {
+      this.trailSig = sig;
+      let trail = '';
+      for (const k of recent) trail += (trail ? ' ' : '') + KEY_LABELS[k];
+      this.trail = trail;
+    }
+    // Upright on touch: right-aligned in the clear slot under the float stack and above the BARGE caption, off the surfer's board.
+    if (run.input.touch && IS_PORTRAIT) this.hud.text(this.W - 6, 300, this.trail, '#b8fbff', TIGHT_RIGHT_OUTLINE);
+    else this.hud.text(this.W / 2, run.input.touch ? this.H - 92 : this.H - 22, this.trail, '#b8fbff', TIGHT_CENTER_OUTLINE);
   }
 
   private drawButtons(): void {
     const run = this.run;
     const hud = this.hud;
+    if (!this.buttonsLettered && hud.fontLoaded) {
+      this.buttonsLettered = true;
+      for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
+        const b = TOUCH_BUTTONS[i];
+        if (b.captionAt === 'inside') this.buttons[i] = buttonArt(b, hud.styledText(b.caption, { stops: HUD_COLORS.white, outline: 1 }));
+      }
+    }
     for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
       const b = TOUCH_BUTTONS[i];
       const art = this.buttons[i];
@@ -466,12 +511,14 @@ export class HudView {
     }
     for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
       const b = TOUCH_BUTTONS[i];
-      if (b.captionAt === 'none') continue;
+      if (b.captionAt === 'none' || b.captionAt === 'inside') continue;
       const pill = (this.captions[i] ??= captionPill(hud, b.caption, CAPTION_EDGE[b.id] ?? '#9aa6c4'));
       if (!pill) continue;
       // The CARVE caption sits under the LEFT/RIGHT pair.
       const cx = b.id === 'carveLeft' ? (TOUCH_BUTTONS[0].x + TOUCH_BUTTONS[1].x) / 2 : b.x;
-      const y = b.captionAt === 'below' ? Math.min(this.H - pill.height, b.y + b.r - 1) : b.y - b.r - pill.height + 1;
+      // Pills tuck 3px under the disc's rim, like the mockup's labels.
+      const r = drawnRadius(b);
+      const y = b.captionAt === 'below' ? Math.min(this.H - pill.height, b.y + r - 3) : b.y - r - pill.height + 3;
       hud.blit(pill, Math.round(cx - pill.width / 2), y);
     }
   }
@@ -494,7 +541,7 @@ export class HudView {
     hud.blit(this.panel('pauseMenu', pw - 24, 16, 4), px + 12, py + 58);
     hud.text(px + 31, py + 63, 'MAIN MENU', HUD_COLORS.label, TIGHT);
     hud.text(px + pw - 22, py + 63, touch ? 'MENU' : 'M', HUD_COLORS.dim, TIGHT_RIGHT);
-    hud.text(W / 2, py + 84, this.pauseLine.get(run.score), HUD_COLORS.dim, TIGHT_CENTER);
+    hud.text(W / 2, py + 84, this.pauseLine.get(Math.floor(run.score) * 1e6 + Math.floor(run.distance)), HUD_COLORS.dim, TIGHT_CENTER);
     this.menuCorner();
   }
 
@@ -553,16 +600,21 @@ export class HudView {
     const W = this.W;
     const H = this.H;
     const spec = run.spec;
-    const logo = hud.loaded('logo-big');
-    if (logo) hud.blit(logo, TITLE.logoX, TITLE.logoY);
+    if (LOGO.complete && LOGO.naturalWidth > 0) hud.blit(LOGO, TITLE.logoX, TITLE.logoY);
     const colW = TITLE.columnW;
     const colX = Math.round(TITLE.columnX - colW / 2);
     // PLAY: the highlighted row.
     this.yellowRow('play', colX + 20, TITLE.playY, colW - 40, 'PLAY', touch ? '' : 'SPACE');
     // The character select: the name between arrows, the title, the stat bars.
     const row = TITLE.rowY;
-    const panelH = IS_PORTRAIT ? 46 : 64;
-    hud.blit(this.panel('character', colW, panelH, 7), colX, row - 9);
+    const panelH = IS_PORTRAIT ? 53 : 64;
+    // A tall panel with a small fixed lean, so the stat bars stay inside its slanted edges.
+    let charPanel = this.panels.get('character');
+    if (!charPanel) {
+      charPanel = brushPanel(colW, panelH, HUD_COLORS.panel, 0.85, { slant: 4, seed: 7 });
+      this.panels.set('character', charPanel);
+    }
+    hud.blit(charPanel, colX, row - 9);
     let name = this.names.get(spec.id);
     if (!name) {
       // Upright: the lean breaks letters like M at this size.
@@ -575,7 +627,7 @@ export class HudView {
     hud.text(titleArrowX(1) + nudge, row - 1, '>', '#ffe14d', ARROW);
     hud.text(TITLE.columnX, row + 15, spec.title, HUD_COLORS.label, TIGHT_CENTER);
     const cols = IS_PORTRAIT ? 4 : 2;
-    const cw = IS_PORTRAIT ? 53 : 84;
+    const cw = IS_PORTRAIT ? 50 : 84;
     for (let i = 0; i < 4; i++) {
       const value = i === 0 ? spec.speed : i === 1 ? spec.turn : i === 2 ? spec.power : spec.rage;
       const sx = Math.round(TITLE.columnX - (cols * cw) / 2) + (i % cols) * cw + 3;
@@ -586,14 +638,14 @@ export class HudView {
       hud.text(sx, sy, STAT_LABELS[i], HUD_COLORS.dim, TIGHT);
       if (bar) hud.blit(bar, sx + (IS_PORTRAIT ? 19 : 33), sy + 1);
     }
-    // Which of the seven, as pips under the panel.
-    const pipsY = row - 9 + panelH + 3;
+    // Which of the seven, as pips along the panel's bottom row.
+    const pipsY = row - 9 + panelH - 7;
     for (let i = 0; i < CHARACTER_ORDER.length; i++) {
       const on = i === run.characterIndex;
       hud.rect(TITLE.columnX - CHARACTER_ORDER.length * 4 + i * 8 + 2, pipsY - (on ? 1 : 0), 4, on ? 3 : 2, on ? 0xffe14d : 0x8a82b0, 1);
     }
     // The best run on this device.
-    const bestY = IS_PORTRAIT ? H - 44 : pipsY + 9;
+    const bestY = IS_PORTRAIT ? H - 44 : row - 9 + panelH + 12;
     hud.blit(this.panel('best', 168, 13, 8), Math.round(TITLE.columnX - 84), bestY - 3);
     const bestScore = this.bestScore.get(run.best.score);
     const bestDist = this.bestDist.get(run.best.distance);
@@ -627,12 +679,12 @@ export class HudView {
 
 const STAT_ROW_KEYS = ['stat0', 'stat1', 'stat2', 'stat3'];
 
-/** A jagged comic burst behind contact words. */
-function withBurst(text: HTMLCanvasElement): HTMLCanvasElement {
+/** A jagged comic burst behind contact words: red-orange, or gold behind red lettering (damage) so it still reads. */
+function withBurst(text: HTMLCanvasElement, gold: boolean): HTMLCanvasElement {
   const w = text.width + 16;
   const h = text.height + 12;
   const { canvas, ctx } = makeCanvas(w, h);
-  ctx.fillStyle = '#ff5a3a';
+  ctx.fillStyle = gold ? '#ffd23a' : '#ff5a3a';
   ctx.beginPath();
   const spikes = 12;
   for (let i = 0; i < spikes * 2; i++) {

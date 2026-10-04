@@ -290,28 +290,28 @@ export function stripMarkers(): {
 const ICON_LIGHT = '#eef2ff';
 const ICON_SHADE = '#9aa6c4';
 
-/** A fat chevron pointing left, 4px thick, lit on its upper arm. */
+/** A fat chevron pointing left, 6px thick, lit on its upper arm (sized to fill most of the disc, like the mockup's). */
 function chevronLeft(): HTMLCanvasElement {
-  const h = 17;
-  const w = 12;
+  const h = 21;
+  const w = 18;
   const { canvas, ctx } = makeCanvas(w, h);
   const mid = (h - 1) / 2;
   for (let y = 0; y < h; y++) {
     const x = Math.round(Math.abs(y - mid) * 0.95) + 1;
     ctx.fillStyle = y > mid ? ICON_SHADE : ICON_LIGHT;
-    ctx.fillRect(x, y, 5, 1);
+    ctx.fillRect(x, y, 6, 1);
   }
   return outlined(canvas, HUD_COLORS.ink, 1, 0);
 }
 
 /** Two stacked chevrons pointing up (pump). */
 function chevronsUp(): HTMLCanvasElement {
-  const { canvas, ctx } = makeCanvas(15, 14);
-  for (const top of [0, 6]) {
-    for (let x = 0; x < 15; x++) {
-      const y = top + Math.round(Math.abs(x - 7) * 0.7);
+  const { canvas, ctx } = makeCanvas(19, 17);
+  for (const top of [0, 7]) {
+    for (let x = 0; x < 19; x++) {
+      const y = top + Math.round(Math.abs(x - 9) * 0.65);
       ctx.fillStyle = top === 0 ? ICON_LIGHT : ICON_SHADE;
-      ctx.fillRect(x, y, 1, 3);
+      ctx.fillRect(x, y, 1, 4);
     }
   }
   gradientFill(canvas, ['#fff7b0', '#ffe14d', '#ffc21a']);
@@ -437,6 +437,16 @@ function waveIcon(): HTMLCanvasElement {
   return outlined(canvas, HUD_COLORS.ink, 1, 0);
 }
 
+/**
+ * The drawn radius of a touch button. The discs are drawn a little bigger
+ * than their hit radius (TOUCH_BUTTONS' r, which the tests and Input use,
+ * plus Input's 5px slack) so they read at the mockup's size; neighbouring
+ * discs still keep a gap of a few pixels.
+ */
+export function drawnRadius(b: TouchButton): number {
+  return b.r + (b.r >= 22 ? 1 : 3);
+}
+
 export interface ButtonArt {
   up: HTMLCanvasElement;
   down: HTMLCanvasElement;
@@ -445,7 +455,7 @@ export interface ButtonArt {
 }
 
 /** A round button: a dark glassy disc in a coloured ring with its icon; the pressed sprite is lit and sunk 1px. */
-export function buttonArt(b: TouchButton): ButtonArt {
+export function buttonArt(b: TouchButton, inside: HTMLCanvasElement | null = null): ButtonArt {
   const color = `#${b.color.toString(16).padStart(6, '0')}`;
   const icon =
     b.id === 'carveLeft'
@@ -461,27 +471,30 @@ export function buttonArt(b: TouchButton): ButtonArt {
               : waveIcon();
   const glow = b.id === 'attack' || b.id === 'barge';
   const pad = 3;
-  const size = (b.r + pad) * 2;
-  const c = b.r + pad;
+  const r = drawnRadius(b);
+  const size = (r + pad) * 2;
+  const c = r + pad;
   const make = (pressed: boolean) => {
     const { canvas, ctx } = makeCanvas(size, size);
-    if (glow || pressed) ring(ctx, c, c, b.r + 3, 3, pressed ? '#ffffff' : color, pressed ? 0.45 : 0.3);
-    disc(ctx, c, c, b.r, HUD_COLORS.ink, 0.5);
+    if (glow || pressed) ring(ctx, c, c, r + 3, 3, pressed ? '#ffffff' : color, pressed ? 0.45 : 0.3);
+    disc(ctx, c, c, r, HUD_COLORS.ink, 0.5);
     const body = pressed ? mixHex(color, '#120c2a', 0.4) : glow ? mixHex(color, '#120c2a', 0.62) : '#141a33';
-    disc(ctx, c, c, b.r - 2, body, pressed ? 0.95 : glow ? 0.78 : 0.55);
+    disc(ctx, c, c, r - 2, body, pressed ? 0.95 : glow ? 0.78 : 0.55);
     // Glass: a lighter cap on the upper half.
     ctx.globalAlpha = pressed ? 0.25 : 0.1;
     ctx.fillStyle = '#ffffff';
-    for (let dy = -(b.r - 3); dy < -2; dy++) {
-      const half = Math.round(Math.sqrt((b.r - 3) * (b.r - 3) - (dy + 0.5) * (dy + 0.5)));
+    for (let dy = -(r - 3); dy < -2; dy++) {
+      const half = Math.round(Math.sqrt((r - 3) * (r - 3) - (dy + 0.5) * (dy + 0.5)));
       ctx.fillRect(c - half, c + dy, half * 2, 1);
     }
     ctx.globalAlpha = 1;
-    ring(ctx, c, c, b.r, 2, pressed ? '#ffffff' : color, pressed ? 1 : 0.85);
-    ring(ctx, c, c, b.r - 2, 1, HUD_COLORS.ink, 0.5);
+    ring(ctx, c, c, r, 2, pressed ? '#ffffff' : color, pressed ? 1 : 0.85);
+    ring(ctx, c, c, r - 2, 1, HUD_COLORS.ink, 0.5);
     const ix = Math.round(c - icon.width / 2 + (b.id === 'carveLeft' ? -1 : b.id === 'carveRight' ? 1 : 0));
-    const iy = Math.round(c - icon.height / 2) + (pressed ? 1 : 0);
+    // With a caption lettered on the lower rim, the icon moves up to make room.
+    const iy = Math.round(c - icon.height / 2) + (pressed ? 1 : 0) - (inside ? 5 : 0);
     ctx.drawImage(icon, ix, iy);
+    if (inside) ctx.drawImage(inside, Math.round(c - inside.width / 2), Math.round(c + r - inside.height - 4) + (pressed ? 1 : 0));
     return canvas;
   };
   return { up: make(false), down: make(true), offset: -c };
