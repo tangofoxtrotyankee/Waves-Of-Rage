@@ -157,6 +157,8 @@ export const CAMERA = {
   crowdRate: 2.5,
   lookRate: 8,
   rollRate: 4,
+  /** The chase offsets swing round this fraction of the surfer's heading (eased with them), so a held carve shows the board turned about half as far. */
+  headingFollow: 0.45,
   /** Roll into a carve, radians at full heading (eased; kept small so carves do not read as spinning). */
   roll: 0.035,
   /** FOV kick in degrees: up to `speedFov` from cruising to top speed, plus `boostFov` while a BOOST lasts and `rageFov` while raging. */

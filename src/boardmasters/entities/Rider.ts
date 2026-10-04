@@ -457,8 +457,11 @@ export class Rider {
       this.heading = Math.sign(this.heading) * PHYSICS.maxHeading;
       if (this.headingRate * this.heading > 0) this.headingRate = 0;
     }
-    // The bank follows the turn (and the press), not the heading, so holding a line reads as riding, not as the board spinning.
-    const leanTarget = this.airborne ? 0 : clamp(this.headingRate / nominal, -1, 1) * 0.75 + clamp(control.steer, -1, 1) * 0.25;
+    // The bank follows the turn and the press, and a little of the heading, so a held carve stays banked (a board turned
+    // with the rider stood up reads as a skid) while straightening up as the board comes back.
+    const leanTarget = this.airborne
+      ? 0
+      : clamp(this.headingRate / nominal, -1, 1) * 0.55 + clamp(this.heading / PHYSICS.maxHeading, -1, 1) * 0.25 + clamp(control.steer, -1, 1) * 0.2;
     this.lean += (leanTarget - this.lean) * damp(8, dt);
 
     // Move along the course; the whitewater at the edges pushes back.

@@ -55,6 +55,7 @@ const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
 const CHEVRON_POOL = 8;
 type ImpactKind = keyof typeof IMPACT.hitStop;
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: number, h: number): boolean => x !== null && y !== null && x >= zx && x < zx + w && y >= zy && y < zy + h;
 
 /**
@@ -752,6 +753,13 @@ export class Run {
     const height = CAMERA.height + (title ? CAMERA.title.height : 0) + this.camCrowd * CAMERA.crowdUp;
     const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(height, water + CAMERA.clearance + 0.3 - this.followY), -back);
     const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight + (title ? CAMERA.title.lookHeight : 0), CAMERA.lookAhead);
+    // Swing round behind the board by part of its heading, so a held carve shows the board turned about half as far as it
+    // is (it still reads as a carve, not as the board spinning under a camera that stays pointed down the course).
+    const yaw = CAMERA.headingFollow * s.heading;
+    if (yaw !== 0) {
+      desired.applyAxisAngle(Y_AXIS, yaw);
+      look.applyAxisAngle(Y_AXIS, yaw);
+    }
     const roll = -s.lean * CAMERA.roll; // banks with how hard the surfer is turning, not with where the board points
     // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
     const speedUp = Math.min(1, Math.max(0, (s.speed - PHYSICS.baseSpeed) / (PHYSICS.maxSpeed - PHYSICS.baseSpeed)));
