@@ -456,7 +456,7 @@ export class Run {
       }
     }
     // Invulnerable after a hit: the surfer pulses white (never blinks out of sight); RAGE has its own pulse.
-    if (this.raging) s.setFlash(0.2 + 0.2 * Math.sin(this.time * 20));
+    if (this.raging) s.setFlash(RAGE.pulse * (0.5 + 0.5 * Math.sin(this.time * 20)));
     else if (!s.wiped && this.time < this.invulnerableUntil) {
       if (!s.hitFlashing) s.setFlash(0.3 + 0.3 * Math.sin(this.time * 30));
       this.pulsing = true;
@@ -774,9 +774,11 @@ export class Run {
   private startRage(): void {
     this.raging = true;
     this.rageUntil = this.time + RAGE.seconds;
-    this.float('RAGE!', hex(PALETTE.red), 2);
-    sharedUniforms.uFogColor.value.setHex(0xff4fa3);
-    sharedUniforms.uHorizon.value.setHex(0xff8fd0);
+    // High over the surfer, in the middle of the screen (above the knockout's word that usually starts it), not in the column at the side.
+    this.float('RAGE!', hex(PALETTE.red), 2, this.surfer, 1.4);
+    // Only the distance tints (FOG.near and far stay): a deep hot pink, so the riders keep their contrast.
+    sharedUniforms.uFogColor.value.setHex(RAGE.fog);
+    sharedUniforms.uHorizon.value.setHex(RAGE.horizon);
   }
 
   private endRage(): void {
@@ -787,13 +789,14 @@ export class Run {
   }
 
   /**
-   * Show a word: in the column beside the surfer, or over rider `at`. A word
+   * Show a word: in the column beside the surfer, or over rider `at` (`lift`
+   * metres higher than usual, to clear a blow's word beside it). A word
    * already showing in the same place pops again instead of showing twice,
    * and each place keeps at most FLOAT_MAX words (the oldest goes).
    */
-  float(text: string, color: string, scale = 1, at: Rider | null = null): void {
+  float(text: string, color: string, scale = 1, at: Rider | null = null, lift = 0): void {
     const s = this.surfer;
-    const anchor = at ? { x: at.x - s.x, y: at.y + FLOAT_HEAD - s.y, z: at.z - s.z } : null;
+    const anchor = at ? { x: at.x - s.x, y: at.y + FLOAT_HEAD + lift - s.y, z: at.z - s.z } : null;
     const list = this.floating;
     const same = list.findIndex((f) => f.text === text && (f.anchor === null) === (anchor === null));
     if (same >= 0) list.splice(same, 1);

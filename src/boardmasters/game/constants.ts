@@ -526,6 +526,10 @@ export const RAGE = {
   speedMul: 1.3,
   attackDamage: 2,
   smashPoints: 100,
+  /** The fog and horizon while raging (only the distance tints: a deep hot pink), and the surfer's white pulse at its strongest. */
+  fog: 0xd8306f,
+  horizon: 0xff5f9a,
+  pulse: 0.32,
 } as const;
 
 /** The MENU corner on touch screens (internal pixels; at least 44 CSS px on phones). */
