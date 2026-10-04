@@ -230,7 +230,7 @@ export class HudView {
     }
     this.drawRage();
     this.drawStrip();
-    this.drawFloats();
+    if (run.state !== 'paused') this.drawFloats();
     if (run.state === 'playing') {
       this.drawTrail();
       if (run.input.touch) this.drawButtons();
@@ -348,7 +348,7 @@ export class HudView {
     }
     if (run.combo > 1 && run.time < run.comboUntil) {
       const n = run.combo;
-      const combo = (this.comboArt[n] ??= hud.styledText(`COMBO X${n}`, { scale: 2, stops: HUD_COLORS.gold, italic: 6, outline: 1 }));
+      const combo = (this.comboArt[n] ??= hud.styledText(`COMBO X${n}`, { scale: 2, stops: HUD_COLORS.gold, outline: 1 }));
       if (combo) hud.blit(combo, Math.round(r.x + r.w / 2 - combo.width / 2), r.y + 15, 1, 1 + 0.15 * Math.max(0, Math.sin(run.time * 10)));
     }
   }
@@ -398,7 +398,8 @@ export class HudView {
   private drawFloats(): void {
     const list = this.run.floats;
     const anchorX = IS_PORTRAIT ? this.W - 4 : Math.round(this.W * 0.6);
-    const baseY = Math.round(this.H * (IS_PORTRAIT ? 0.68 : 0.62));
+    // Beside the surfer: upright, right of his head and shoulders; landscape, right of him.
+    const baseY = Math.round(this.H * (IS_PORTRAIT ? 0.6 : 0.62));
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
@@ -416,7 +417,7 @@ export class HudView {
   private bakeFloat(f: FloatingText): HTMLCanvasElement | null {
     const hud = this.hud;
     const stops = stopsFor(f.color);
-    const maxW = (IS_PORTRAIT ? this.W : this.W * 0.4) - 8;
+    const maxW = IS_PORTRAIT ? 100 : this.W * 0.4 - 8;
     const line = (text: string, scale: number): HTMLCanvasElement | null => {
       const big = hud.styledText(text, { scale, stops, italic: scale > 1 ? 6 : 4, outline: 1 });
       if (!big || big.width <= maxW || scale === 1) return big;
