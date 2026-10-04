@@ -145,9 +145,9 @@ export const RIVALS: RiderSpec[] = [
   rider('local', 'LOCAL', 'RIVAL', [0.55, 0.6, 0.5, 0.5], { skin: 0xad6233, hair: 0x3a2418, shorts: 0x2a9d8f, board: 0x2bb673, boardStripe: 0xffd166 }, {
     hair: 'dreads', shorts: 'palm', accent: 0xffd166, necklace: 0xf8f0d8, board: 'reggae', roundNose: true,
   }),
-  // Blond spikes and shades, floral shorts, a classic board.
-  rider('poser', 'POSER', 'RIVAL', [0.65, 0.5, 0.4, 0.4], { skin: 0xf39c5a, hair: 0xffe066, shorts: 0x5fb3f0, board: 0xffc43d, boardStripe: 0x7b2cbf }, {
-    hair: 'spiky', shorts: 'floral', accent: 0xffd166, shades: true, wristbands: 0x7b2cbf, board: 'classic',
+  // Bleached spikes and shades, a gold chain, lime floral shorts, the sheet's pink palm board: blond like SAM, but never mistaken for him.
+  rider('poser', 'POSER', 'RIVAL', [0.65, 0.5, 0.4, 0.4], { skin: 0xf3a46a, hair: 0xfff4b8, shorts: 0x8fd14f, board: 0xff8fd0, boardStripe: 0x7b2cbf }, {
+    hair: 'spiky', shorts: 'floral', accent: 0xff4fa3, shades: true, necklace: 0xffd166, wristbands: 0x7b2cbf, board: 'palm', roundNose: true,
   }),
   // The mockup's big rival: a mohawk, a black vest with a skull on the back, red shorts, a skull board.
   rider('big-guy', 'BIG GUY', 'RIVAL', [0.4, 0.35, 0.95, 0.6], { skin: 0xa0582c, hair: 0x15151f, shorts: 0xd62839, board: 0x1a1a2e, boardStripe: 0xf8f8f0 }, {

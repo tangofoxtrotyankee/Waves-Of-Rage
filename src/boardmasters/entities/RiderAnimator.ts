@@ -336,12 +336,14 @@ export class RiderAnimator {
   /**
    * The surf stance (the mockup's hero): side-on hips (left foot forward),
    * shoulders turned back towards the camera, knees well bent, the back
-   * leaning forward over the front foot, and both arms spread wide for
-   * balance, the front one reaching forward, the back one trailing.
+   * leaning forward over the front foot, and both arms out from the body
+   * for balance, hands about chest to hip height and elbows bent (an
+   * athlete's ready stance, not a T-pose), the front one reaching forward,
+   * the back one trailing.
    */
   private stance(p: Pose): void {
     p.fill(0);
-    p[C.crouch] = 0.6;
+    p[C.crouch] = 0.75;
     p[C.hipYaw] = -0.5;
     p[C.hipPitch] = 0.3;
     p[C.spineYaw] = 0.14;
@@ -350,8 +352,8 @@ export class RiderAnimator {
     p[C.chestPitch] = 0.32;
     p[C.headYaw] = 0.12;
     p[C.headPitch] = -0.78;
-    setArm(p, ARM.l, 0.45, 1.32, 0.2, 0.6);
-    setArm(p, ARM.r, -0.2, 1.08, 0.0, 0.45);
+    setArm(p, ARM.l, 0.5, 0.88, 0.35, 0.95);
+    setArm(p, ARM.r, -0.1, 0.78, 0.1, 0.8);
     p[C.plant] = 1;
   }
 
