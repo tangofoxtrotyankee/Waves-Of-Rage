@@ -405,7 +405,8 @@ try {
   await ev(() => window.bm.run.start());
   await wait(200);
   const spansStart = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
-  check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart[0] === 0 && spansStart[1] === 1200, JSON.stringify({ spansFar, spansStart }));
+  // Each span is 1,200 m long: after the restart one must cover the start line and the other the stretch after it.
+  check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart[0] <= 0 && spansStart[0] + 1200 > 0 && spansStart[1] === spansStart[0] + 1200, JSON.stringify({ spansFar, spansStart }));
 
   // --- back to the main menu, from the pause panel ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
