@@ -68,7 +68,9 @@ export class CourseGenerator {
     const added: BuoySpot[] = [];
     const chevrons: BuoySpot[] = [];
     while (this.nextChevronZ < toZ) {
-      chevrons.push({ x: lanes[Math.floor(rng() * lanes.length)] + (rng() - 0.5) * 4, z: this.nextChevronZ });
+      // Kept within the outer lanes (|x| <= 6), so no gate sits out beside the pier or the cliffs.
+      const x = lanes[Math.floor(rng() * lanes.length)] + (rng() - 0.5) * 4;
+      chevrons.push({ x: Math.max(-6, Math.min(6, x)), z: this.nextChevronZ });
       this.nextChevronZ += ENDLESS.chevronGap[0] + rng() * ENDLESS.chevronGap[1];
     }
     while (this.nextRampZ < toZ) {

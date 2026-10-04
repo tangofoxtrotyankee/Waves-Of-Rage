@@ -7,11 +7,17 @@ import type { Ocean } from '../world/Ocean';
 
 /** The gate's centre, metres ahead of its spot (the run's pickup test uses the same offset). */
 const CENTRE_Z = 1.9;
-/** Hover height of the sign's centre above the water: high enough that riders (and the chase camera behind them) pass under it, like a gate. */
-const HOVER = 3.5;
-/** The sign's scale, pulsing by PULSE. */
-const SCALE = 1.35;
-const PULSE = 0.1;
+/**
+ * The sign's centre above the water: a small marker riding just over the
+ * swell on a float, as in the mockup (not an arch overhead). Riders take it
+ * before they reach it (the pickup reaches 2.6 m short of the centre), so
+ * neither they nor the chase camera run through it.
+ */
+const HOVER = 0.7;
+/** The sign's scale (about 1.9 m wide), pulsing by PULSE, and how far it leans back from the camera (radians), so it sits on the water. */
+const SCALE = 0.85;
+const PULSE = 0.05;
+const LEAN = 0.35;
 
 let shared: THREE.BufferGeometry | null = null;
 
@@ -44,7 +50,22 @@ function chevronGeometry(): THREE.BufferGeometry {
   return g;
 }
 
-/** A boost gate: a glowing cyan ">>" hovering over the water, bobbing and pulsing; ride under it for a BOOST. Pooled like the buoys. */
+let floatShared: THREE.BufferGeometry | null = null;
+
+/** The float under the sign: a dark pontoon with a cyan stripe and two short posts up to the sign. */
+function floatGeometry(): THREE.BufferGeometry {
+  if (floatShared) return floatShared;
+  const parts = [
+    colorGeometry(new THREE.BoxGeometry(2.1, 0.16, 0.55).translate(0, 0.02, 0), 0x14205a),
+    colorGeometry(new THREE.BoxGeometry(2.14, 0.05, 0.58).translate(0, 0.1, 0), PALETTE.cyan),
+    colorGeometry(new THREE.BoxGeometry(0.08, 0.42, 0.08).translate(-0.6, 0.3, 0.06), 0x14205a),
+    colorGeometry(new THREE.BoxGeometry(0.08, 0.42, 0.08).translate(0.6, 0.3, 0.06), 0x14205a),
+  ];
+  floatShared = mergeGeometries(parts);
+  return floatShared;
+}
+
+/** A boost gate: a glowing cyan ">>" on a float just over the water, bobbing and pulsing; ride through it for a BOOST. Pooled like the buoys. */
 export class Chevron {
   /** The gate's root (the sign hangs off it); named `mesh` for the run, which adds it to the scene. */
   readonly mesh = new THREE.Group();
@@ -55,8 +76,11 @@ export class Chevron {
 
   constructor(material: THREE.Material) {
     this.sign = new THREE.Mesh(chevronGeometry(), material);
-    this.sign.position.set(0, HOVER, CENTRE_Z);
-    this.mesh.add(this.sign);
+    this.sign.position.set(0.1 * SCALE, HOVER, CENTRE_Z);
+    this.sign.rotation.x = LEAN;
+    const float = new THREE.Mesh(floatGeometry(), material);
+    float.position.set(0, 0, CENTRE_Z);
+    this.mesh.add(this.sign, float);
     this.mesh.visible = false;
   }
 
