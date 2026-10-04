@@ -122,7 +122,16 @@ export class Scenery {
     }
   }
 
+  /**
+   * Place the two spans on the two tiles the camera needs: the tile holding the point 60 m behind it and the
+   * next one, each copy taking the tiles of its own parity. Computed from the camera every frame, so it also
+   * works backwards (a restart puts the camera back at the start line).
+   */
   update(cameraZ: number): void {
-    for (const span of this.spans) if (span.position.z + SPAN < cameraZ - 60) span.position.z += SPAN * 2;
+    const first = Math.max(0, Math.ceil((cameraZ - 60) / SPAN - 1));
+    for (let copy = 0; copy < this.spans.length; copy++) {
+      const tile = first % 2 === copy ? first : first + 1;
+      this.spans[copy].position.z = tile * SPAN;
+    }
   }
 }

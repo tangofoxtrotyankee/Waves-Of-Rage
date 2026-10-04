@@ -291,6 +291,13 @@ try {
   const gateAfter = await ev((z) => ({ taken: !window.bm.run.chevrons.some((c) => c.active && c.z === z), texts: window.bm.run.floating.map((f) => f.text) }), gate ? gate.z : -1);
   check('riding over a boost gate gives a BOOST and takes the gate', gateBoost && gateAfter.taken && gateAfter.texts.includes('BOOST!'), JSON.stringify({ gate, gateAfter }));
 
+  // --- a restart after a long run brings the shore back to the start line ---
+  const spansFar = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
+  await ev(() => window.bm.run.start());
+  await wait(200);
+  const spansStart = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
+  check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart[0] === 0 && spansStart[1] === 1200, JSON.stringify({ spansFar, spansStart }));
+
   // --- back to the main menu, from the pause panel ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
   await page.keyboard.press('Escape'); await wait(150);
