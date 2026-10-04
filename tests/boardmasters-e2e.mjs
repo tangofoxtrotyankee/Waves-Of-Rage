@@ -59,6 +59,23 @@ try {
     return { x: s.x, z: s.z, y: s.y, speed: s.speed, airborne: s.airborne, heading: s.heading };
   });
   const grounded = async () => { for (let i = 0; i < 60 && (await surfer()).airborne; i++) await wait(50); };
+  // Hold a key for this much GAME time (the run clock), so a slow frame under load cannot shorten the hold.
+  const holdGame = async (key, seconds) => {
+    const t0 = await ev(() => window.bm.run.time);
+    await page.keyboard.down(key);
+    await page.waitForFunction((end) => window.bm.run.time >= end, t0 + seconds, { timeout: 15000, polling: 20 }).catch(() => {});
+    await page.keyboard.up(key);
+  };
+  // Sample a value every `step` seconds of game time for `seconds` of game time.
+  const sampleGame = async (seconds, step, read) => {
+    const out = [];
+    const t0 = await ev(() => window.bm.run.time);
+    for (let t = step; t <= seconds + 1e-6; t += step) {
+      await page.waitForFunction((end) => window.bm.run.time >= end, t0 + t, { timeout: 15000, polling: 20 }).catch(() => {});
+      out.push(await ev(read));
+    }
+    return out;
+  };
   const hold = async (key, ms) => {
     await page.keyboard.down(key);
     await wait(ms);
@@ -71,24 +88,23 @@ try {
   check('the surfer rides on its own on the title (attract)', await until(() => window.bm.run.surfer.z > 5), `z=${(await surfer()).z.toFixed(1)}`);
 
   // --- character select ---
-  await page.keyboard.press('ArrowRight'); await wait(100);
-  check('Right on the title picks the next character', (await ev(() => window.bm.run.spec.id)) === 'kai');
-  await page.keyboard.press('ArrowLeft'); await wait(100);
-  check('Left picks the previous one', (await ev(() => window.bm.run.spec.id)) === 'sam');
+  await page.keyboard.press('ArrowRight');
+  check('Right on the title picks the next character', await until(() => window.bm.run.spec.id === 'kai', 5000), `id=${await ev(() => window.bm.run.spec.id)}`);
+  await page.keyboard.press('ArrowLeft');
+  check('Left picks the previous one', await until(() => window.bm.run.spec.id === 'sam', 5000), `id=${await ev(() => window.bm.run.spec.id)}`);
 
   // --- start and move ---
   await page.keyboard.press('Space');
-  await wait(300);
-  check('Space starts a run', (await state()) === 'playing');
+  check('Space starts a run', await until(() => window.bm.run.state === 'playing', 5000));
   const s0 = await surfer();
-  await wait(800);
+  await page.waitForFunction((end) => window.bm.run.time >= end, (await ev(() => window.bm.run.time)) + 0.8, { timeout: 15000, polling: 20 }).catch(() => {});
   const s1 = await surfer();
   check('the surfer travels forward', s1.z > s0.z + 5, `${s0.z.toFixed(1)} -> ${s1.z.toFixed(1)}`);
   check('distance and score follow', await ev(() => window.bm.run.distance > 5 && window.bm.run.score > 5));
 
-  await hold('ArrowRight', 450);
+  await holdGame('ArrowRight', 0.45);
   const sRight = await surfer();
-  await hold('ArrowLeft', 900);
+  await holdGame('ArrowLeft', 0.9);
   const sLeft = await surfer();
   // The chase camera looks down +z, so screen-right is world -x.
   check('Right carves to screen-right (world -x), Left back', sRight.x < s1.x - 1 && sLeft.x > sRight.x + 1, `${s1.x.toFixed(1)} -> ${sRight.x.toFixed(1)} -> ${sLeft.x.toFixed(1)}`);
@@ -97,22 +113,21 @@ try {
   // Slopes change speed too, so start from a known speed and take the extreme over the hold.
   await ev(() => { window.bm.run.surfer.speed = 13; });
   await page.keyboard.down('ArrowUp');
-  let vMax = 0;
-  for (let i = 0; i < 12; i++) { await wait(100); vMax = Math.max(vMax, (await surfer()).speed); }
+  const vUp = await sampleGame(1.2, 0.1, () => window.bm.run.surfer.speed);
   await page.keyboard.up('ArrowUp');
+  const vMax = Math.max(...vUp);
   check('Up pumps for speed', vMax > 14, `peak ${vMax.toFixed(1)}`);
   await ev(() => { window.bm.run.surfer.speed = 16; });
   await page.keyboard.down('ArrowDown');
-  let vMin = 99;
-  for (let i = 0; i < 8; i++) { await wait(100); vMin = Math.min(vMin, (await surfer()).speed); }
+  const vDown = await sampleGame(0.8, 0.1, () => window.bm.run.surfer.speed);
   await page.keyboard.up('ArrowDown');
+  const vMin = Math.min(...vDown);
   check('Down brakes', vMin < 12, `low ${vMin.toFixed(1)}`);
 
   // --- jump ---
   for (let i = 0; i < 30 && (await surfer()).airborne; i++) await wait(50);
   await page.keyboard.press('Space');
-  await wait(120);
-  check('Space jumps', (await surfer()).airborne);
+  check('Space jumps', await until(() => window.bm.run.surfer.airborne, 3000));
   let landed = false;
   for (let i = 0; i < 60 && !landed; i++) {
     await wait(50);
@@ -211,7 +226,8 @@ try {
       await page.keyboard.down('ArrowLeft');
       let landing = null;
       for (let i = 0; i < 80 && !landing; i++) {
-        await ev(() => { const s = window.bm.run.surfer; if (s.airborne && s.vy < 0) { s.spin = Math.PI; s.spinVel = 0; } });
+        // Only on the way down to the first landing: a bounce off a crest after the crash must not be forced into a second one.
+        await ev(() => { const run = window.bm.run; const s = run.surfer; if (run.lastLanding === null && s.airborne && s.vy < 0) { s.spin = Math.PI; s.spinVel = 0; } });
         await wait(30);
         landing = await ev(() => window.bm.run.lastLanding);
       }
