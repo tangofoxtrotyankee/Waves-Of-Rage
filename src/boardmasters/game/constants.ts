@@ -139,6 +139,9 @@ export const CAMERA = {
   lineEnd: 0.92,
   /** ...and the near band moves this much further out for a rival a metre or more behind the surfer. */
   behindShift: 0.5,
+  /** How "in the way" (0..1) maps to the rider's screen-door fade: solid below fadeFrom, gone at fadeTo. */
+  fadeFrom: 0.15,
+  fadeTo: 0.9,
 } as const;
 
 /** Short draw distance: linear fog to the sunset colour. The sky dome meets the same colour at the horizon. */
@@ -289,6 +292,34 @@ export const COMBAT = {
 } as const;
 
 /**
+ * How blows and crashes are felt (game/Run.ts): hit-stop (the whole run
+ * freezes for a few frames as a blow lands), camera shake as [amount,
+ * seconds] (Run.shake: amount 1 is about CAMERA.shakeMove metres), and
+ * splash sizes for Spray.splash (about 1 for a landing, 2 for a knockout).
+ */
+export const IMPACT = {
+  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14 },
+  shake: {
+    punch: [1, 0.22],
+    barge: [1.5, 0.3],
+    knockout: [2.2, 0.42],
+    shoved: [0.9, 0.25],
+    bump: [0.45, 0.15],
+    buoy: [2, 0.35],
+    smash: [1.2, 0.25],
+    crash: [1.6, 0.32],
+    wipeout: [2.4, 0.5],
+  },
+  /** Rider.takeSplash sizes (knocked-out body 1.4, board 0.6, wipeout 1.1, crash 0.8) are scaled by this for Spray.splash. */
+  splashScale: 1.3,
+  /** A landing after real air: this splash plus 0.4 per second of air, up to landingSplashMax more. */
+  landingSplash: 0.55,
+  landingSplashMax: 0.6,
+  buoySplash: 1.3,
+  smashSplash: 1.6,
+} as const;
+
+/**
  * In the air: Left/Right spin, X grabs; land within the tolerance or wipe
  * out. The spin is eased so a phone's digital button is not a full-rate
  * spin the moment it is touched:
@@ -319,8 +350,10 @@ export const TRICKS = {
   spinBrakeMul: 4,
   /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate... */
   spinSettleMul: 1.4,
-  /** ...and helping a held spin round, its rate may build this many times faster than spinRampSeconds allows. */
+  /** ...and helping a held spin round, its rate may build this many times faster than spinRampSeconds allows... */
   spinAssistMul: 2,
+  /** ...but only once the turn is this far round (radians, 60 degrees): a short tap never gets the help, so it unwinds instead of whipping round a full 360. */
+  spinAssistFrom: Math.PI / 3,
   /** Released, the rider approaches its upright at least this fast (proportional, per second), and faster when the water is close... */
   spinSettleGain: 6,
   /** ...and picks it from where the spin would carry it in this many seconds (momentum: past the half turn it completes). */

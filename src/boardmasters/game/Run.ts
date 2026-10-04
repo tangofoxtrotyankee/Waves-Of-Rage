@@ -10,7 +10,7 @@ import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { Buoy } from '../entities/Buoy';
 import { Chevron, chevronMaterial } from '../entities/Chevron';
-import type { Landing } from '../entities/Rider';
+import type { Landing, Rider } from '../entities/Rider';
 import { Rival } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
 import { Wake } from '../entities/Wake';
@@ -21,7 +21,7 @@ import { Scenery } from '../world/Scenery';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
 import { type Combo, ComboReader } from './Combos';
-import { CAMERA, COMBAT, FOG, MENU_ZONE, PALETTE, PHYSICS, RAGE, SCORING, TRICKS } from './constants';
+import { CAMERA, COMBAT, FOG, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
 import { PAUSE_ZONE, titleArrowX, titleRow } from './HudLayout';
 import { HudView } from './HudView';
 
@@ -44,6 +44,7 @@ const BEST_KEY = 'bm.best';
 const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
 const CHEVRON_POOL = 8;
+type ImpactKind = keyof typeof IMPACT.hitStop;
 const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: number, h: number): boolean => x !== null && y !== null && x >= zx && x < zx + w && y >= zy && y < zy + h;
 
 /**
@@ -91,6 +92,10 @@ export class Run {
   readonly combos = new ComboReader();
   private invulnerableUntil = 0;
   private bumpCooldown = 0;
+  /** A blow the surfer threw that lands a moment later (when the fist arrives): its time, its kind and the word to show. */
+  private impact: { at: number; kind: ImpactKind; label: string | null } | null = null;
+  /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
+  hitStop = 0;
   private snapCamera = true;
   /** Camera and look-at offsets from the surfer, eased; the surfer's own motion is followed exactly. */
   private readonly camOffset = new THREE.Vector3();
@@ -118,13 +123,13 @@ export class Run {
     const pool = [...RIVALS, ...CHARACTER_ORDER.map((id) => CHARACTERS[id])];
     for (let i = 0; i < course.rivals; i++) {
       const rival = new Rival(pool[i % pool.length], i);
+      rival.autoNearFade = false; // the camera's rule (updateNearFade) decides, sight line included
       this.rivals.push(rival);
       scene.add(rival.group, rival.shadow);
     }
     const drum = createPS1Material({ map: skullTexture() });
-    const plain = createPS1Material();
     for (let i = 0; i < BUOY_POOL; i++) {
-      const buoy = new Buoy(drum, plain);
+      const buoy = new Buoy(drum);
       this.buoys.push(buoy);
       scene.add(buoy.group);
     }
@@ -134,7 +139,6 @@ export class Run {
       this.chevrons.push(chevron);
       scene.add(chevron.mesh);
     }
-    hud.loadImage('logo', 'assets/boardmasters/logo-220x110.png');
     this.reset();
   }
 
@@ -175,6 +179,10 @@ export class Run {
     this.floating = [];
     this.invulnerableUntil = 0;
     this.bumpCooldown = 0;
+    this.impact = null;
+    this.hitStop = 0;
+    this.wake.reset();
+    this.spray.reset();
     this.snapCamera = true;
     this.combos.clear();
     this.endRage();
@@ -216,6 +224,15 @@ export class Run {
   }
 
   update(dt: number): void {
+    if (this.hitStop > 0) {
+      // Hit-stop: the world holds still for a few frames as a blow lands (the run clock too, so every timer
+      // and animation picks up where it stopped); the camera shake and the words on the HUD keep moving.
+      // Input is not read, so presses made now are kept for the next step.
+      this.hitStop = Math.max(0, this.hitStop - dt);
+      for (const f of this.floating) f.age += dt;
+      this.updateCamera(dt);
+      return;
+    }
     this.time += dt;
     this.stateTime += dt;
     syncLook();
@@ -302,6 +319,8 @@ export class Run {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
       r.update(dt, r.think(s, buoyPositions, this.time), this.ocean, this.time);
     }
+    this.splashFrom(s);
+    for (const r of this.rivals) this.splashFrom(r);
     for (const b of this.buoys) b.update(this.time, this.ocean);
     for (const c of this.chevrons) c.update(this.time, this.ocean);
 
@@ -364,15 +383,35 @@ export class Run {
 
     const landing = s.takeLanding();
     if (landing) this.resolveLanding(landing);
+    if (this.impact && this.time >= this.impact.at) this.landImpact();
     this.resolveAttacks();
     this.resolveHazards();
+  }
+
+  /** Throw a splash for every body or board that hit the water this step (knockouts, wipeouts, crashes). */
+  private splashFrom(r: Rider): void {
+    for (let sp = r.takeSplash(); sp; sp = r.takeSplash()) this.spray.splash(sp.x, this.ocean.height(sp.x, sp.z), sp.z, sp.size * IMPACT.splashScale);
+  }
+
+  /** The surfer's blow arrives: freeze frames, a jolt of the camera and the word. */
+  private landImpact(): void {
+    const impact = this.impact;
+    if (!impact) return;
+    this.impact = null;
+    this.hitStop = IMPACT.hitStop[impact.kind];
+    const [amount, seconds] = IMPACT.shake[impact.kind];
+    this.shake(amount, seconds);
+    if (impact.label) this.float(impact.label, '#ffffff', 1);
   }
 
   /** Air, spins and grabs score on a clean landing; a bad one is a crash. */
   private resolveLanding(l: Landing): void {
     const s = this.surfer;
     if (l.airTime < SCORING.airSeconds) return;
+    this.spray.splash(s.x, this.ocean.height(s.x, s.z), s.z, IMPACT.landingSplash + Math.min(IMPACT.landingSplashMax, l.airTime * 0.4));
     if (!l.clean) {
+      const [amount, seconds] = IMPACT.shake.crash;
+      this.shake(amount, seconds);
       this.lastLanding = { ...l, points: 0 };
       s.crashUntil = this.time + TRICKS.crashSeconds;
       s.stunnedUntil = Math.max(s.stunnedUntil, this.time + TRICKS.crashSeconds);
@@ -438,20 +477,27 @@ export class Run {
       }
       if (target) {
         const dir = Math.sign(target.x - s.x || 1);
+        s.strikeDir = dir; // the clip swings at the rider the run shoves
         const damage = this.raging ? RAGE.attackDamage : barge ? COMBAT.bargeDamage : COMBAT.punchDamage;
         const shove = dir * (barge ? COMBAT.bargeShove : COMBAT.punchShove) * s.stats.power;
         if (barge) s.stunnedUntil = Math.max(s.stunnedUntil, this.time + COMBAT.bargeSelfStun);
-        if (target.takeHit(damage, shove, this.time)) this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints);
-        else this.float(barge ? 'BARGE!' : 'HIT!', '#ffffff', 1);
+        // Damage and points count now; the victim feels it (shove, flinch, launch) when the blow arrives, and so does the camera.
+        const out = target.takeHit(damage, shove, this.time);
+        if (out) this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints);
+        this.impact = { at: this.time + RIDER_ANIM.impactDelay, kind: out ? 'knockout' : barge ? 'barge' : 'punch', label: out ? null : barge ? 'BARGE!' : 'HIT!' };
       }
     }
     for (const r of this.rivals) {
       if (!r.barging || r.knockedOut || s.wiped || this.time < this.invulnerableUntil) continue;
       if (Math.abs(r.x - s.x) > 1.6 || Math.abs(r.z - s.z) > 2.4) continue;
       const dir = Math.sign(s.x - r.x || 1);
+      r.strikeDir = dir;
       s.shoveVx = dir * COMBAT.rivalShove * r.stats.power;
       s.speed *= 0.9;
       s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.2);
+      s.flinch(dir, (COMBAT.rivalShove * r.stats.power) / 4, this.time);
+      const [amount, seconds] = IMPACT.shake.shoved;
+      this.shake(amount, seconds);
       this.float('SHOVED!', hex(PALETTE.cyan), 1);
     }
   }
@@ -476,11 +522,19 @@ export class Run {
         if (this.raging) {
           b.smash();
           this.score += RAGE.smashPoints;
+          this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.smashSplash);
+          const [amount, seconds] = IMPACT.shake.smash;
+          this.shake(amount, seconds);
           this.float(`SMASH +${RAGE.smashPoints}`, hex(PALETTE.gold), 1);
         } else if (this.time >= this.invulnerableUntil) {
+          const dir = Math.sign(s.x - b.x || 1);
           s.speed *= SCORING.hitSpeedFactor;
-          s.shoveVx = Math.sign(s.x - b.x || 1) * 6;
+          s.shoveVx = dir * 6;
           s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.45);
+          s.flinch(dir, 1.2, this.time);
+          this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.buoySplash);
+          const [amount, seconds] = IMPACT.shake.buoy;
+          this.shake(amount, seconds);
           this.damage('OUCH!');
         }
       }
@@ -503,6 +557,7 @@ export class Run {
           r.shoveVx = Math.sign(r.x - b.x || 1) * 5;
           r.speed *= SCORING.hitSpeedFactor;
           r.stunnedUntil = this.time + 0.4;
+          r.flinch(Math.sign(r.x - b.x || 1), 1, this.time);
         }
       }
     }
@@ -514,6 +569,10 @@ export class Run {
       r.shoveVx = -dir * 4;
       s.speed *= SCORING.bumpSpeedFactor;
       r.speed *= SCORING.bumpSpeedFactor;
+      s.flinch(dir, 0.5, this.time);
+      r.flinch(-dir, 0.5, this.time);
+      const [amount, seconds] = IMPACT.shake.bump;
+      this.shake(amount, seconds);
       this.bumpCooldown = 0.6;
       this.float('BUMP', hex(PALETTE.cyan), 1);
     }
@@ -530,6 +589,8 @@ export class Run {
       this.invulnerableUntil = 0;
       s.wiped = true;
       s.group.visible = true;
+      const [amount, seconds] = IMPACT.shake.wipeout;
+      this.shake(amount, seconds);
       this.endRage();
       this.float('WIPEOUT', hex(PALETTE.red), 2);
       // The run is over: keep the best score and distance on this device.
@@ -620,7 +681,7 @@ export class Run {
     const height = CAMERA.height + (title ? CAMERA.title.height : 0) + this.camCrowd * CAMERA.crowdUp;
     const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(height, water + CAMERA.clearance + 0.3 - this.followY), -back);
     const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight + (title ? CAMERA.title.lookHeight : 0), CAMERA.lookAhead);
-    const roll = (-s.heading / PHYSICS.maxHeading) * CAMERA.roll;
+    const roll = -s.lean * CAMERA.roll; // banks with how hard the surfer is turning, not with where the board points
     // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
     const speedUp = Math.min(1, Math.max(0, (s.speed - PHYSICS.baseSpeed) / (PHYSICS.maxSpeed - PHYSICS.baseSpeed)));
     const kick = speedUp * CAMERA.speedFov + (this.time < s.boostUntil ? CAMERA.boostFov : 0) + (this.raging ? CAMERA.rageFov : 0);
@@ -752,18 +813,16 @@ export class Run {
   }
 
   /**
-   * Fade a rival that is in the camera's way. The lead switches this to
-   * Rider.setNearFade(amount) (screen-door transparency, on the rider
-   * branch) at merge; until then the rival and its shadow are hidden outright
-   * past 0.5 (about 3.6 m from the lens). setNearFade should start dithering
-   * out at about 0.15 so the 3.0 to 4.2 m band reads as a fade. Never used
-   * on the surfer (simulate flashes it while invulnerable).
+   * Fade a rival that is in the camera's way, through the rider's
+   * screen-door transparency (Rider.setNearFade / fadeNear). Never used on
+   * the surfer (simulate flashes it while invulnerable).
    */
   private applyNearFade(rider: Rival, amount: number): void {
-    const visible = amount <= 0.5;
-    if (rider.group.visible === visible) return;
-    rider.group.visible = visible;
-    rider.shadow.visible = visible && !rider.wiped;
+    // The rider's own rule fades the body and the board by their distance to the lens (a knocked-out board skidding
+    // past fades on its own); in the way of the surfer, the whole rider screen-doors out from 0.15 to gone by 0.9.
+    const own = rider.fadeNear(this.renderer.camera.position);
+    const inWay = Run.step(CAMERA.fadeFrom, CAMERA.fadeTo, amount);
+    if (inWay > own) rider.setNearFade(inWay);
   }
 
   /** Hermite step from 0 at `e0` to 1 at `e1` (engine/math's smoothstep, kept local to the camera code). */

@@ -2,10 +2,13 @@ import { type Hud2D, hardenAlpha, heavyWidth, makeCanvas, outlined, type Stops }
 import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
-import { IS_PORTRAIT, SCORING } from './constants';
+import { IS_PORTRAIT, RIDER_ANIM, SCORING } from './constants';
 import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import type { FloatingText, Run } from './Run';
+
+/** Seconds after the last heart before the results panel slams in: the wipeout fall plays first. */
+const RESULTS_DELAY = RIDER_ANIM.wipeoutFall + 0.3;
 
 /** How long a floating text lives (Run drops it after 1.3 s); it fades over the last part. */
 const FLOAT_LIFE = 1.3;
@@ -236,7 +239,9 @@ export class HudView {
     }
     this.drawTopBar();
     if (run.state === 'wipeout') {
-      this.drawResults();
+      // The results wait until the surfer has gone over the nose into the water.
+      if (run.stateTime < RESULTS_DELAY) this.drawFloats();
+      else this.drawResults();
       return;
     }
     this.drawRage();
@@ -556,8 +561,9 @@ export class HudView {
     const py = Math.round((this.H - ph) / 2) - (IS_PORTRAIT ? 16 : 0);
     hud.blit(this.panel('results', pw, ph, 12, HUD_COLORS.panel, 0.9), px, py);
     const titles = this.bigTitles();
-    const shake = run.stateTime < 0.4 ? Math.round(Math.sin(run.stateTime * 60) * 2) : 0;
-    const slam = run.stateTime < 0.15 ? 1.4 - run.stateTime * 2.6 : 1;
+    const t = run.stateTime - RESULTS_DELAY; // the panel's own clock: it arrives after the fall
+    const shake = t < 0.4 ? Math.round(Math.sin(t * 60) * 2) : 0;
+    const slam = t < 0.15 ? 1.4 - t * 2.6 : 1;
     hud.blit(titles.wipeout, Math.round(W / 2 - titles.wipeout.width / 2) + shake, py + 4, 1, slam);
     const rx = px + 10;
     const rw = pw - 20;
@@ -567,7 +573,7 @@ export class HudView {
     this.statRow(3, rx, py + 89, rw, 'KNOCKOUTS', this.kos.get(run.knockouts), HUD_COLORS.white, '');
     const by = py + 108;
     if (run.newBest) {
-      hud.blit(titles.best, Math.round(W / 2 - titles.best.width / 2), by, 1, 1 + 0.08 * Math.max(0, Math.sin(run.stateTime * 8)));
+      hud.blit(titles.best, Math.round(W / 2 - titles.best.width / 2), by, 1, 1 + 0.08 * Math.max(0, Math.sin(t * 8)));
     } else {
       hud.text(W / 2 - 4, by + 3, 'BEST ', HUD_COLORS.dim, TIGHT_RIGHT);
       hud.text(W / 2 - 4, by + 3, this.bestScore.get(run.best.score), '#ffe14d', TIGHT);

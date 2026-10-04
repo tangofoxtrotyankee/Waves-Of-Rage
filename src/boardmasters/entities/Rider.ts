@@ -597,9 +597,10 @@ export class Rider {
       const boost = accel * TRICKS.spinAssistMul;
       let target = steer * TRICKS.spinRate;
       let rate = this.spinVel * dir < 0 ? brake : accel;
+      const committed = Math.abs(this.spin - behind) >= TRICKS.spinAssistFrom;
       if (this.spinShortfall(dist, dir, T, boost, fastest) <= SPIN_AIM) {
-        // The next upright can still be made by touchdown: turn faster if that is what it takes.
-        if (dist / T > TRICKS.spinRate) {
+        // The next upright can still be made by touchdown: once the spin is clearly meant (past spinAssistFrom), turn faster if that is what it takes.
+        if (committed && dist / T > TRICKS.spinRate) {
           target = dir * Math.min(dist / T, fastest);
           rate = boost;
         }

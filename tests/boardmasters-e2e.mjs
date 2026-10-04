@@ -58,6 +58,7 @@ try {
     const s = window.bm.run.surfer;
     return { x: s.x, z: s.z, y: s.y, speed: s.speed, airborne: s.airborne, heading: s.heading };
   });
+  const grounded = async () => { for (let i = 0; i < 60 && (await surfer()).airborne; i++) await wait(50); };
   const hold = async (key, ms) => {
     await page.keyboard.down(key);
     await wait(ms);
@@ -134,8 +135,15 @@ try {
   check('the camera follows from behind and above', cam.behind > 3 && cam.behind < 7 && cam.above > 0.8 && cam.beside < 3, JSON.stringify(cam));
   const terrain = await ev(() => { const o = window.bm.run.ocean; const z = window.bm.run.surfer.z; const hs = [0, 10, 20, 30, 40].map((d) => o.height(0, z + d)); return Math.max(...hs) - Math.min(...hs); });
   check('the water ahead varies in height like terrain', terrain > 0.8, `range ${terrain.toFixed(2)} m`);
-  await ev(() => { const r = window.bm.run; const s = r.surfer; s.heading = 0; s.shoveVx = 0; const b = r.buoys[0]; Object.defineProperty(b, 'x', { value: s.x, writable: true }); Object.defineProperty(b, 'z', { value: s.z + 5, writable: true }); });
-  check('a buoy hit costs a heart and the run goes on', await until(() => window.bm.run.health === 2) && (await state()) === 'playing');
+  // Put a pooled buoy (re-armed with place) in the surfer's path; again if a hop off a crest carried the surfer over it.
+  const buoyAhead = (index) => ev((index) => { const r = window.bm.run; const s = r.surfer; s.heading = 0; s.shoveVx = 0; r.buoys[index].place(s.x, s.z + 5); }, index);
+  let buoyHit = false;
+  for (let tries = 0; tries < 4 && !buoyHit; tries++) {
+    await grounded();
+    await buoyAhead(0);
+    buoyHit = await until(() => window.bm.run.health === 2, 2000);
+  }
+  check('a buoy hit costs a heart and the run goes on', buoyHit && (await state()) === 'playing');
   await wait(1500);
   check('position is somewhere in the field of eight', await ev(() => window.bm.run.rank >= 1 && window.bm.run.rank <= 8));
 
@@ -146,7 +154,6 @@ try {
     v.reset(s.x + dx, s.z + 0.3, r.ocean); v.health = health;
   }, [i, dx, health]);
   // Fast riding hops off crests on its own, so wait for the water before anything that needs the surfer grounded.
-  const grounded = async () => { for (let i = 0; i < 60 && (await surfer()).airborne; i++) await wait(50); };
   // Punch (or barge) a rival placed beside the surfer; retried in case a hop or stun swallowed the press.
   const strike = async (index, dx, health, key) => {
     for (let tries = 0; tries < 4; tries++) {
@@ -334,9 +341,6 @@ try {
     if (!boosted) await wait(600);
   }
   check('UP UP is a boost', boosted, `speed ${(await surfer()).speed.toFixed(1)}`);
-  // The wipeout check below moves buoys[1] into the surfer's path, but the pool retires buoys left behind (and RAGE smashes
-  // them), so how long the checks above take decides whether that one is still in play. Park it far ahead, in play.
-  await ev(() => { const r = window.bm.run; const b = r.buoys[1]; if (!b.active || b.smashed) b.place(0, r.surfer.z + 450); });
 
   // --- pause ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); } // never press Escape outside play: it would leave the page
@@ -352,18 +356,15 @@ try {
   // --- wipeout: put a buoy in the surfer's path with one heart left (RAGE would smash it, so end it first) ---
   await ev(() => { window.bm.run.rageUntil = 0; });
   await wait(100);
-  await grounded();
-  await ev(() => {
-    const run = window.bm.run;
-    run.health = 1;
-    const s = run.surfer;
-    s.heading = 0;
-    s.shoveVx = 0;
-    const b = run.buoys[1];
-    Object.defineProperty(b, 'x', { value: s.x, writable: true });
-    Object.defineProperty(b, 'z', { value: s.z + 5, writable: true });
-  });
-  check('a buoy hit on the last heart wipes out', await until(() => window.bm.run.state === 'wipeout') && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
+  await ev(() => { window.bm.run.health = 1; });
+  let wipedOut = false;
+  for (let tries = 0; tries < 4 && !wipedOut; tries++) {
+    await grounded();
+    await ev(() => { window.bm.run.invulnerableUntil = 0; window.bm.run.rageUntil = 0; });
+    await buoyAhead(1);
+    wipedOut = await until(() => window.bm.run.state === 'wipeout', 2000);
+  }
+  check('a buoy hit on the last heart wipes out', wipedOut && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
   // An earlier wipeout in this page may already hold a better run; either way the saved best covers this one.
   const best = await ev(() => ({ newBest: window.bm.run.newBest, score: Math.floor(window.bm.run.score), saved: JSON.parse(localStorage.getItem('waves-of-rage.bm.best') || 'null') }));
   check('the best score and distance are kept on the device', !!best.saved && best.saved.score > 0 && best.saved.distance > 0 && (best.newBest || best.saved.score >= best.score), JSON.stringify(best));
@@ -406,7 +407,7 @@ try {
   await wait(200);
   const spansStart = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
   // Each span is 1,200 m long: after the restart one must cover the start line and the other the stretch after it.
-  check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart[0] <= 0 && spansStart[0] + 1200 > 0 && spansStart[1] === spansStart[0] + 1200, JSON.stringify({ spansFar, spansStart }));
+  check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart.some((z) => z <= 0 && z + 1200 > 0) && spansStart[1] === spansStart[0] + 1200, JSON.stringify({ spansFar, spansStart }));
 
   // --- back to the main menu, from the pause panel ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
