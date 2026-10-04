@@ -695,7 +695,7 @@ const STAT_ROW_KEYS = ['stat0', 'stat1', 'stat2', 'stat3'];
 function withBurst(text: HTMLCanvasElement, gold: boolean): HTMLCanvasElement {
   const w = text.width + 16;
   const h = text.height + 12;
-  const { canvas, ctx } = makeCanvas(w, h);
+  const { canvas, ctx } = makeCanvas(w, h, true); // read back by hardenAlpha: CPU-backed, so no GPU sync
   ctx.fillStyle = gold ? '#ffd23a' : '#ff5a3a';
   ctx.beginPath();
   const spikes = 12;

@@ -85,13 +85,22 @@ export interface StyleOptions {
   tight?: boolean;
 }
 
-/** A canvas of `w` x `h` with its 2D context (nearest-neighbour). */
-export function makeCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+/** Canvases made CPU-backed for readback (makeCanvas's `readable`): reading them never waits on the GPU. */
+const READABLE = new WeakSet<HTMLCanvasElement>();
+
+/**
+ * A canvas of `w` x `h` with its 2D context (nearest-neighbour).
+ * `readable` makes it CPU-backed (willReadFrequently), for the steps of a
+ * bake whose pixels are read back (hardenAlpha, the ink box): the read then
+ * costs no GPU sync. Sprites blitted every frame stay GPU-backed.
+ */
+export function makeCanvas(w: number, h: number, readable = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(w));
   canvas.height = Math.max(1, Math.ceil(h));
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', readable ? { willReadFrequently: true } : undefined);
   if (!ctx) throw new Error('2D canvas unavailable');
+  if (readable) READABLE.add(canvas);
   ctx.imageSmoothingEnabled = false;
   return { canvas, ctx };
 }
@@ -115,11 +124,16 @@ export function gradientFill(canvas: HTMLCanvasElement, stops: Stops, top = 0, b
 let scratch: CanvasRenderingContext2D | null = null;
 
 /**
- * The pixels of `canvas`, read through one shared scratch canvas made for
- * readback (willReadFrequently), so the sprite canvases themselves stay
- * GPU-friendly and the browser does not warn about repeated readbacks.
+ * The pixels of `canvas`: straight from a readable (CPU-backed) canvas, or
+ * through one shared scratch canvas made for readback (willReadFrequently),
+ * so the sprite canvases themselves stay GPU-friendly and the browser does
+ * not warn about repeated readbacks.
  */
 function readPixels(canvas: HTMLCanvasElement): ImageData {
+  if (READABLE.has(canvas)) {
+    const own = canvas.getContext('2d');
+    if (own) return own.getImageData(0, 0, canvas.width, canvas.height);
+  }
   if (!scratch) {
     const c = document.createElement('canvas');
     scratch = c.getContext('2d', { willReadFrequently: true });
@@ -135,14 +149,36 @@ function readPixels(canvas: HTMLCanvasElement): ImageData {
   return scratch.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-/** Alpha to 0 or 1 at `threshold` (0..255): canvas text and arcs lose their soft edges. */
-export function hardenAlpha(canvas: HTMLCanvasElement, threshold = 110): void {
+/**
+ * Alpha to 0 or 1 at `threshold` (0..255): canvas text and arcs lose their
+ * soft edges. Returns the bounding box of the pixels left opaque (one
+ * readback serves both). Pass a readable canvas (makeCanvas) where it can
+ * be: then the readback costs no GPU sync.
+ */
+export function hardenAlpha(canvas: HTMLCanvasElement, threshold = 110): { x: number; y: number; w: number; h: number } {
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return { x: 0, y: 0, w: canvas.width, h: canvas.height };
   const img = readPixels(canvas);
   const d = img.data;
-  for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= threshold ? 255 : 0;
+  const width = canvas.width;
+  let x0 = width;
+  let y0 = canvas.height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let i = 3, p = 0; i < d.length; i += 4, p++) {
+    if (d[i] >= threshold) {
+      d[i] = 255;
+      const x = p % width;
+      const y = (p - x) / width;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    } else d[i] = 0;
+  }
   ctx.putImageData(img, 0, 0);
+  if (x1 < 0) return { x: 0, y: 0, w: 1, h: 1 };
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
 
 /** A copy of `src` with a solid outline `thickness` pixels wide all round (plus a 1px drop below), `pad` pixels bigger on each side. */
@@ -369,7 +405,8 @@ export class Hud2D {
     const font = heavyFont(px);
     const w = Math.ceil(heavyWidth(text, px) * squeeze + px * 0.7);
     const h = Math.ceil(px * 1.2);
-    const { canvas, ctx } = makeCanvas(w, h);
+    // CPU-backed: its pixels are read back once (hardened and boxed in one pass) with no GPU sync.
+    const { canvas, ctx } = makeCanvas(w, h, true);
     ctx.font = font;
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = '#ffffff';
@@ -377,8 +414,7 @@ export class Hud2D {
     ctx.setTransform(squeeze, 0, -0.12, 1, px * 0.15, 0);
     ctx.fillText(text, 1, Math.round(px * 0.95));
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    hardenAlpha(canvas);
-    const box = inkBox(canvas);
+    const box = hardenAlpha(canvas);
     const trimmed = makeCanvas(box.w, box.h);
     trimmed.ctx.drawImage(canvas, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
     gradientFill(trimmed.canvas, stops);
@@ -451,28 +487,4 @@ export function heavyWidth(text: string, px: number): number {
   probe ??= makeCanvas(1, 1).ctx;
   probe.font = heavyFont(px);
   return probe.measureText(text).width;
-}
-
-/** The bounding box of a canvas's opaque pixels. */
-function inkBox(canvas: HTMLCanvasElement): {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-} {
-  const d = readPixels(canvas).data;
-  let x0 = canvas.width;
-  let y0 = canvas.height;
-  let x1 = -1;
-  let y1 = -1;
-  for (let y = 0; y < canvas.height; y++)
-    for (let x = 0; x < canvas.width; x++)
-      if (d[(y * canvas.width + x) * 4 + 3] > 0) {
-        if (x < x0) x0 = x;
-        if (x > x1) x1 = x;
-        if (y < y0) y0 = y;
-        if (y > y1) y1 = y;
-      }
-  if (x1 < 0) return { x: 0, y: 0, w: 1, h: 1 };
-  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
 }
