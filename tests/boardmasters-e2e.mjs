@@ -388,8 +388,11 @@ try {
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); } // never press Escape outside play: it would leave the page
   await page.keyboard.press('Escape'); await wait(150);
   check('Escape pauses', (await state()) === 'paused');
-  const zPaused = (await surfer()).z; await wait(300);
-  check('nothing moves while paused', (await surfer()).z === zPaused);
+  const frozen = () => ev(() => { const r = window.bm.run; return { z: r.surfer.z, wake: r.wake.mesh.geometry.drawRange.count, spray: r.spray.mesh.count, floats: r.floats.map((f) => f.age).join() }; });
+  const atPause = await frozen(); await wait(300);
+  const afterPause = await frozen();
+  // The wakes, the spray and the words hold too (they used to age away behind the PAUSED panel).
+  check('nothing moves while paused', JSON.stringify(atPause) === JSON.stringify(afterPause), `${JSON.stringify(atPause)} -> ${JSON.stringify(afterPause)}`);
   await page.keyboard.press('Space'); await wait(150);
   check('Space resumes', (await state()) === 'playing');
   check('the course is generated ahead with buoys and ramps', world.buoys > 3 && world.ramps > 3 && world.ahead > 250, `${world.buoys} buoys, ${world.ramps} ramps, ${world.ahead.toFixed(0)} m ahead`);
@@ -496,6 +499,17 @@ try {
     phoneKo = await tp.evaluate(() => window.bm.run.knockouts);
   }
   check('phone: the HIT button punches', phoneKo >= 1);
+  // The knocked-out rider's flight and splash play out in the narrow upright frame (they used to leave it at once).
+  const koFrames = [];
+  for (let i = 0; i < 12; i++) {
+    koFrames.push(await tp.evaluate(() => {
+      const r = window.bm.run; const v = r.rivals[1];
+      const p = v.group.position.clone(); p.y += 0.8; p.project(r.renderer.camera);
+      return v.knockedOut && Math.abs(p.x) < 1 && Math.abs(p.y) < 1 && p.z < 1;
+    }));
+    await tp.waitForTimeout(80);
+  }
+  check('phone: a knockout stays in frame through its flight', phoneKo >= 1 && koFrames.filter(Boolean).length >= 10, JSON.stringify(koFrames));
   // Holding RIGHT on the pad carves to screen-right (world -x); a mouse press stands in for a held thumb.
   for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
   await tp.evaluate(() => { window.bm.run.surfer.heading = 0; window.bm.run.surfer.shoveVx = 0; window.bm.run.surfer.stunnedUntil = 0; });

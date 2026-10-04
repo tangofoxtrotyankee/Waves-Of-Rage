@@ -45,8 +45,17 @@ const FLOAT_SECONDS = 1.3;
 const FLOAT_MAX = 2;
 /** Metres above a rider's feet where a word over them starts (about the head). */
 const FLOAT_HEAD = 2.0;
-/** The start grid for the rivals: (x, z) around the player. */
-const RIVAL_GRID: [number, number][] = [[-4, 6], [4, 9], [-8, 3], [8, 12], [-6, -6], [2, 16], [7, -9], [-3, 20]];
+/**
+ * The start grid for the rivals: (x, z) from the player. Everyone starts
+ * ahead and off to the side, so nobody starts beside or behind the camera
+ * (a huge cut-off body at the screen edge) and the field comes back to the
+ * player over the first seconds instead of piling onto it.
+ */
+const RIVAL_GRID: [number, number][] = [[-4, 7], [4, 10], [-7, 13], [7, 16], [-2.5, 20], [3, 24], [-5.5, 28], [5.5, 32]];
+/** On the title the rivals ride parked in these slots, well ahead and clear of the selected character. */
+const TITLE_GRID: [number, number][] = [[-4.5, 13], [4.5, 17], [-7.5, 22], [7.5, 26], [-3, 31], [3.5, 35], [-6, 40], [6, 44]];
+/** Seconds a hit spark (the comic star at the point of contact) shows. */
+export const SPARK_SECONDS = 0.24;
 
 /** localStorage key (through systems/Storage) for the best score and distance. */
 const BEST_KEY = 'bm.best';
@@ -54,9 +63,32 @@ const BEST_KEY = 'bm.best';
 const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
 const CHEVRON_POOL = 8;
-type ImpactKind = keyof typeof IMPACT.hitStop;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: number, h: number): boolean => x !== null && y !== null && x >= zx && x < zx + w && y >= zy && y < zy + h;
+
+/** A blow on its way: when it lands, the freeze, the jolt, the word (over `over`, or beside the surfer) and a spark where `from` meets `to`. */
+interface PendingImpact {
+  at: number;
+  hitStop: number;
+  shake: readonly [number, number];
+  label: string;
+  color: string;
+  scale: number;
+  over: Rider | null;
+  from: Rider;
+  to: Rider;
+  /** The surfer's speed is multiplied by this as it lands (a rival's shoulder check), else 1. */
+  slow: number;
+}
+
+/** A hit spark, in metres from the surfer (like an anchored float), with its age and size (metres across). */
+export interface HitSpark {
+  x: number;
+  y: number;
+  z: number;
+  age: number;
+  size: number;
+}
 
 /**
  * One course, one surfer, the field of rivals and the hazards, and the
@@ -105,8 +137,18 @@ export class Run {
   /** Whether the surfer is pulsing white for its invulnerability (cleared when it ends). */
   private pulsing = false;
   private bumpCooldown = 0;
-  /** A blow the surfer threw that lands a moment later (when the fist arrives): its time, its kind and the word to show. */
-  private impact: { at: number; kind: ImpactKind; label: string; color: string; scale: number; target: Rider } | null = null;
+  /**
+   * Blows on their way (the surfer's punches and barges, and rivals'
+   * shoulder checks on the surfer), oldest first: each lands a moment later,
+   * when the fist or shoulder arrives. Two in quick succession both land,
+   * each with its own word; the freeze is the stronger one.
+   */
+  private impacts: PendingImpact[] = [];
+  /** Hit sparks on screen (the HUD draws them). */
+  private sparks: HitSpark[] = [];
+  /** The rider whose blow just landed, and the run time until which the camera keeps the fight framed (crowdAmount, updateCamera). */
+  private focusTarget: Rider | null = null;
+  private focusUntil = 0;
   /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
   hitStop = 0;
   /** The rival the surfer's last blow is aimed at, and the run time until which its reaction must stay in sight (updateNearFade). */
@@ -136,7 +178,8 @@ export class Run {
     this.characterIndex = Math.max(0, CHARACTER_ORDER.indexOf(spec.id as (typeof CHARACTER_ORDER)[number]));
     this.surfer = new Surfer(spec);
     scene.add(this.surfer.group, this.surfer.shadow);
-    const pool = [...RIVALS, ...CHARACTER_ORDER.map((id) => CHARACTERS[id])];
+    // Never a clone of the player's own character (selectCharacter swaps one out if the player picks a rival's look).
+    const pool = [...RIVALS, ...CHARACTER_ORDER.filter((id) => id !== spec.id).map((id) => CHARACTERS[id])];
     for (let i = 0; i < course.rivals; i++) {
       const rival = new Rival(pool[i % pool.length], i);
       rival.autoNearFade = false; // the camera's rule (updateNearFade) decides, sight line included
@@ -156,7 +199,7 @@ export class Run {
       this.chevrons.push(chevron);
       scene.add(chevron.mesh);
     }
-    this.reset();
+    this.reset(true);
   }
 
   get spec(): RiderSpec {
@@ -168,13 +211,18 @@ export class Run {
     return this.floating;
   }
 
+  /** The hit sparks on screen (the HUD draws them). */
+  get hitSparks(): readonly HitSpark[] {
+    return this.sparks;
+  }
+
   /** Run time until which the surfer is invulnerable after a hit (the HUD flashes the lost heart). */
   get invulnerableTill(): number {
     return this.invulnerableUntil;
   }
 
-  /** Everyone back to the start line, with a fresh course ahead. */
-  reset(): void {
+  /** Everyone back to the start line, with a fresh course ahead; `title` parks the rivals in the title's slots instead. */
+  reset(title = this.state === 'title'): void {
     this.generator = new CourseGenerator(this.course);
     this.featureCount = -1;
     for (const b of this.buoys) b.retire();
@@ -183,7 +231,12 @@ export class Run {
     this.ocean.advance(0, 0);
     this.surfer.reset(0, 0, this.ocean);
     this.surfer.health = SCORING.startHealth;
-    this.rivals.forEach((rival, i) => rival.respawn(RIVAL_GRID[i % RIVAL_GRID.length][0], RIVAL_GRID[i % RIVAL_GRID.length][1], this.ocean));
+    const grid = title ? TITLE_GRID : RIVAL_GRID;
+    this.rivals.forEach((rival, i) => {
+      const [x, z] = grid[i % grid.length];
+      rival.respawn(x, z, this.ocean);
+      rival.holdChecks(this.time + COMBAT.rivalGraceSeconds); // no shoulder checks in the first seconds of a run
+    });
     this.newBest = false;
     this.score = 0;
     this.health = SCORING.startHealth;
@@ -197,7 +250,10 @@ export class Run {
     this.invulnerableUntil = 0;
     this.pulsing = false;
     this.bumpCooldown = 0;
-    this.impact = null;
+    this.impacts = [];
+    this.sparks = [];
+    this.focusTarget = null;
+    this.focusUntil = 0;
     this.hitStop = 0;
     this.strikeTarget = null;
     this.strikeUntil = 0;
@@ -210,7 +266,7 @@ export class Run {
   }
 
   start(): void {
-    this.reset();
+    this.reset(false);
     this.state = 'playing';
     this.stateTime = 0;
   }
@@ -239,6 +295,9 @@ export class Run {
     const n = CHARACTER_ORDER.length;
     this.characterIndex = (this.characterIndex + direction + n) % n;
     const spec = CHARACTERS[CHARACTER_ORDER[this.characterIndex]];
+    // The rival riding in the new character's look takes the one just given up, so the player never races a clone.
+    const given = this.surfer.spec;
+    for (const r of this.rivals) if (r.spec.id === spec.id) r.setSpec(given);
     this.surfer.setSpec(spec);
     saveJSON(CHARACTER_STORAGE_KEY, spec.id);
   }
@@ -250,6 +309,7 @@ export class Run {
       // Input is not read, so presses made now are kept for the next step.
       this.hitStop = Math.max(0, this.hitStop - dt);
       for (const f of this.floating) f.age += dt;
+      this.ageSparks(dt); // the spark plays out over the freeze
       this.updateCamera(dt);
       return;
     }
@@ -299,14 +359,23 @@ export class Run {
         this.simulate(dt, idle, false);
         break;
     }
+    // Paused: everything holds (the wakes, the spray and the words included), not just the riders and the camera.
+    if (this.state === 'paused') return;
 
     for (const f of this.floating) f.age += dt;
+    this.ageSparks(dt);
     this.floating = this.floating.filter((f) => f.age < FLOAT_SECONDS);
     this.updateCamera(dt);
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
     this.spray.update(dt, this.renderer.camera);
     this.wake.update(dt, this.ocean);
+  }
+
+  private ageSparks(dt: number): void {
+    if (this.sparks.length === 0) return;
+    for (const sp of this.sparks) sp.age += dt;
+    this.sparks = this.sparks.filter((sp) => sp.age < SPARK_SECONDS);
   }
 
   render(): void {
@@ -337,7 +406,9 @@ export class Run {
     const buoyPositions = this.buoys.filter((b) => b.active && !b.smashed);
     for (const r of this.rivals) {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
-      r.update(dt, r.think(s, buoyPositions, this.time), this.ocean, this.time);
+      // On the title the rivals ride parked in their slots ahead, clear of the selected character.
+      const slot = this.state === 'title' ? TITLE_GRID[r.index % TITLE_GRID.length] : null;
+      r.update(dt, r.think(s, buoyPositions, this.time, slot), this.ocean, this.time);
     }
     this.splashFrom(s);
     for (const r of this.rivals) this.splashFrom(r);
@@ -410,7 +481,7 @@ export class Run {
 
     const landing = s.takeLanding();
     if (landing) this.resolveLanding(landing);
-    if (this.impact && this.time >= this.impact.at) this.landImpact();
+    if (this.impacts.length > 0 && this.time >= this.impacts[0].at) this.landImpacts();
     this.resolveAttacks();
     this.resolveHazards();
   }
@@ -420,15 +491,37 @@ export class Run {
     for (let sp = r.takeSplash(); sp; sp = r.takeSplash()) this.spray.splash(sp.x, this.ocean.height(sp.x, sp.z), sp.z, sp.size * IMPACT.splashScale);
   }
 
-  /** The surfer's blow arrives: freeze frames, a jolt of the camera and the word. */
-  private landImpact(): void {
-    const impact = this.impact;
-    if (!impact) return;
-    this.impact = null;
-    this.hitStop = IMPACT.hitStop[impact.kind];
-    const [amount, seconds] = IMPACT.shake[impact.kind];
-    this.shake(amount, seconds);
-    this.float(impact.label, impact.color, impact.scale, impact.target);
+  /**
+   * Blows arrive: freeze frames (the strongest of those landing), a jolt
+   * of the camera, a spark at the point of contact and each blow's word;
+   * the camera keeps the fight framed for a moment (focusTarget).
+   */
+  private landImpacts(): void {
+    const s = this.surfer;
+    while (this.impacts.length > 0 && this.time >= this.impacts[0].at) {
+      const impact = this.impacts.shift() as PendingImpact;
+      this.hitStop = Math.max(this.hitStop, impact.hitStop);
+      this.shake(impact.shake[0], impact.shake[1]);
+      this.float(impact.label, impact.color, impact.scale, impact.over);
+      if (impact.slow !== 1) s.speed *= impact.slow;
+      // The spark: most of the way from the striker to the one struck, at chest height.
+      const a = impact.from;
+      const b = impact.to;
+      const k = 0.6;
+      this.sparks.push({
+        x: a.x + (b.x - a.x) * k - s.x,
+        y: a.y + (b.y - a.y) * k + IMPACT.sparkHeight * (a.spec.build + b.spec.build) * 0.5 - s.y,
+        z: a.z + (b.z - a.z) * k - s.z,
+        age: 0,
+        size: impact.hitStop >= IMPACT.hitStop.knockout ? IMPACT.sparkSize * 1.4 : IMPACT.sparkSize,
+      });
+      if (this.sparks.length > 4) this.sparks.shift();
+      const victim = b === s ? a : b;
+      if (victim !== s) {
+        this.focusTarget = victim;
+        this.focusUntil = this.time + (victim.knockedOut ? CAMERA.fightKoSeconds : CAMERA.fightSeconds);
+      }
+    }
   }
 
   /** Air, spins and grabs score on a clean landing; a bad one is a crash. */
@@ -511,18 +604,24 @@ export class Run {
         // Damage and points count now; the victim feels it (shove, flinch, launch) when the blow arrives, and so does the camera.
         // The word waits for the blow too, over the victim: HIT!, BARGE!, or the knockout with its points.
         const out = target.takeHit(damage, shove, this.time);
-        const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false) : barge ? 'BARGE!' : 'HIT!';
-        // Keep the victim in sight through its flinch: the camera's near fade must not screen-door it out as the blow lands.
+        // A knocked-out body is thrown along with the surfer (beside and level with them), so the tumble and splash play out in frame.
+        const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false, s.speed) : barge ? 'BARGE!' : 'HIT!';
+        // Keep the victim in sight through its flinch (or its knockout flight): the camera's near fade must not screen-door it out.
         this.strikeTarget = target;
-        this.strikeUntil = this.time + RIDER_ANIM.impactDelay + RIDER_ANIM.flinchSeconds;
-        this.impact = {
+        this.strikeUntil = this.time + RIDER_ANIM.impactDelay + (out ? CAMERA.fightKoSeconds : RIDER_ANIM.flinchSeconds);
+        const kind = out ? 'knockout' : barge ? 'barge' : 'punch';
+        this.impacts.push({
           at: this.time + RIDER_ANIM.impactDelay,
-          kind: out ? 'knockout' : barge ? 'barge' : 'punch',
+          hitStop: IMPACT.hitStop[kind],
+          shake: IMPACT.shake[kind],
           label,
           color: out ? hex(PALETTE.gold) : '#ffffff',
           scale: out ? 2 : 1,
-          target,
-        };
+          over: target,
+          from: s,
+          to: target,
+          slow: 1,
+        });
       }
     }
     for (const r of this.rivals) {
@@ -530,13 +629,13 @@ export class Run {
       if (Math.abs(r.x - s.x) > 1.6 || Math.abs(r.z - s.z) > 2.4) continue;
       const dir = Math.sign(s.x - r.x || 1);
       r.strikeDir = dir;
-      s.shoveVx = dir * COMBAT.rivalShove * r.stats.power;
-      s.speed *= 0.9;
-      s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.2);
-      s.flinch(dir, (COMBAT.rivalShove * r.stats.power) / 4, this.time);
-      const [amount, seconds] = IMPACT.shake.shoved;
-      this.shake(amount, seconds);
-      this.float('SHOVED!', hex(PALETTE.cyan), 1);
+      // Felt when the rival's shoulder arrives, like the surfer's own blows: the shove, the stagger, the flinch, the jolt and the word.
+      const at = this.time + RIDER_ANIM.impactDelay;
+      const push = dir * COMBAT.rivalShove * r.stats.power;
+      s.shoveAt(push, at);
+      s.stunnedUntil = Math.max(s.stunnedUntil, at + 0.2);
+      s.flinch(dir, Math.abs(push) / 4, at);
+      this.impacts.push({ at, hitStop: 0, shake: IMPACT.shake.shoved, label: 'SHOVED!', color: hex(PALETTE.cyan), scale: 1, over: null, from: r, to: s, slow: 0.9 });
     }
   }
 
@@ -648,9 +747,13 @@ export class Run {
     }
   }
 
-  /** Knock a rival out: points (times the combo), RAGE, and the word, shown now or (`show` false) by the caller. Returns the word. */
-  private knockout(r: Rival, label: string, points: number, show = true): string {
-    r.knockOut(this.time);
+  /**
+   * Knock a rival out: points (times the combo), RAGE, and the word, shown
+   * now or (`show` false) by the caller; the body is thrown along at `carry`
+   * m/s (its own speed unless given). Returns the word.
+   */
+  private knockout(r: Rival, label: string, points: number, show = true, carry = r.speed): string {
+    r.knockOut(this.time, carry);
     this.knockouts++;
     this.combo = this.time < this.comboUntil ? Math.min(COMBAT.comboMax, this.combo + 1) : 1;
     this.comboUntil = this.time + COMBAT.comboSeconds;
@@ -715,6 +818,12 @@ export class Run {
     return this.renderer.worldToHud(s.x + a.x, s.y + a.y, s.z + a.z, out);
   }
 
+  /** Where a point given in metres from the surfer (a hit spark) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */
+  hudPoint(dx: number, dy: number, dz: number, out: { x: number; y: number }): boolean {
+    const s = this.surfer;
+    return this.renderer.worldToHud(s.x + dx, s.y + dy, s.z + dz, out);
+  }
+
   /**
    * Chase camera: behind and above the surfer, looking down on them (the
    * mockup's framing), never under the water, rolling a little into carves,
@@ -759,6 +868,13 @@ export class Run {
     if (yaw !== 0) {
       desired.applyAxisAngle(Y_AXIS, yaw);
       look.applyAxisAngle(Y_AXIS, yaw);
+    }
+    // Just after a blow lands, the frame slides towards the rider it hit (eased with the rest), so the reaction stays in shot.
+    const focus = title ? null : this.fightFocus();
+    if (focus) {
+      const bias = Math.max(-CAMERA.fightShift, Math.min(CAMERA.fightShift, (focus.x - s.x) * 0.5));
+      desired.x += bias;
+      look.x += bias;
     }
     const roll = -s.lean * CAMERA.roll; // banks with how hard the surfer is turning, not with where the board points
     // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
@@ -849,6 +965,8 @@ export class Run {
    */
   private crowdAmount(): number {
     const s = this.surfer;
+    // A fight that just happened counts in full (the victim reeling away, a knockout tumbling), so the camera stays back for it.
+    if (this.fightFocus()) return 1;
     let amount = 0;
     for (const r of this.rivals) {
       if (r.knockedOut) continue;
@@ -859,13 +977,21 @@ export class Run {
     return amount;
   }
 
+  /** The rider a blow just landed on while the camera keeps the fight framed (not too far off to the side or along), else null. */
+  private fightFocus(): Rider | null {
+    const r = this.focusTarget;
+    if (!r || this.time >= this.focusUntil) return null;
+    const dz = r.z - this.surfer.z;
+    return Math.abs(r.x - this.surfer.x) < 6 && dz > -4 && dz < 10 ? r : null;
+  }
+
   /**
    * Near-camera occlusion: for each rival, how much it is in the way, 0..1,
    * from how close it is to the camera and whether it sits on the sight line
    * from the camera to the surfer, short of the surfer. Allocation-free.
    *
-   * The rival the surfer is hitting (strikeTarget, until its flinch is over)
-   * is exempt: the blow and the reaction must read, so only a tighter lens
+   * The rival the surfer is hitting (strikeTarget, until its flinch or its
+   * knockout flight is over) is exempt: the blow and the reaction must read, so only a tighter lens
    * rule (CAMERA.strikeNear) can thin it, when it is right at the lens.
    */
   private updateNearFade(): void {
@@ -878,7 +1004,7 @@ export class Run {
     const lz = s.z - cam.z;
     const len2 = lx * lx + ly * ly + lz * lz;
     for (const r of this.rivals) {
-      if (r === struck && !r.knockedOut) {
+      if (r === struck) {
         r.fadeNear(cam, CAMERA.strikeNear.start, CAMERA.strikeNear.full);
         continue;
       }

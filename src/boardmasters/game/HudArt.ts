@@ -528,3 +528,64 @@ export function pauseArt(): HTMLCanvasElement {
   ctx.fillRect(10, 5, 2, 8);
   return canvas;
 }
+
+/** Frames in a hit spark (HudView plays them over Run's SPARK_SECONDS). */
+export const SPARK_FRAMES = 6;
+
+/** A filled star: `n` points between radius `r` and `inner`, turned by `turn`. */
+function star(ctx: Ctx, cx: number, cy: number, r: number, inner: number, n: number, turn: number, color: string): void {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = turn + (i / (n * 2)) * Math.PI * 2;
+    const k = i % 2 === 0 ? r : inner;
+    if (i === 0) ctx.moveTo(cx + Math.cos(a) * k, cy + Math.sin(a) * k);
+    else ctx.lineTo(cx + Math.cos(a) * k, cy + Math.sin(a) * k);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * One frame of the hit spark, `size` pixels across: a comic impact star
+ * where a blow lands, like the ATTACK icon's. A white pop, a spiky
+ * white-gold-orange star at full size, then its rays flying apart and a
+ * last scatter of sparks. Hard-edged and outlined in the HUD's ink.
+ */
+export function hitSparkFrame(frame: number, size: number): HTMLCanvasElement {
+  const S = Math.max(8, Math.round(size));
+  const { canvas, ctx } = makeCanvas(S + 4, S + 4, true); // read back by hardenAlpha: CPU-backed
+  const c = (S + 4) / 2;
+  const R = S / 2;
+  const turn = 0.2 + frame * 0.13;
+  const spikes = 8;
+  if (frame === 0) {
+    star(ctx, c, c, R * 0.55, R * 0.25, spikes, turn, '#ffffff');
+  } else if (frame <= 2) {
+    const r = frame === 1 ? R * 0.85 : R;
+    star(ctx, c, c, r, r * 0.42, spikes, turn, '#ff7a1e');
+    star(ctx, c, c, r * 0.74, r * 0.34, spikes, turn + 0.12, '#ffe14d');
+    star(ctx, c, c, r * 0.44, r * 0.22, spikes, turn + 0.3, '#ffffff');
+  } else if (frame <= 4) {
+    // The rays break away from the middle and fly out.
+    const from = frame === 3 ? 0.4 : 0.66;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < spikes; i++) {
+      const a = turn + (i / spikes) * Math.PI * 2;
+      ctx.strokeStyle = frame === 3 ? '#ffe14d' : '#ffffff';
+      ctx.lineWidth = Math.max(2, Math.round(S / (frame === 3 ? 9 : 13)));
+      ctx.beginPath();
+      ctx.moveTo(c + Math.cos(a) * R * from, c + Math.sin(a) * R * from);
+      ctx.lineTo(c + Math.cos(a) * R * (from + 0.42), c + Math.sin(a) * R * (from + 0.42));
+      ctx.stroke();
+    }
+    if (frame === 3) star(ctx, c, c, R * 0.3, R * 0.16, spikes, turn, '#ffffff');
+  } else {
+    for (let i = 0; i < spikes; i++) {
+      const a = turn + 0.2 + (i / spikes) * Math.PI * 2;
+      disc(ctx, Math.round(c + Math.cos(a) * R * 0.98), Math.round(c + Math.sin(a) * R * 0.98), Math.max(1, Math.round(S / 22)), '#ffe9a0');
+    }
+  }
+  hardenAlpha(canvas, 128);
+  return outlined(canvas, HUD_COLORS.ink, 1, 0);
+}

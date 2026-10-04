@@ -146,15 +146,26 @@ export const CAMERA = {
    * Combat framing: with a rival right alongside (within `crowdFull` to
    * `crowdNone` metres to the side, from `crowdBehind` to `crowdAhead`
    * metres along), the camera eases back and up this much so a fight shows
-   * both riders rather than one body filling the side of the screen.
+   * both riders rather than one body filling the side of the screen. Upright
+   * the frame is only about 1.5 m either side at the surfer, so it pulls
+   * back far enough to keep a rider shoved a metre or two further out.
    */
-  crowdBack: IS_PORTRAIT ? 1.0 : 0.5,
-  crowdUp: IS_PORTRAIT ? 0.3 : 0.15,
+  crowdBack: IS_PORTRAIT ? 2.0 : 0.6,
+  crowdUp: IS_PORTRAIT ? 0.55 : 0.2,
   crowdFull: 1.4,
   crowdNone: 2.6,
   crowdBehind: -2.0,
   crowdAhead: 2.5,
   crowdRate: 2.5,
+  /**
+   * After a blow lands, the camera keeps the fight framed for this long
+   * (longer for a knockout's flight and splash): pulled back as if crowded,
+   * and slid sideways towards the rider hit (half its offset, up to
+   * `fightShift` metres) so the reaction stays in shot.
+   */
+  fightSeconds: 0.9,
+  fightKoSeconds: 1.5,
+  fightShift: IS_PORTRAIT ? 1.0 : 0.4,
   lookRate: 8,
   rollRate: 4,
   /** The chase offsets swing round this fraction of the surfer's heading (eased with them), so a held carve shows the board turned about half as far. */
@@ -325,7 +336,8 @@ export const COMBAT = {
   punchRangeX: 1.7,
   punchRangeZ: 2.2,
   bargeDamage: 1,
-  bargeShove: 8,
+  /** The barge's sideways shove (m/s, times POWER); a shoved rider slides on it slowly (PHYSICS.shovedDecay) so it reads. */
+  bargeShove: 5.5,
   bargeCooldown: 1.0,
   bargeSeconds: 0.35,
   bargeRangeX: 2.2,
@@ -347,6 +359,8 @@ export const COMBAT = {
   rivalShove: 4,
   rivalCheckCooldown: 4,
   rivalCheckSeconds: 0.7,
+  /** No shoulder checks in the first seconds of a run (the field settles first). */
+  rivalGraceSeconds: 3,
 } as const;
 
 /**
@@ -377,6 +391,9 @@ export const IMPACT = {
   /** Sideways speed (m/s) a buoy throws the surfer off with (decaying), enough to clear it by about 1.8 m. */
   buoyShove: 9,
   smashSplash: 1.6,
+  /** The hit spark (a comic star where a blow lands): metres above the riders' feet (times their build), and metres across (a knockout's is bigger). */
+  sparkHeight: 1.25,
+  sparkSize: 0.7,
 } as const;
 
 /**
@@ -466,13 +483,24 @@ export const RIDER_ANIM = {
   flinchSeconds: 0.5,
   /** The deep knee bend on landing. */
   landSeconds: 0.22,
-  /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the same side, lower and slower, flipping. */
+  /**
+   * Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s);
+   * the board flies off the same side, lower and slower, flipping. Both are
+   * carried along at about the attacker's speed (koCarry, boardCarry), so
+   * the flight and the splash land beside the surfer: upright the frame is
+   * narrow, so the throw sideways is short.
+   */
   koUp: 6,
-  koSide: 2.6,
+  koSide: IS_PORTRAIT ? 1.1 : 2.0,
+  koCarry: 1.0,
   koTumble: 8,
   boardUp: 4.2,
-  boardSide: 1.2,
+  boardSide: IS_PORTRAIT ? 0.6 : 1.0,
+  boardCarry: 0.96,
   boardTumble: 11,
+  /** A hit's white flash: how white (the rider keeps some shading) and for how long once the blow lands (the hit-stop holds it too). */
+  hitFlash: 0.4,
+  hitFlashSeconds: 0.05,
   /** Floating after the splash, the body sinks this far over the respawn wait. */
   koSink: 0.55,
   /** The last heart: pitch forward over the board into the water over this long. */

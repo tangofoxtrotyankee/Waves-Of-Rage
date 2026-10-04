@@ -270,12 +270,13 @@ export class RiderAnimator {
     const fx = Math.sin(input.heading);
     const fz = Math.cos(input.heading);
     this.koBody.set(input.x, input.y + pivot, input.z);
-    // The flight keeps up with the field (the hit has already slowed the rider), so the tumble plays out beside the attacker, not in the camera's face.
+    // The flight keeps up with the attacker (input.speed: the rider passes the attacker's speed), so the tumble and the splash play out
+    // beside them, in the frame, not behind the camera or off the side of a narrow upright screen.
     const forward = Math.max(input.speed, PHYSICS.baseSpeed);
-    this.koBodyV.set(this.koDir * RIDER_ANIM.koSide + fx * forward * 0.92, RIDER_ANIM.koUp, fz * forward * 0.92);
+    this.koBodyV.set(this.koDir * RIDER_ANIM.koSide + fx * forward * RIDER_ANIM.koCarry, RIDER_ANIM.koUp, fz * forward * RIDER_ANIM.koCarry);
     // The board flies out on the shove side too (never back through the attacker), a little slower than the body, flipping.
     this.koBoard.set(input.x + this.koDir * 0.3 * b, input.y, input.z);
-    this.koBoardV.set(this.koDir * RIDER_ANIM.boardSide + fx * forward * 0.88, RIDER_ANIM.boardUp, fz * forward * 0.88);
+    this.koBoardV.set(this.koDir * RIDER_ANIM.boardSide + fx * forward * RIDER_ANIM.boardCarry, RIDER_ANIM.boardUp, fz * forward * RIDER_ANIM.boardCarry);
     this.koRoll = 0;
     this.koPitch = 0;
     this.koYaw = input.heading;

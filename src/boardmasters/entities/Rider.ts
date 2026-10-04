@@ -175,9 +175,10 @@ export class Rider {
   /** A hit's shove waits for the attacker's strike to land. */
   private pendingShove = 0;
   private pendingShoveAt = -1;
-  /** The knockout launch, likewise. */
+  /** The knockout launch, likewise, and the speed the body is carried along at (the attacker's). */
   private koLaunchAt = -1;
   private koDir = 1;
+  private koCarry = 0;
 
   constructor(spec: RiderSpec) {
     this.spec = spec;
@@ -291,9 +292,15 @@ export class Rider {
     this.stunnedUntil = Math.max(this.stunnedUntil, impact + 0.4);
     this.shovedUntil = impact + 0.6;
     this.flashFrom = impact;
-    this.flashUntil = impact + 0.12;
+    this.flashUntil = impact + RIDER_ANIM.hitFlashSeconds;
     this.flinch(Math.sign(shove) || 1, clamp(Math.abs(shove) / 4, 0.6, 1.5), impact);
     return this.health <= 0;
+  }
+
+  /** A sideways shove (m/s, decaying) that lands at run time `at` (a blow on its way). */
+  shoveAt(vx: number, at: number): void {
+    this.pendingShove = vx;
+    this.pendingShoveAt = at;
   }
 
   /** React to a hit from the `dir` side's opposite (dir: the world-x sign the rider is pushed towards), scaled by `strength` (1: a punch). Takes effect at `time`. */
@@ -301,8 +308,13 @@ export class Rider {
     this.animator.flinch(dir, strength, time);
   }
 
-  /** Out of the race until the run respawns it: launched off the board when the hit lands, tumbling into the water. */
-  knockOut(time: number): void {
+  /**
+   * Out of the race until the run respawns it: launched off the board when
+   * the hit lands, tumbling into the water, carried along at `carry` m/s (at
+   * least cruising speed) so it lands level with whoever hit it.
+   */
+  knockOut(time: number, carry = 0): void {
+    this.koCarry = carry;
     this.health = 0;
     this.wiped = true;
     this.knockedOut = true;
@@ -706,6 +718,7 @@ export class Rider {
     if (this.knockedOut && this.koLaunchAt >= 0 && time >= this.koLaunchAt) {
       this.koLaunchAt = -1;
       this.fillAnim(time);
+      this.anim.speed = Math.max(this.anim.speed, this.koCarry);
       this.animator.knockOut(this.koDir, this.anim);
     }
     if (this.knockedOut && this.animator.knockedOutBody) {
@@ -782,7 +795,7 @@ export class Rider {
       // Positive lean and bank tip the rider towards world +x; the barrel roll turns towards its direction (screen-right is world -x).
       this.group.rotateZ(-(this.lean * PHYSICS.carveLean + anim.bank) - this.rollAngle);
     }
-    if (time >= this.flashFrom && time < this.flashUntil) this.setFlash(1);
+    if (time >= this.flashFrom && time < this.flashUntil) this.setFlash(RIDER_ANIM.hitFlash);
     else if (this.flashUntil > 0 && time >= this.flashUntil) {
       this.setFlash(0);
       this.flashUntil = 0;

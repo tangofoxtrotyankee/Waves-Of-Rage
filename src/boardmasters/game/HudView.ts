@@ -4,9 +4,9 @@ import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
 import { hex } from '../engine/math';
 import { COMBAT, IS_PORTRAIT, PALETTE, RIDER_ANIM, SCORING, VIEW } from './constants';
-import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
+import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, hitSparkFrame, pauseArt, segmentBar, SPARK_FRAMES, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
-import type { FloatingText, Run } from './Run';
+import { type FloatingText, type Run, SPARK_SECONDS } from './Run';
 
 /** Seconds after the last heart before the results panel slams in: the wipeout fall plays first. */
 const RESULTS_DELAY = RIDER_ANIM.wipeoutFall + 0.3;
@@ -25,6 +25,11 @@ const MILESTONE = 500;
 const BIG = new BigDigits();
 /** Scratch for a float's projected point (no allocation per frame). */
 const FLOAT_AT = { x: 0, y: 0 };
+/** Scratch for a hit spark's projected centre and a point above it (its size on screen). */
+const SPARK_AT = { x: 0, y: 0 };
+const SPARK_UP = { x: 0, y: 0 };
+/** Hit spark sizes are baked in steps of this many pixels. */
+const SPARK_STEP = 4;
 /** Baked floats kept by text, colour and scale. */
 const FLOAT_CACHE = 48;
 /** The words Run floats with fixed text (colours as Run passes them), baked on the title before play. */
@@ -148,6 +153,8 @@ export class HudView {
   private readonly floatArt = new WeakMap<FloatingText, HTMLCanvasElement>();
   /** Baked float sprites by `text|color|scale`, most recently used last (a small LRU): the same word is baked once. */
   private readonly floatCache = new Map<string, HTMLCanvasElement>();
+  /** Hit spark frames by baked size (SPARK_STEP buckets), made on first use. */
+  private readonly sparkArt = new Map<number, HTMLCanvasElement[]>();
   /** How many of FLOAT_VOCABULARY are baked ahead (one per frame on the title, so a first HIT! costs nothing). */
   private prebaked = 0;
   /** Panels and other art by a fixed key (literal strings only, so lookups allocate nothing). */
@@ -277,7 +284,10 @@ export class HudView {
     }
     this.drawRage();
     this.drawStrip();
-    if (run.state !== 'paused') this.drawFloats();
+    if (run.state !== 'paused') {
+      this.drawSparks();
+      this.drawFloats();
+    }
     if (run.state === 'playing') {
       this.drawTrail();
       if (run.input.touch) this.drawButtons();
@@ -446,6 +456,24 @@ export class HudView {
     hud.blit(m.flag, this.stripX(next, 0) - 1, fy);
     hud.text(st.x + 21, fy + 1, this.milestone.get(next), '#ffffff', TIGHT_OUTLINE);
     hud.blit(m.arrow, this.stripX(s.z, s.x) - 3, st.playerY - 4);
+  }
+
+  /** Hit sparks: a comic star where each blow lands, sized by its distance from the camera, playing over SPARK_SECONDS. */
+  private drawSparks(): void {
+    const run = this.run;
+    for (const sp of run.hitSparks) {
+      if (!run.hudPoint(sp.x, sp.y, sp.z, SPARK_AT) || !run.hudPoint(sp.x, sp.y + sp.size / 2, sp.z, SPARK_UP)) continue;
+      const px = Math.max(12, Math.min(72, Math.hypot(SPARK_UP.x - SPARK_AT.x, SPARK_UP.y - SPARK_AT.y) * 2));
+      const bucket = Math.round(px / SPARK_STEP) * SPARK_STEP;
+      let frames = this.sparkArt.get(bucket);
+      if (!frames) {
+        frames = [];
+        for (let i = 0; i < SPARK_FRAMES; i++) frames.push(hitSparkFrame(i, bucket));
+        this.sparkArt.set(bucket, frames);
+      }
+      const art = frames[Math.min(SPARK_FRAMES - 1, Math.floor((sp.age / SPARK_SECONDS) * SPARK_FRAMES))];
+      this.hud.blit(art, Math.round(SPARK_AT.x - art.width / 2), Math.round(SPARK_AT.y - art.height / 2));
+    }
   }
 
   /**
