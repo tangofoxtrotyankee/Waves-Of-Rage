@@ -354,7 +354,7 @@ export class Run {
       const tailZ = r.z - cosH * 0.9;
       const carve = Math.min(1, Math.abs(r.heading) / PHYSICS.maxHeading);
       const pace = Math.min(1, Math.max(0, (r.speed - 6) / 16));
-      this.wake.emit(tailX, r.y, tailZ, r.heading, r.speed, 0.55 + pace * 0.35 + carve * 0.4);
+      this.wake.emit(tailX, r.y, tailZ, r.heading, r.speed, 0.4 + pace * 0.3 + carve * 0.4);
       // Spray only where it can be seen; rivals throw less of it so the pool goes round.
       if (r.z < camZ - 2 || r.z > camZ + 60) continue;
       const boost = this.time < r.boostUntil;

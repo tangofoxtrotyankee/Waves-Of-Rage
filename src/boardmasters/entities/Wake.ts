@@ -189,7 +189,7 @@ export class Wake {
       }
       // The churned trail: wide and thick at first, dissolving.
       const trailFoam = Math.min(1.2, s.strength) * life * life * life;
-      if (trailFoam >= FOAM_MIN) this.strip(n++ * VERTS, s.x, ocean.height(s.x, s.z) + LIFT, s.z, fx, fz, rx, rz, half * 1.1, 0.36 + age * 0.3, 0, trailFoam);
+      if (trailFoam >= FOAM_MIN) this.strip(n++ * VERTS, s.x, ocean.height(s.x, s.z) + LIFT, s.z, fx, fz, rx, rz, half * 1.1, 0.27 + age * 0.22, 0, trailFoam);
     }
     this.geometry.setDrawRange(0, n * 12);
     for (const name of DYNAMIC) {

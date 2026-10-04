@@ -221,7 +221,7 @@ export const SUN = {
  * crests, breaking faces and open-water patches carry.
  */
 export const WATER = {
-  nearTint: [0.78, 1.06, 1.04] as const,
+  nearTint: [0.62, 0.98, 1.0] as const,
   farTint: [0.62, 0.72, 1.0] as const,
   glint: 0xfff3c4,
   foamShade: 0xa8e6f6,
