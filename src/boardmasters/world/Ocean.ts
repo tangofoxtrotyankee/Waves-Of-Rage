@@ -21,7 +21,8 @@ export interface OceanFeature {
  * Grid: 1 m cells across the course and its whitewater edges (x from -17 to
  * 17), 2 m cells out to 22 m under the shore break, then coarse columns out
  * to +/-124 m so the water reaches past the fog in every direction. Along
- * the course, 1 m rows from 12 m behind the rider to 50 m ahead, then 2 m
+ * the course, 1 m rows from 9 m behind the rider (the chase camera sees
+ * the water from about 3 m behind the rider) to 40 m ahead, then 2 m
  * rows (on even metres, so they do not swim as the window moves) to about
  * 99 m ahead, where the fog has it all.
  */
@@ -29,10 +30,10 @@ const OUTER = [26, 32, 40, 50, 64, 80, 100, 124];
 const INNER = [18, 20, 22];
 const COLUMN_X: number[] = [...OUTER.map((x) => -x).reverse(), ...INNER.map((x) => -x).reverse(), ...Array.from({ length: 35 }, (_, i) => i - 17), ...INNER, ...OUTER];
 const COLS = COLUMN_X.length - 1;
-const BEHIND = 12;
+const BEHIND = 9;
 /** Rows of vertices 1 m apart from the back edge, then rows 2 m apart. */
-const NEAR_ROWS = 62;
-const FAR_ROWS = 25;
+const NEAR_ROWS = 49;
+const FAR_ROWS = 30;
 const ROWS = NEAR_ROWS + FAR_ROWS;
 /** The sampled height grid carries one extra ring so every vertex has neighbours for its normal. */
 const GW = COLS + 3;

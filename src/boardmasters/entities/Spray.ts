@@ -35,8 +35,8 @@ const RING_LIFE = 0.8;
 /** Rings sit this far above the water they were thrown on (the swell moves under them). */
 const RING_LIFT = 0.22;
 /** Clumps closer to the camera than NEAR_SKIP metres are not drawn, and shrink in over the next NEAR_FADE metres. */
-const NEAR_SKIP = 1.5;
-const NEAR_FADE = 4;
+const NEAR_SKIP = 1.2;
+const NEAR_FADE = 2.5;
 
 /**
  * Crunchy spray: a pool of white camera-facing pixel clumps (a big square

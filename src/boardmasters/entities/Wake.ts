@@ -5,7 +5,7 @@ import type { Ocean } from '../world/Ocean';
 /** Seconds a stretch of wake lasts. */
 const LIFE = 1.5;
 /** A new stretch is laid each time a rider has moved this far (metres) since its last one. */
-const SPACING = 0.7;
+const SPACING = 0.85;
 /** Stretches in the ring buffer: enough for eight riders at a good pace for LIFE seconds (at top speed the oldest go a little early). */
 const POOL = 320;
 /** Strips per stretch: the two arms of the V and the churned trail between them. Each strip is two quads across (6 vertices), foamy down the middle and clear at the edges, so it dithers out softly. */
@@ -53,11 +53,12 @@ interface Tracker {
  * lying on the water (two arms spreading back and out from the tail, and a
  * churned central trail that widens), foamy down the middle and clear at
  * the edges, drawn with the PS1_WATER foam block so they dissolve into
- * dithered pixels as they age instead of blending. A ring
- * buffer of stretches; the live ones are packed into the front of the
- * buffers each step and only they are drawn. `emit` is called per
+ * dithered pixels as they age instead of blending. A ring buffer of
+ * stretches; each step the strips with foam enough to show are packed into
+ * the front of the buffers and only they are drawn. `emit` is called per
  * rider per step and lays a stretch every SPACING metres (riders are told
- * apart by position), `update` ages them and re-seats them on the swell.
+ * apart by position), `update` ages them and re-seats them on the swell,
+ * `reset` clears them all.
  */
 export class Wake {
   readonly mesh: THREE.Mesh;
