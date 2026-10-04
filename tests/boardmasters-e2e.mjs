@@ -188,10 +188,12 @@ try {
     return null;
   };
   const score0 = await ev(() => window.bm.run.score);
+  const kos0 = await ev(() => window.bm.run.knockouts);
   // Rivals 1 and 3 (POSER, GIRL RIVAL) are below the aggression threshold, so they do not shoulder-check mid-test.
   await strike(1, 1.0, 1, 'x');
   const ko = await ev(() => ({ out: window.bm.run.rivals[1].knockedOut, kos: window.bm.run.knockouts, score: window.bm.run.score }));
-  check('a punch on a one-health rival knocks it out for 500', ko.out && ko.kos === 1 && ko.score >= score0 + 500, JSON.stringify(ko));
+  // At least one knockout: a rival shoved earlier may also have gone into a buoy meanwhile (an environment knockout).
+  check('a punch on a one-health rival knocks it out for 500', ko.out && ko.kos >= kos0 + 1 && ko.score >= score0 + 500, JSON.stringify({ ...ko, kos0 }));
   await wait(600);
   const barged = await strike(3, -1.0, 2, 'Shift');
   check('a barge shoves a rival hard and takes a health point', !!barged && barged.peak > 4 && barged.health === 1, JSON.stringify(barged));
@@ -322,7 +324,12 @@ try {
     await page.keyboard.down('ArrowRight');
     const ok = await until(() => window.bm.run.lastLanding !== null, 4000);
     await page.keyboard.up('ArrowRight');
-    if (ok) held360 = { landing: await ev(() => window.bm.run.lastLanding), health: await ev(() => window.bm.run.health) };
+    if (!ok) continue;
+    const attempt = { landing: await ev(() => window.bm.run.lastLanding), health: await ev(() => window.bm.run.health) };
+    // A swell rising under the jump can cut the forced air well short of the 1.2 s (0.6 to 1.0 s seen): that is not
+    // the big air this check is about, so try again.
+    if (attempt.landing.airTime >= 1.1 || tries === 4) held360 = attempt;
+    else await wait(300);
   }
   check('a spin held through big air lands as a clean 360', !!held360 && held360.landing.clean && Math.round(held360.landing.spinDeg / 180) === 2 && held360.landing.points >= 850 && held360.health === 3, JSON.stringify(held360));
   // The course's own buoys are still out there; and these landings feed the RAGE meter, which the RAGE check wants empty and idle.
