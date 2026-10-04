@@ -2,7 +2,8 @@ import { type Hud2D, hardenAlpha, heavyWidth, makeCanvas, outlined, type Stops }
 import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
-import { IS_PORTRAIT, RIDER_ANIM, SCORING, VIEW } from './constants';
+import { hex } from '../engine/math';
+import { COMBAT, IS_PORTRAIT, PALETTE, RIDER_ANIM, SCORING, VIEW } from './constants';
 import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import type { FloatingText, Run } from './Run';
@@ -22,6 +23,26 @@ const STRIP_BEHIND = 24;
 /** Distance milestones on the endless course, shown as the strip's flag. */
 const MILESTONE = 500;
 const BIG = new BigDigits();
+/** Scratch for a float's projected point (no allocation per frame). */
+const FLOAT_AT = { x: 0, y: 0 };
+/** Baked floats kept by text, colour and scale. */
+const FLOAT_CACHE = 48;
+/** The words Run floats with fixed text (colours as Run passes them), baked on the title before play. */
+const FLOAT_VOCABULARY: [string, string, number][] = [
+  ['HIT!', '#ffffff', 1],
+  ['BARGE!', '#ffffff', 1],
+  ['SHOVED!', hex(PALETTE.cyan), 1],
+  ['OUCH!', hex(PALETTE.red), 1],
+  ['WIPEOUT -1', hex(PALETTE.red), 1],
+  ['BOOST!', hex(PALETTE.cyan), 1],
+  ['BOOST!', hex(PALETTE.gold), 1],
+  ['BARREL ROLL!', hex(PALETTE.cyan), 1],
+  ['RAGE!', hex(PALETTE.red), 2],
+  ['WIPEOUT', hex(PALETTE.red), 2],
+  [`AIR +${SCORING.airBonus}`, hex(PALETTE.gold), 1],
+  [`BIG AIR +${SCORING.bigAirBonus}`, hex(PALETTE.gold), 1],
+  [`KNOCKOUT +${COMBAT.knockoutPoints}`, hex(PALETTE.gold), 2],
+];
 /**
  * The title logo, fetched as soon as this module is evaluated (with the
  * bundle, alongside the font) rather than when the first frame is drawn.
@@ -123,7 +144,12 @@ export class HudView {
   private readonly buttons: ButtonArt[] = TOUCH_BUTTONS.map((b) => buttonArt(b));
   private buttonsLettered = false;
   private readonly captions: (HTMLCanvasElement | null)[] = TOUCH_BUTTONS.map(() => null);
+  /** Float sprites per float (no key string per frame), backed by floatCache by text, colour and scale. */
   private readonly floatArt = new WeakMap<FloatingText, HTMLCanvasElement>();
+  /** Baked float sprites by `text|color|scale`, most recently used last (a small LRU): the same word is baked once. */
+  private readonly floatCache = new Map<string, HTMLCanvasElement>();
+  /** How many of FLOAT_VOCABULARY are baked ahead (one per frame on the title, so a first HIT! costs nothing). */
+  private prebaked = 0;
   /** Panels and other art by a fixed key (literal strings only, so lookups allocate nothing). */
   private readonly panels = new Map<string, HTMLCanvasElement>();
   private readonly names = new Map<string, HTMLCanvasElement | null>();
@@ -238,6 +264,7 @@ export class HudView {
     if (this.hud.height !== this.H) this.layout();
     this.hud.clear();
     if (run.state === 'title') {
+      this.prebakeFloats();
       this.drawTitle();
       return;
     }
@@ -421,22 +448,36 @@ export class HudView {
     hud.blit(m.arrow, this.stripX(s.z, s.x) - 3, st.playerY - 4);
   }
 
-  /** Floating trick text: heavy brush lettering with a dark outline, popping in, stacked beside the surfer (newest lowest) and fading. */
+  /**
+   * Floating text: heavy brush lettering with a dark outline, popping in and
+   * fading. Trick and score words stack beside the surfer (newest lowest, at
+   * most two: Run caps them); the blows' words (HIT!, BARGE!, KNOCKOUT) rise
+   * over the rider who took the blow.
+   */
   private drawFloats(): void {
     const list = this.run.floats;
     const anchorX = IS_PORTRAIT ? this.W - 3 : Math.round(this.W * 0.6);
     // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
     const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * (this.run.input.touch ? 0.62 : 0.8));
+    const at = FLOAT_AT;
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
-      const c = this.floatArt.get(f) ?? this.bakeFloat(f);
-      if (!c) continue;
-      const top = baseY - c.height - stack - Math.round(f.age * 10);
-      // Only the entries that would cover the RAGE row give way; the rest still show.
-      if (top < FLOAT_TOP) continue;
+      const c = this.floatArt.get(f) ?? this.floatSprite(f);
+      const rise = Math.round(f.age * 10);
       const pop = f.age < FLOAT_POP ? 1 + 0.6 * (1 - f.age / FLOAT_POP) ** 2 : 1;
       const alpha = Math.min(1, (FLOAT_LIFE - f.age) / FLOAT_FADE);
+      if (f.anchor) {
+        // Over the rider, kept on screen and under the RAGE row.
+        if (!this.run.floatPoint(f, at)) continue;
+        const x = Math.max(8, Math.min(this.W - 8 - c.width, Math.round(at.x - c.width / 2)));
+        const top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
+        this.hud.blit(c, x, top, alpha, pop);
+        continue;
+      }
+      const top = baseY - c.height - stack - rise;
+      // Only the entries that would cover the RAGE row give way; the rest still show.
+      if (top < FLOAT_TOP) continue;
       this.hud.blit(c, IS_PORTRAIT ? anchorX - c.width : anchorX, top, alpha, pop);
       stack += c.height;
     }
@@ -458,8 +499,38 @@ export class HudView {
     return this.hud.heavyText(text, size, stops, 1, undefined, squeeze);
   }
 
-  private bakeFloat(f: FloatingText): HTMLCanvasElement | null {
-    const stops = stopsFor(f.color);
+  /** The sprite for a float: from the cache by text, colour and scale, or baked now. */
+  private floatSprite(f: FloatingText): HTMLCanvasElement {
+    const canvas = this.cachedFloat(f.text, f.color, f.scale);
+    this.floatArt.set(f, canvas);
+    return canvas;
+  }
+
+  private cachedFloat(text: string, color: string, scale: number): HTMLCanvasElement {
+    const key = `${text}|${color}|${scale}`;
+    let canvas = this.floatCache.get(key);
+    if (canvas) this.floatCache.delete(key); // re-inserted below as the most recent
+    else {
+      canvas = this.bakeFloat(text, color, scale);
+      if (this.floatCache.size >= FLOAT_CACHE) {
+        const oldest = this.floatCache.keys().next().value;
+        if (oldest !== undefined) this.floatCache.delete(oldest);
+      }
+    }
+    this.floatCache.set(key, canvas);
+    return canvas;
+  }
+
+  /** Bake the next word of the fixed vocabulary ahead of play (one per call). */
+  private prebakeFloats(): void {
+    if (this.prebaked >= FLOAT_VOCABULARY.length) return;
+    const [text, color, scale] = FLOAT_VOCABULARY[this.prebaked++];
+    this.cachedFloat(text, color, scale);
+  }
+
+  private bakeFloat(text: string, color: string, scale: number): HTMLCanvasElement {
+    const f = { text, scale };
+    const stops = stopsFor(color);
     // Upright the stack sits right of the surfer's head, above his outstretched arm (the mockup's "+250 CARVE" sits at x 180..232 of 240).
     const maxW = IS_PORTRAIT ? 96 : Math.round(this.W * 0.4 - 8);
     const big = IS_PORTRAIT ? 18 : 20;
@@ -481,7 +552,6 @@ export class HudView {
       const text = this.heavyFit(f.text, f.scale >= 2 || impact ? big - 1 : big - 3, 14, maxW - (impact ? 16 : 0), stops);
       canvas = impact ? withBurst(text, stops === HUD_COLORS.red) : text;
     }
-    this.floatArt.set(f, canvas);
     return canvas;
   }
 

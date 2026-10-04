@@ -32,9 +32,19 @@ export interface FloatingText {
   color: string;
   age: number;
   scale: number;
+  /**
+   * A word over a rider (the blows' HIT!, BARGE!, KNOCKOUT): where it
+   * shows, in metres from the surfer (so it keeps its place in the chase
+   * camera's view). Null for the column beside the surfer.
+   */
+  anchor: { x: number; y: number; z: number } | null;
 }
 
 const FLOAT_SECONDS = 1.3;
+/** At most this many floats in each place (the column beside the surfer, and over the riders); a new one pushes out the oldest. */
+const FLOAT_MAX = 2;
+/** Metres above a rider's feet where a word over them starts (about the head). */
+const FLOAT_HEAD = 2.0;
 /** The start grid for the rivals: (x, z) around the player. */
 const RIVAL_GRID: [number, number][] = [[-4, 6], [4, 9], [-8, 3], [8, 12], [-6, -6], [2, 16], [7, -9], [-3, 20]];
 
@@ -93,7 +103,7 @@ export class Run {
   private invulnerableUntil = 0;
   private bumpCooldown = 0;
   /** A blow the surfer threw that lands a moment later (when the fist arrives): its time, its kind and the word to show. */
-  private impact: { at: number; kind: ImpactKind; label: string | null } | null = null;
+  private impact: { at: number; kind: ImpactKind; label: string; color: string; scale: number; target: Rider } | null = null;
   /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
   hitStop = 0;
   private snapCamera = true;
@@ -401,7 +411,7 @@ export class Run {
     this.hitStop = IMPACT.hitStop[impact.kind];
     const [amount, seconds] = IMPACT.shake[impact.kind];
     this.shake(amount, seconds);
-    if (impact.label) this.float(impact.label, '#ffffff', 1);
+    this.float(impact.label, impact.color, impact.scale, impact.target);
   }
 
   /** Air, spins and grabs score on a clean landing; a bad one is a crash. */
@@ -482,9 +492,17 @@ export class Run {
         const shove = dir * (barge ? COMBAT.bargeShove : COMBAT.punchShove) * s.stats.power;
         if (barge) s.stunnedUntil = Math.max(s.stunnedUntil, this.time + COMBAT.bargeSelfStun);
         // Damage and points count now; the victim feels it (shove, flinch, launch) when the blow arrives, and so does the camera.
+        // The word waits for the blow too, over the victim: HIT!, BARGE!, or the knockout with its points.
         const out = target.takeHit(damage, shove, this.time);
-        if (out) this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints);
-        this.impact = { at: this.time + RIDER_ANIM.impactDelay, kind: out ? 'knockout' : barge ? 'barge' : 'punch', label: out ? null : barge ? 'BARGE!' : 'HIT!' };
+        const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false) : barge ? 'BARGE!' : 'HIT!';
+        this.impact = {
+          at: this.time + RIDER_ANIM.impactDelay,
+          kind: out ? 'knockout' : barge ? 'barge' : 'punch',
+          label,
+          color: out ? hex(PALETTE.gold) : '#ffffff',
+          scale: out ? 2 : 1,
+          target,
+        };
       }
     }
     for (const r of this.rivals) {
@@ -573,8 +591,7 @@ export class Run {
       r.flinch(-dir, 0.5, this.time);
       const [amount, seconds] = IMPACT.shake.bump;
       this.shake(amount, seconds);
-      this.bumpCooldown = 0.6;
-      this.float('BUMP', hex(PALETTE.cyan), 1);
+      this.bumpCooldown = 0.6; // the flinches and the shake say it; no word
     }
   }
 
@@ -607,15 +624,18 @@ export class Run {
     }
   }
 
-  private knockout(r: Rival, label: string, points: number): void {
+  /** Knock a rival out: points (times the combo), RAGE, and the word, shown now or (`show` false) by the caller. Returns the word. */
+  private knockout(r: Rival, label: string, points: number, show = true): string {
     r.knockOut(this.time);
     this.knockouts++;
     this.combo = this.time < this.comboUntil ? Math.min(COMBAT.comboMax, this.combo + 1) : 1;
     this.comboUntil = this.time + COMBAT.comboSeconds;
     const total = points * this.combo;
     this.score += total;
-    this.float(this.combo > 1 ? `${label} +${total} X${this.combo}` : `${label} +${points}`, hex(PALETTE.gold), 2);
+    const text = this.combo > 1 ? `${label} +${total} X${this.combo}` : `${label} +${points}`;
+    if (show) this.float(text, hex(PALETTE.gold), 2);
     this.addRage(RAGE.perKnockout);
+    return text;
   }
 
   private addRage(amount: number): void {
@@ -639,8 +659,36 @@ export class Run {
     sharedUniforms.uHorizon.value.setHex(PALETTE.horizon);
   }
 
-  float(text: string, color: string, scale = 1): void {
-    this.floating.push({ text, color, age: 0, scale });
+  /**
+   * Show a word: in the column beside the surfer, or over rider `at`. A word
+   * already showing in the same place pops again instead of showing twice,
+   * and each place keeps at most FLOAT_MAX words (the oldest goes).
+   */
+  float(text: string, color: string, scale = 1, at: Rider | null = null): void {
+    const s = this.surfer;
+    const anchor = at ? { x: at.x - s.x, y: at.y + FLOAT_HEAD - s.y, z: at.z - s.z } : null;
+    const list = this.floating;
+    const same = list.findIndex((f) => f.text === text && (f.anchor === null) === (anchor === null));
+    if (same >= 0) list.splice(same, 1);
+    else {
+      let count = 0;
+      let oldest = -1;
+      for (let i = 0; i < list.length; i++) {
+        if ((list[i].anchor === null) !== (anchor === null)) continue;
+        if (oldest < 0) oldest = i;
+        count++;
+      }
+      if (count >= FLOAT_MAX) list.splice(oldest, 1);
+    }
+    list.push({ text, color, age: 0, scale, anchor });
+  }
+
+  /** Where a float over a rider shows on the HUD (VIEW pixels, into `out`); false for a column float or one behind the camera. */
+  floatPoint(f: FloatingText, out: { x: number; y: number }): boolean {
+    const a = f.anchor;
+    if (!a) return false;
+    const s = this.surfer;
+    return this.renderer.worldToHud(s.x + a.x, s.y + a.y, s.z + a.z, out);
   }
 
   /**
