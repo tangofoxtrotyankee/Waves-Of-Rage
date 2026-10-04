@@ -48,8 +48,24 @@ export function layoutTouchButtons(): void {
   for (const b of TOUCH_BUTTONS) b.y = VIEW.height - b.fromBottom;
 }
 
-/** The button under a point, with a little slack around each. */
+/** Slack round a button's disc that still presses it (internal pixels); the left thumb's pad gets more, so the gaps between its buttons press the nearest. */
+const SLACK = 5;
+const PAD_SLACK = 12;
+
+/** The nearest button under a point, with a little slack around each (more round the left thumb's pad). */
 export function buttonAt(x: number, y: number): TouchButton | null {
-  for (const b of TOUCH_BUTTONS) if (Math.hypot(x - b.x, y - b.y) <= b.r + 5) return b;
-  return null;
+  let best: TouchButton | null = null;
+  let bestD = Infinity;
+  for (const b of TOUCH_BUTTONS) {
+    const d = Math.hypot(x - b.x, y - b.y);
+    const pad = b.id === 'carveLeft' || b.id === 'carveRight' || b.id === 'forward';
+    if (d <= b.r + (pad ? PAD_SLACK : SLACK) && d < bestD) {
+      best = b;
+      bestD = d;
+    }
+  }
+  return best;
 }
+
+/** The band at the HUD's bottom edge, internal pixels tall, where the buttons sit: a tap that misses them there is not a jump. */
+export const CONTROLS_BAND = 100;
