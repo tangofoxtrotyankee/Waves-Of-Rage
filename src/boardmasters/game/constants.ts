@@ -15,28 +15,27 @@ export const IS_PORTRAIT = usePortraitLayout();
  * in these VIEW pixels. `?res=320` uses the original game's 320x180 for
  * comparison.
  *
- * The 3D world renders at RENDER_SCALE times VIEW (852x480 / 480x852 by
- * default) and is CSS-scaled with the HUD to the same rectangle: silhouettes
- * and far detail come out sharper while the textures, dither, 5-bit
- * quantise and vertex snap keep the PlayStation grain. `?res=1` restores the
- * 1x world, `?res=1.5` / `?res=3` try other multiples.
+ * The 3D world renders at RENDER_SCALE times VIEW (639x360 / 360x639 by
+ * default, the 300 to 470 world pixels across a phone that the gameplay
+ * mockup reads as) and is CSS-scaled with the HUD to the same rectangle:
+ * silhouettes and far detail come out sharper while the textures, dither,
+ * 5-bit quantise and vertex snap keep the PlayStation grain. 1.5 rather than
+ * 2 keeps the chunkier pixels of the mockup, gives exactly 2 device pixels
+ * per world pixel on a 1280x720 window, and costs 2.25x the fill of 1x
+ * rather than 4x. `?res=1` restores the 1x world, `?res=2` / `?res=3` try
+ * other multiples (1 to 4).
  */
 const RES = params.get('res');
 const LOW_RES = RES === '320';
 const LONG_SIDE = LOW_RES ? 320 : 426;
 const SHORT_SIDE = LOW_RES ? 180 : 240;
 const RES_SCALE = RES !== null && !LOW_RES ? Number(RES) : NaN;
-export const RENDER_SCALE = RES_SCALE >= 1 && RES_SCALE <= 4 ? RES_SCALE : 2;
-/**
- * The vertex snap grid in VIEW pixels per cell: 1 snaps to the VIEW grid
- * (the 1x build's polygon jitter at any RENDER_SCALE), 1 / RENDER_SCALE to
- * the render grid. Never finer than one rendered pixel.
- */
-const SNAP_CELL = 0.5;
+export const RENDER_SCALE = RES_SCALE >= 1 && RES_SCALE <= 4 ? RES_SCALE : 1.5;
 export const VIEW = {
   width: IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE,
   height: IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE,
-  snap: Math.max(SNAP_CELL, 1 / RENDER_SCALE),
+  /** The vertex snap grid in VIEW pixels per cell: one rendered pixel, so polygons still jitter but edges stay on the render grid. */
+  snap: 1 / RENDER_SCALE,
 } as const;
 
 /** `?character=kai` picks a rider from CHARACTERS; the character select comes later. */
@@ -67,6 +66,9 @@ export const CAMERA = {
   lookSide: 1.2,
   /** Exponential easing rates per second for position, look target and roll. */
   followRate: 6,
+  /** ...and for following the surfer's height: tight on the water, loose in the air so jumps rise in frame. */
+  waterFollowRate: 12,
+  airFollowRate: 2.5,
   lookRate: 8,
   rollRate: 4,
   /** Roll into a carve, radians at full heading (eased; kept small so carves do not read as spinning). */

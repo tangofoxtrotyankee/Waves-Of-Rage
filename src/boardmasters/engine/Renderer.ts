@@ -4,7 +4,7 @@ import { THREE } from './three';
 /**
  * The 3D canvas and the 2D HUD canvas. The HUD is drawn at the internal
  * resolution (VIEW: 426x240, or 240x426 upright); the world at RENDER_SCALE
- * times that (2x by default, `?res=1` for 1x). Both are scaled up to the same
+ * times that (1.5x by default, `?res=1` for 1x). Both are scaled up to the same
  * CSS rectangle, the largest fit, with nearest-neighbour sampling and centred
  * with letterboxing like the original game's FIT scaling, so one HUD pixel
  * always covers RENDER_SCALE x RENDER_SCALE world pixels. There is no

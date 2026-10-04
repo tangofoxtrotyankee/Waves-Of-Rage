@@ -550,20 +550,25 @@ export class Run {
   }
 
   /**
-   * Chase camera: close behind and above the surfer (the mockup's framing),
-   * never under the water, rolling a little into carves, widening its FOV
-   * with speed, BOOST and RAGE, and shaking on demand (shake()). The offsets
-   * ease; the surfer's travel is followed exactly, so no speed leaves it
-   * behind. Ends by fading rivals that come between the camera and the
-   * surfer or right up to the lens (updateNearFade).
+   * Chase camera: behind and above the surfer, looking down on them (the
+   * mockup's framing), never under the water, rolling a little into carves,
+   * widening its FOV with speed, BOOST and RAGE, and shaking on demand
+   * (shake()). The offsets ease; the surfer's travel along the water is
+   * followed exactly, so no speed leaves it behind, while its height is
+   * followed loosely in the air so jumps rise in frame. Ends by fading
+   * rivals that come between the camera and the surfer or right up to the
+   * lens (updateNearFade).
    */
   private updateCamera(dt: number): void {
     const s = this.surfer;
     const sinH = Math.sin(s.heading);
     const camX = s.x - sinH * CAMERA.side;
     const camZ = s.z - CAMERA.back;
+    // The camera's own idea of the surfer's height: tight on the water, lagging in the air so a jump rises in frame.
+    if (this.snapCamera) this.followY = s.y;
+    else this.followY += (s.y - this.followY) * damp(s.airborne ? CAMERA.airFollowRate : CAMERA.waterFollowRate, dt);
     const water = this.ocean.height(camX, camZ);
-    const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(CAMERA.height, water + CAMERA.clearance + 0.3 - s.y), -CAMERA.back);
+    const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(CAMERA.height, water + CAMERA.clearance + 0.3 - this.followY), -CAMERA.back);
     const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight, CAMERA.lookAhead);
     const roll = (-s.heading / PHYSICS.maxHeading) * CAMERA.roll;
     // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
@@ -588,7 +593,7 @@ export class Run {
       camera.fov = fov;
       camera.updateProjectionMatrix();
     }
-    camera.position.set(s.x + this.camOffset.x, s.y + this.camOffset.y, s.z + this.camOffset.z);
+    camera.position.set(s.x + this.camOffset.x, this.followY + this.camOffset.y, s.z + this.camOffset.z);
     let shakeRoll = 0;
     if (this.shakeLeft > 0) {
       // A decaying jolt: two incommensurate sines per axis read as noise without allocating or seeding anything.
@@ -604,12 +609,13 @@ export class Run {
     // Never under (or skimming) the water, whatever the easing and shake did.
     const floor = this.ocean.height(camera.position.x, camera.position.z) + CAMERA.clearance;
     if (camera.position.y < floor) camera.position.y = floor;
-    camera.lookAt(this.tmp.set(s.x + this.lookOffset.x, s.y + this.lookOffset.y, s.z + this.lookOffset.z));
+    camera.lookAt(this.tmp.set(s.x + this.lookOffset.x, this.followY + this.lookOffset.y, s.z + this.lookOffset.z));
     camera.rotateZ(this.camRoll + shakeRoll);
     this.updateNearFade();
   }
 
-  /** Eased roll (radians) and FOV kick (degrees) of the chase camera. */
+  /** Eased surfer height (metres), roll (radians) and FOV kick (degrees) of the chase camera. */
+  private followY = 0;
   private camRoll = 0;
   private fovKick = 0;
   /** The current camera shake: strength, length and seconds left, and its own clock for the wobble. */
