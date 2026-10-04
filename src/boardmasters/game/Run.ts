@@ -5,7 +5,6 @@ import { requestImmersiveMode } from '../engine/immersive';
 import type { Input, InputState } from '../engine/Input';
 import { createPS1Material, sharedUniforms, syncLook } from '../engine/PS1Material';
 import type { Renderer } from '../engine/Renderer';
-import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { damp, hex } from '../engine/math';
 import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
@@ -21,12 +20,14 @@ import { Ocean } from '../world/Ocean';
 import { Scenery } from '../world/Scenery';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
-import { type Combo, ComboReader, KEY_LABELS } from './Combos';
-import { CAMERA, COMBAT, FOG, IS_PORTRAIT, MENU_ZONE, PALETTE, PHYSICS, RAGE, SCORING, TRICKS } from './constants';
+import { type Combo, ComboReader } from './Combos';
+import { CAMERA, COMBAT, FOG, MENU_ZONE, PALETTE, PHYSICS, RAGE, SCORING, TRICKS } from './constants';
+import { PAUSE_ZONE, titleArrowX, titleRow } from './HudLayout';
+import { HudView } from './HudView';
 
 export type RunState = 'title' | 'playing' | 'paused' | 'wipeout';
 
-interface FloatingText {
+export interface FloatingText {
   text: string;
   color: string;
   age: number;
@@ -34,10 +35,6 @@ interface FloatingText {
 }
 
 const FLOAT_SECONDS = 1.3;
-/** The pause button at the top centre of the HUD on touch screens. */
-const PAUSE_ZONE = { w: 28, h: 14 };
-/** Where the character-select arrows sit on the title, relative to the centre. */
-const ARROW_DX = 66;
 /** The start grid for the rivals: (x, z) around the player. */
 const RIVAL_GRID: [number, number][] = [[-4, 6], [4, 9], [-8, 3], [8, 12], [-6, -6], [2, 16], [7, -9], [-3, 20]];
 
@@ -47,11 +44,6 @@ const BEST_KEY = 'bm.best';
 const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
 const CHEVRON_POOL = 8;
-/** How far ahead the hazard radar looks, in metres. */
-const RADAR_RANGE = 90;
-
-const pad = (value: number, digits: number): string => String(Math.max(0, Math.floor(value))).padStart(digits, '0');
-const ordinal = (n: number): string => `${n}${n === 1 ? 'ST' : n === 2 ? 'ND' : n === 3 ? 'RD' : 'TH'}`;
 const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: number, h: number): boolean => x !== null && y !== null && x >= zx && x < zx + w && y >= zy && y < zy + h;
 
 /**
@@ -95,7 +87,8 @@ export class Run {
   generator: CourseGenerator;
   private featureCount = -1;
   private floating: FloatingText[] = [];
-  private readonly combos = new ComboReader();
+  /** The combo reader (the HUD shows its held presses). */
+  readonly combos = new ComboReader();
   private invulnerableUntil = 0;
   private bumpCooldown = 0;
   private snapCamera = true;
@@ -107,8 +100,8 @@ export class Run {
 
   constructor(
     private readonly renderer: Renderer,
-    private readonly hud: Hud2D,
-    private readonly input: Input,
+    readonly hud: Hud2D,
+    readonly input: Input,
     spec: RiderSpec,
     readonly course: CourseSpec = COURSES.sunsetBay,
   ) {
@@ -147,6 +140,16 @@ export class Run {
 
   get spec(): RiderSpec {
     return this.surfer.spec;
+  }
+
+  /** The floating texts on screen, oldest first (the HUD draws them). */
+  get floats(): readonly FloatingText[] {
+    return this.floating;
+  }
+
+  /** Run time until which the surfer is invulnerable after a hit (the HUD flashes the lost heart). */
+  get invulnerableTill(): number {
+    return this.invulnerableUntil;
   }
 
   /** Everyone back to the start line, with a fresh course ahead. */
@@ -224,8 +227,8 @@ export class Run {
     switch (this.state) {
       case 'title':
         if (input.back || this.tappedMenu(input)) this.mainMenu();
-        else if (input.menuLeft || inZone(input.tapX, input.tapY, W / 2 - ARROW_DX - 16, this.titleRow() - 10, 32, 32)) this.selectCharacter(-1);
-        else if (input.menuRight || inZone(input.tapX, input.tapY, W / 2 + ARROW_DX - 16, this.titleRow() - 10, 32, 32)) this.selectCharacter(1);
+        else if (input.menuLeft || inZone(input.tapX, input.tapY, titleArrowX(-1) - 16, titleRow() - 10, 32, 32)) this.selectCharacter(-1);
+        else if (input.menuRight || inZone(input.tapX, input.tapY, titleArrowX(1) - 16, titleRow() - 10, 32, 32)) this.selectCharacter(1);
         else if (input.start) {
           if (this.input.touch) void requestImmersiveMode();
           this.start();
@@ -282,11 +285,6 @@ export class Run {
 
   private tappedMenu(input: InputState): boolean {
     return inZone(input.tapX, input.tapY, 0, 0, MENU_ZONE.w, MENU_ZONE.h);
-  }
-
-  /** Y of the character name row on the title. */
-  private titleRow(): number {
-    return (IS_PORTRAIT ? 48 : 6) + 110 + 22;
   }
 
   /** Advance the world one step; `live` applies the rules (score, damage, combat, finish). */
@@ -774,173 +772,10 @@ export class Run {
     return t * t * (3 - 2 * t);
   }
 
+  /** The 2D overlay is game/HudView.ts (made on the first frame). */
+  private hudView: HudView | null = null;
+
   private drawHud(): void {
-    const hud = this.hud;
-    const W = hud.width;
-    const H = hud.height;
-    const gold = hex(PALETTE.gold);
-    const cyan = hex(PALETTE.cyan);
-    const red = hex(PALETTE.red);
-    const white = '#ffffff';
-    const grey = '#bbbbbb';
-    const touch = this.input.touch;
-    hud.clear();
-
-    const menuCorner = () => {
-      if (!touch) return;
-      hud.rect(0, 0, MENU_ZONE.w, MENU_ZONE.h, PALETTE.ui, 0.8);
-      hud.text(MENU_ZONE.w / 2, MENU_ZONE.h / 2 - 4, 'MENU', cyan, { align: 'center' });
-    };
-
-    if (this.state === 'title') {
-      const spec = this.spec;
-      const logoW = 220;
-      const logoH = 110;
-      const ly = IS_PORTRAIT ? 48 : 6;
-      hud.image('logo', (W - logoW) / 2, ly);
-      const y0 = ly + logoH + 8;
-      hud.rect(0, y0 - 4, W, 66, PALETTE.ui, 0.65);
-      hud.text(W / 2, y0, `${this.course.name}  BEST ${pad(this.best.score, 6)} ${pad(this.best.distance, 4)}M`, cyan, { align: 'center' });
-      const row = this.titleRow();
-      hud.text(W / 2 - ARROW_DX, row, '<', gold, { align: 'center' });
-      hud.text(W / 2 + ARROW_DX, row, '>', gold, { align: 'center' });
-      hud.text(W / 2, row - 2, spec.name, gold, { align: 'center', scale: 2 });
-      hud.text(W / 2, row + 16, spec.title, white, { align: 'center' });
-      const stats: [string, number][] = [
-        ['SPEED', spec.speed],
-        ['TURN', spec.turn],
-        ['POWER', spec.power],
-        ['RAGE', spec.rage],
-      ];
-      const colW = 92;
-      const left = W / 2 - colW;
-      stats.forEach(([label, value], i) => {
-        const x = left + (i % 2) * colW;
-        const y = row + 28 + Math.floor(i / 2) * 10;
-        hud.text(x, y, label, grey);
-        hud.rect(x + 44, y + 1, 44, 6, PALETTE.ui, 0.9);
-        hud.rect(x + 44, y + 1, Math.round(44 * value), 6, i === 3 ? PALETTE.red : PALETTE.cyan);
-      });
-      if (Math.floor(this.time * 2) % 2 === 0) hud.text(W / 2, row + 56, touch ? 'TAP TO SURF' : 'PRESS SPACE TO SURF', gold, { align: 'center' });
-      if (touch) {
-        hud.text(W / 2, H - 35, '> > UP: BARREL ROLL', grey, { align: 'center' });
-        hud.text(W / 2, H - 24, 'UP UP: BOOST', grey, { align: 'center' });
-        hud.text(W / 2, H - 13, '< >: CHARACTER   TAP: SURF', grey, { align: 'center' });
-      } else {
-        hud.text(W / 2, H - 24, 'RIGHT RIGHT UP: BARREL ROLL   UP UP: BOOST', grey, { align: 'center' });
-        hud.text(W / 2, H - 13, 'LEFT/RIGHT: CHARACTER   SPACE: SURF', grey, { align: 'center' });
-      }
-      if (touch) menuCorner();
-      else hud.text(6, 4, 'ESC: MAIN MENU', grey);
-      return;
-    }
-
-    // In play: the mockup's boxes. Left: health and position. Right: score and distance. Under them the RAGE bar, the speed bar and the hazard radar.
-    const hearts = '♥'.repeat(this.health) + '♡'.repeat(SCORING.startHealth - this.health);
-    const n = this.rivals.length + 1;
-    const s = this.surfer;
-    const boxH = 24;
-    hud.panel(4, 4, 90, boxH, PALETTE.cyan);
-    hud.text(8, 7, hearts, red);
-    hud.text(8, 16, `POS ${ordinal(this.rank)} / ${n}`, this.rank === 1 ? gold : white);
-    hud.panel(W - 102, 4, 98, boxH, PALETTE.gold);
-    hud.text(W - 8, 7, `SCORE ${pad(this.score, 6)}`, gold, { align: 'right' });
-    hud.text(W - 8, 16, `DIST ${pad(this.distance, 4)}M`, cyan, { align: 'right' });
-    if (touch && this.state === 'playing') {
-      hud.panel(W / 2 - PAUSE_ZONE.w / 2, 2, PAUSE_ZONE.w, PAUSE_ZONE.h, PALETTE.cyan, 0.8);
-      hud.text(W / 2, 5, 'II', cyan, { align: 'center' });
-    }
-    // RAGE: a gradient bar that flashes while raging.
-    const rageY = 4 + boxH + 4;
-    const flash = this.raging && Math.floor(this.time * 8) % 2 === 0;
-    hud.text(6, rageY, 'RAGE', flash ? white : this.raging ? red : gold, { outline: true });
-    hud.rect(44, rageY + 1, W - 50, 7, PALETTE.ui, 0.75);
-    hud.gradientBar(44, rageY + 1, W - 50, 7, this.raging ? this.rage : this.rage, flash ? PALETTE.foam : PALETTE.gold, PALETTE.red);
-    hud.frame(44, rageY + 1, W - 50, 7, this.raging ? PALETTE.red : PALETTE.gold);
-    // Speed under the left box.
-    const speedY = rageY + 12;
-    hud.text(6, speedY, 'SPD', grey);
-    hud.rect(32, speedY + 2, 48, 4, PALETTE.ui, 0.75);
-    hud.rect(32, speedY + 2, Math.round((48 * s.speed) / (PHYSICS.maxSpeed * 1.1)), 4, this.time < s.boostUntil ? PALETTE.foam : s.airborne ? PALETTE.gold : PALETTE.cyan);
-    // Radar: the course ahead, buoys red, gates cyan, rivals white, you gold at the foot.
-    const rw = 40;
-    const rh = 30;
-    const rx = W - 4 - rw;
-    const ry = rageY + 12;
-    hud.panel(rx, ry, rw, rh, PALETTE.cyan, 0.6);
-    const dot = (x: number, z: number, color: number, size: number) => {
-      const dz = z - s.z;
-      if (dz < -4 || dz > RADAR_RANGE) return;
-      const px = rx + rw / 2 + (-x / 12) * (rw / 2 - 2);
-      const py = ry + rh - 4 - (dz / RADAR_RANGE) * (rh - 6);
-      hud.rect(px - size / 2, py - size / 2, size, size, color);
-    };
-    for (const b of this.buoys) if (b.active && !b.smashed) dot(b.x, b.z, PALETTE.red, 2);
-    for (const c of this.chevrons) if (c.active) dot(c.x, c.z, PALETTE.cyan, 2);
-    for (const r of this.rivals) if (!r.knockedOut) dot(r.x, r.z, 0xffffff, 1);
-    dot(s.x, s.z, PALETTE.gold, 3);
-    if (this.combo > 1 && this.time < this.comboUntil) hud.text(W / 2, rageY + 14, `COMBO X${this.combo}`, gold, { align: 'center', outline: true });
-
-    let stack = 0;
-    for (const f of this.floating) {
-      hud.text(W / 2, H * 0.4 - f.age * 14 - stack, f.text, f.color, { align: 'center', scale: f.scale, outline: true });
-      stack += 8 * f.scale + 4;
-    }
-
-    if (this.state === 'playing') {
-      // The input trail: the presses the combo reader is holding, so moves can be learnt by watching.
-      const trail = this.combos.recent(this.time).map((k) => KEY_LABELS[k]).join(' ');
-      if (trail) hud.text(W / 2, H * 0.55, trail, cyan, { align: 'center', outline: true });
-      if (touch) {
-        for (const b of TOUCH_BUTTONS) {
-          const held = this.input.holding(b.id);
-          hud.circle(b.x, b.y, b.r, held ? b.color : PALETTE.ui, held ? 0.45 : 0.55);
-          hud.ring(b.x, b.y, b.r, b.color, 2);
-          if (b.id === 'attack') {
-            // A fist.
-            hud.rect(b.x - 5, b.y - 11, 10, 7, b.color);
-            hud.rect(b.x - 7, b.y - 9, 3, 4, b.color);
-            hud.text(b.x, b.y - 1, b.label, hex(b.color), { align: 'center' });
-          } else if (b.id === 'barge') {
-            // A shoulder: a chevron pushing right.
-            hud.rect(b.x - 6, b.y - 12, 6, 3, b.color);
-            hud.rect(b.x - 2, b.y - 9, 6, 3, b.color);
-            hud.rect(b.x - 6, b.y - 6, 6, 3, b.color);
-            hud.text(b.x, b.y - 1, b.label, hex(b.color), { align: 'center' });
-          } else {
-            hud.text(b.x, b.y - 4, b.label, hex(b.color), { align: 'center' });
-          }
-        }
-      }
-    }
-
-    if (this.state === 'paused') {
-      const pw = Math.min(W - 16, 200);
-      const ph = 60;
-      const px = (W - pw) / 2;
-      const py = (H - ph) / 2;
-      hud.rect(px, py, pw, ph, PALETTE.ui, 0.92);
-      hud.text(W / 2, py + 8, 'PAUSED', gold, { align: 'center', scale: 2 });
-      hud.text(W / 2, py + 32, touch ? 'TAP: RESUME' : 'SPACE: RESUME', white, { align: 'center' });
-      hud.text(W / 2, py + 44, touch ? 'MENU: TOP LEFT' : 'M: MAIN MENU', grey, { align: 'center' });
-      menuCorner();
-    }
-
-    if (this.state === 'wipeout') {
-      const pw = Math.min(W - 16, 216);
-      const ph = 100;
-      const px = (W - pw) / 2;
-      const py = (H - ph) / 2;
-      hud.rect(px, py, pw, ph, PALETTE.ui, 0.9);
-      hud.text(W / 2, py + 8, 'WIPEOUT', red, { align: 'center', scale: 2 });
-      hud.text(W / 2, py + 32, `DIST ${pad(this.distance, 4)}M  ${ordinal(this.rank)} PLACE`, cyan, { align: 'center' });
-      hud.text(W / 2, py + 44, `SCORE ${pad(this.score, 6)}  KO ${this.knockouts}`, gold, { align: 'center' });
-      hud.text(W / 2, py + 56, this.newBest ? 'NEW BEST!' : `BEST ${pad(this.best.score, 6)} ${pad(this.best.distance, 4)}M`, this.newBest ? gold : grey, { align: 'center' });
-      if (this.stateTime > SCORING.wipeoutSeconds) {
-        hud.text(W / 2, py + 68, touch ? 'TAP: SURF AGAIN' : 'SPACE: SURF AGAIN', white, { align: 'center' });
-        hud.text(W / 2, py + 80, touch ? 'MENU: TOP LEFT' : 'ESC: MAIN MENU', grey, { align: 'center' });
-        menuCorner();
-      }
-    }
+    (this.hudView ??= new HudView(this)).draw();
   }
 }
