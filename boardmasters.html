@@ -24,8 +24,9 @@
         -webkit-tap-highlight-color: transparent;
       }
 
-      /* The 3D canvas and the 2D HUD canvas are both rendered at the internal
-         resolution and scaled up together with nearest-neighbour sampling
+      /* The 2D HUD canvas is drawn at the internal resolution and the 3D canvas
+         at a multiple of it (RENDER_SCALE); both are given the same CSS size and
+         offset and scaled up with nearest-neighbour sampling
          (src/boardmasters/engine/Renderer.ts positions them). */
       #game {
         position: absolute;

@@ -549,27 +549,139 @@ export class Run {
     this.floating.push({ text, color, age: 0, scale });
   }
 
-  /** Chase camera: behind and above the surfer, never under the water, rolling into carves. The offsets ease; the surfer's travel is followed exactly, so no speed leaves it behind. */
+  /**
+   * Chase camera: close behind and above the surfer (the mockup's framing),
+   * never under the water, rolling a little into carves, widening its FOV
+   * with speed, BOOST and RAGE, and shaking on demand (shake()). The offsets
+   * ease; the surfer's travel is followed exactly, so no speed leaves it
+   * behind. Ends by fading rivals that come between the camera and the
+   * surfer or right up to the lens (updateNearFade).
+   */
   private updateCamera(dt: number): void {
     const s = this.surfer;
     const sinH = Math.sin(s.heading);
-    const camX = s.x - sinH * 1.2;
+    const camX = s.x - sinH * CAMERA.side;
     const camZ = s.z - CAMERA.back;
     const water = this.ocean.height(camX, camZ);
-    const desired = this.tmp.set(-sinH * 1.2, Math.max(CAMERA.height, water + 0.9 - s.y), -CAMERA.back);
-    const look = this.tmp2.set(sinH * 1.5, CAMERA.lookHeight, CAMERA.lookAhead);
+    const desired = this.tmp.set(-sinH * CAMERA.side, Math.max(CAMERA.height, water + CAMERA.clearance + 0.3 - s.y), -CAMERA.back);
+    const look = this.tmp2.set(sinH * CAMERA.lookSide, CAMERA.lookHeight, CAMERA.lookAhead);
+    const roll = (-s.heading / PHYSICS.maxHeading) * CAMERA.roll;
+    // FOV kick: wider with speed above cruising, more while a BOOST or RAGE lasts; quick to widen, slow to settle.
+    const speedUp = Math.min(1, Math.max(0, (s.speed - PHYSICS.baseSpeed) / (PHYSICS.maxSpeed - PHYSICS.baseSpeed)));
+    const kick = speedUp * CAMERA.speedFov + (this.time < s.boostUntil ? CAMERA.boostFov : 0) + (this.raging ? CAMERA.rageFov : 0);
     if (this.snapCamera) {
       this.camOffset.copy(desired);
       this.lookOffset.copy(look);
+      this.camRoll = roll;
+      this.fovKick = 0;
+      this.shakeLeft = 0;
       this.snapCamera = false;
     } else {
       this.camOffset.lerp(desired, damp(CAMERA.followRate, dt));
       this.lookOffset.lerp(look, damp(CAMERA.lookRate, dt));
+      this.camRoll += (roll - this.camRoll) * damp(CAMERA.rollRate, dt);
+      this.fovKick += (kick - this.fovKick) * damp(kick > this.fovKick ? CAMERA.fovIn : CAMERA.fovOut, dt);
     }
     const camera = this.renderer.camera;
+    const fov = CAMERA.fov + this.fovKick;
+    if (Math.abs(camera.fov - fov) > 0.01) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
     camera.position.set(s.x + this.camOffset.x, s.y + this.camOffset.y, s.z + this.camOffset.z);
+    let shakeRoll = 0;
+    if (this.shakeLeft > 0) {
+      // A decaying jolt: two incommensurate sines per axis read as noise without allocating or seeding anything.
+      this.shakeClock += dt;
+      const k = this.shakeLeft / this.shakeSeconds;
+      const a = this.shakeAmount * k * k;
+      const t = this.shakeClock;
+      camera.position.x += a * CAMERA.shakeMove * (Math.sin(t * 53) + 0.5 * Math.sin(t * 97 + 1.3));
+      camera.position.y += a * CAMERA.shakeMove * (Math.sin(t * 61 + 0.7) + 0.5 * Math.sin(t * 89 + 2.1));
+      shakeRoll = a * CAMERA.shakeRoll * Math.sin(t * 71 + 0.4);
+      this.shakeLeft = Math.max(0, this.shakeLeft - dt);
+    }
+    // Never under (or skimming) the water, whatever the easing and shake did.
+    const floor = this.ocean.height(camera.position.x, camera.position.z) + CAMERA.clearance;
+    if (camera.position.y < floor) camera.position.y = floor;
     camera.lookAt(this.tmp.set(s.x + this.lookOffset.x, s.y + this.lookOffset.y, s.z + this.lookOffset.z));
-    camera.rotateZ((-s.heading / PHYSICS.maxHeading) * CAMERA.roll);
+    camera.rotateZ(this.camRoll + shakeRoll);
+    this.updateNearFade();
+  }
+
+  /** Eased roll (radians) and FOV kick (degrees) of the chase camera. */
+  private camRoll = 0;
+  private fovKick = 0;
+  /** The current camera shake: strength, length and seconds left, and its own clock for the wobble. */
+  private shakeAmount = 0;
+  private shakeSeconds = 1;
+  private shakeLeft = 0;
+  private shakeClock = 0;
+
+  /**
+   * Shake the camera: `amount` 1 is a solid hit (about CAMERA.shakeMove
+   * metres and CAMERA.shakeRoll radians), decaying to nothing over
+   * `seconds`. A stronger shake replaces a weaker one in progress; a weaker
+   * one never cuts a stronger one short. The camera still never dips under
+   * the water.
+   */
+  shake(amount: number, seconds: number): void {
+    if (!(amount > 0) || !(seconds > 0)) return;
+    const k = this.shakeLeft > 0 ? this.shakeLeft / this.shakeSeconds : 0;
+    if (amount < this.shakeAmount * k * k) return;
+    this.shakeAmount = amount;
+    this.shakeSeconds = seconds;
+    this.shakeLeft = seconds;
+  }
+
+  /**
+   * Near-camera occlusion: for each rival, how much it is in the way, 0..1,
+   * from how close it is to the camera and whether it sits on the sight line
+   * from the camera to the surfer, short of the surfer. Allocation-free.
+   */
+  private updateNearFade(): void {
+    const cam = this.renderer.camera.position;
+    const s = this.surfer;
+    // The sight line: camera to the surfer's chest.
+    const lx = s.x - cam.x;
+    const ly = s.y + 1.0 - cam.y;
+    const lz = s.z - cam.z;
+    const len2 = lx * lx + ly * ly + lz * lz;
+    for (const r of this.rivals) {
+      const rx = r.x - cam.x;
+      const ry = r.y + 0.9 - cam.y;
+      const rz = r.z - cam.z;
+      const near = 1 - Run.step(CAMERA.nearFull, CAMERA.nearNone, Math.sqrt(rx * rx + ry * ry + rz * rz));
+      let between = 0;
+      const t = (rx * lx + ry * ly + rz * lz) / len2;
+      if (t > 0 && t < 1) {
+        const px = rx - lx * t;
+        const py = ry - ly * t;
+        const pz = rz - lz * t;
+        between = (1 - Run.step(CAMERA.lineFull, CAMERA.lineNone, Math.sqrt(px * px + py * py + pz * pz))) * (1 - Run.step(0.85, 1, t));
+      }
+      this.applyNearFade(r, r.knockedOut ? 0 : Math.max(near, between));
+    }
+  }
+
+  /**
+   * Fade a rival that is in the camera's way. The lead switches this to
+   * Rider.setNearFade(amount) (screen-door transparency, on the rider
+   * branch) at merge; until then the rival and its shadow are hidden outright
+   * past 0.8. Never used on the surfer (simulate flashes it while
+   * invulnerable).
+   */
+  private applyNearFade(rider: Rival, amount: number): void {
+    const visible = amount <= 0.8;
+    if (rider.group.visible === visible) return;
+    rider.group.visible = visible;
+    rider.shadow.visible = visible && !rider.wiped;
+  }
+
+  /** Hermite step from 0 at `e0` to 1 at `e1` (engine/math's smoothstep, kept local to the camera code). */
+  private static step(e0: number, e1: number, x: number): number {
+    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
   }
 
   private drawHud(): void {

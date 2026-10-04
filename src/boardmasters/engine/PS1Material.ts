@@ -19,7 +19,7 @@ import { THREE } from './three';
  * Every geometry must carry a `color` attribute (see colorGeometry).
  */
 export const sharedUniforms = {
-  uSnap: { value: new THREE.Vector2(VIEW.width / 2, VIEW.height / 2) },
+  uSnap: { value: new THREE.Vector2(VIEW.width / 2 / VIEW.snap, VIEW.height / 2 / VIEW.snap) },
   uAffine: { value: 1 },
   uQuantize: { value: 1 },
   uDither: { value: 1 },
@@ -33,9 +33,10 @@ export const sharedUniforms = {
   uAmbient: { value: LIGHT.ambient },
 };
 
-/** Push the LOOK toggles into the shared uniforms (called every frame; cheap). */
+/** Push the LOOK toggles into the shared uniforms (called every frame; cheap). Vertices snap to a grid of VIEW.snap VIEW pixels per cell (the world renders at RENDER_SCALE times VIEW). */
 export function syncLook(): void {
-  sharedUniforms.uSnap.value.set(LOOK.snap ? VIEW.width / 2 : 0, LOOK.snap ? VIEW.height / 2 : 0);
+  const cells = LOOK.snap ? 0.5 / VIEW.snap : 0;
+  sharedUniforms.uSnap.value.set(VIEW.width * cells, VIEW.height * cells);
   sharedUniforms.uAffine.value = LOOK.affine ? 1 : 0;
   sharedUniforms.uQuantize.value = LOOK.quantize ? 1 : 0;
   sharedUniforms.uDither.value = LOOK.dither ? 1 : 0;

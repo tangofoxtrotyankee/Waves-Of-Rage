@@ -10,37 +10,87 @@ const params = typeof window === 'undefined' ? new URLSearchParams() : new URLSe
 export const IS_PORTRAIT = usePortraitLayout();
 
 /**
- * Internal render resolution: 426x240 keeps the PlayStation's 240 lines at
- * 16:9 (240x426 upright). `?res=320` renders at the original game's 320x180
- * for comparison.
+ * Internal resolution: 426x240 keeps the PlayStation's 240 lines at 16:9
+ * (240x426 upright). The HUD canvas, touch buttons and pointer mapping work
+ * in these VIEW pixels. `?res=320` uses the original game's 320x180 for
+ * comparison.
+ *
+ * The 3D world renders at RENDER_SCALE times VIEW (852x480 / 480x852 by
+ * default) and is CSS-scaled with the HUD to the same rectangle: silhouettes
+ * and far detail come out sharper while the textures, dither, 5-bit
+ * quantise and vertex snap keep the PlayStation grain. `?res=1` restores the
+ * 1x world, `?res=1.5` / `?res=3` try other multiples.
  */
-const LOW_RES = params.get('res') === '320';
+const RES = params.get('res');
+const LOW_RES = RES === '320';
 const LONG_SIDE = LOW_RES ? 320 : 426;
 const SHORT_SIDE = LOW_RES ? 180 : 240;
+const RES_SCALE = RES !== null && !LOW_RES ? Number(RES) : NaN;
+export const RENDER_SCALE = RES_SCALE >= 1 && RES_SCALE <= 4 ? RES_SCALE : 2;
+/**
+ * The vertex snap grid in VIEW pixels per cell: 1 snaps to the VIEW grid
+ * (the 1x build's polygon jitter at any RENDER_SCALE), 1 / RENDER_SCALE to
+ * the render grid. Never finer than one rendered pixel.
+ */
+const SNAP_CELL = 0.5;
 export const VIEW = {
   width: IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE,
   height: IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE,
+  snap: Math.max(SNAP_CELL, 1 / RENDER_SCALE),
 } as const;
 
 /** `?character=kai` picks a rider from CHARACTERS; the character select comes later. */
 export const CHARACTER_PARAM = params.get('character');
 
-/** Chase camera: behind the surfer at about waist height, looking a little way ahead. */
+/**
+ * Chase camera, framed like the gameplay mockup: behind and above the
+ * surfer, looking down on their head and shoulders, with a narrower FOV than
+ * before so the surfer fills the lower middle of the screen (about 47 % to
+ * 91 % of the height on an upright phone) while the horizon sits about 38 %
+ * from the top. Run.updateCamera uses all of it.
+ */
 export const CAMERA = {
-  fov: IS_PORTRAIT ? 72 : 62,
-  near: 0.4,
+  /** Vertical field of view in degrees at cruising speed. */
+  fov: IS_PORTRAIT ? 64 : 52,
+  near: 0.3,
   far: 130,
-  /** Metres behind and above the surfer. Upright phones sit closer and higher, looking further down the course (the gameplay mockup's framing). */
-  back: IS_PORTRAIT ? 4.2 : 4.8,
-  height: IS_PORTRAIT ? 2.0 : 1.5,
-  /** The look-at point, metres ahead of and above the surfer. */
-  lookAhead: IS_PORTRAIT ? 10 : 7,
-  lookHeight: IS_PORTRAIT ? 0.2 : 0.5,
-  /** Exponential easing rates per second for position and look target. */
+  /** Metres behind and above the surfer (the e2e test expects 3 to 7 m behind and more than 0.8 m above). */
+  back: IS_PORTRAIT ? 4.3 : 4.8,
+  height: IS_PORTRAIT ? 2.4 : 2.2,
+  /** Metres beside the surfer, against the heading, at full carve: the camera swings out a little to show the line. */
+  side: 1.0,
+  /** Least height over the water under the camera itself, after easing and shake. */
+  clearance: 0.6,
+  /** The look-at point, metres ahead of and above the surfer, and how far it leads the carve. */
+  lookAhead: IS_PORTRAIT ? 12 : 13,
+  lookHeight: IS_PORTRAIT ? 0 : 0.1,
+  lookSide: 1.2,
+  /** Exponential easing rates per second for position, look target and roll. */
   followRate: 6,
   lookRate: 8,
-  /** Roll into a carve, radians at full heading. */
-  roll: 0.09,
+  rollRate: 4,
+  /** Roll into a carve, radians at full heading (eased; kept small so carves do not read as spinning). */
+  roll: 0.035,
+  /** FOV kick in degrees: up to `speedFov` from cruising to top speed, plus `boostFov` while a BOOST lasts and `rageFov` while raging. */
+  speedFov: 4,
+  boostFov: 5,
+  rageFov: 3,
+  /** Easing rates per second for the kick: quick to widen, slow to settle. */
+  fovIn: 7,
+  fovOut: 2,
+  /** Run.shake: metres of offset per unit of amount and radians of roll per unit, decaying quadratically over the shake's seconds. */
+  shakeMove: 0.12,
+  shakeRoll: 0.03,
+  /**
+   * Near-camera occlusion: a rival this close to the camera (metres, full
+   * to none), or within `lineFull` to `lineNone` metres of the sight line
+   * from the camera to the surfer and short of the surfer, fades out
+   * (Run.applyNearFade).
+   */
+  nearFull: 3.0,
+  nearNone: 4.2,
+  lineFull: 0.6,
+  lineNone: 1.1,
 } as const;
 
 /** Short draw distance: linear fog to the sunset colour. The sky dome meets the same colour at the horizon. */
