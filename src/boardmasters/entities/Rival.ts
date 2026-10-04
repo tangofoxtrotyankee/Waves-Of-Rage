@@ -24,6 +24,8 @@ export class Rival extends Rider {
     this.laneOffset = ((index % 4) - 1.5) * 2.2;
     // The lane-keeping steer is not a trick: rivals ride their air straight and land clean.
     this.spinsInAir = false;
+    // A rival passing the camera screen-doors out instead of filling the screen.
+    this.autoNearFade = true;
   }
 
   think(player: Rider, buoys: { x: number; z: number }[], time: number): RiderControl {

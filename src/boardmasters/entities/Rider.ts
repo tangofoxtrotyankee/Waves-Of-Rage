@@ -41,6 +41,7 @@ const SPIN_AIM = ((TRICKS.landingToleranceDeg - 15) * Math.PI) / 180;
 const RIDERS: Rider[] = [];
 
 const UP = new THREE.Vector3(0, 1, 0);
+const _camera = new THREE.Vector3();
 const _normal = new THREE.Vector3();
 const _tilt = new THREE.Quaternion();
 const _turn = new THREE.Quaternion();
@@ -50,12 +51,12 @@ const FLAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0),
 /** Seconds for a fall starting at vertical speed `vy` to drop `height` metres. */
 const fallTime = (vy: number, height: number): number => (vy + Math.sqrt(Math.max(0, vy * vy + 2 * PHYSICS.gravity * Math.max(0, height)))) / PHYSICS.gravity;
 
-/** The near fade for a point: 0 beyond `start` metres from the camera, 0.9 at `full` metres and nearer. */
+/** The near fade for a point: 0 beyond `start` metres from the camera, rising to 1 (gone) at `full` metres and nearer. */
 const nearFadeAt = (camera: THREE.Vector3, x: number, y: number, z: number, start: number, full: number): number => {
   const dx = x - camera.x;
   const dy = y - camera.y;
   const dz = z - camera.z;
-  return 0.9 * clamp((start - Math.sqrt(dx * dx + dy * dy + dz * dz)) / (start - full), 0, 1);
+  return clamp((start - Math.sqrt(dx * dx + dy * dy + dz * dz)) / (start - full), 0, 1);
 };
 
 const moveTowards = (value: number, target: number, step: number): number => (value < target ? Math.min(target, value + step) : Math.max(target, value - step));
@@ -113,6 +114,8 @@ export class Rider {
   spinVel = 0;
   /** Steering in the air spins this rider (the AI's lane-keeping steer does not). */
   spinsInAir = true;
+  /** Screen-door this rider out when it comes close to the camera that draws it (rivals; never the player). See fadeNear. */
+  autoNearFade = false;
   grabbing = false;
   /** A barrel roll in progress: direction, 0..1 progress, and the roll angle shown. */
   rolling = false;
@@ -184,6 +187,7 @@ export class Rider {
     this.foam.position.set(0, 0, 0.02);
     this.shadow.add(this.foam);
     this.model = buildRiderModel(spec);
+    this.model.body.onBeforeRender = this.beforeBodyRender;
     this.animator = new RiderAnimator(this.model);
     this.group.add(this.model.board, this.animator.bodyPivot);
     this.group.scale.setScalar(spec.build);
@@ -197,6 +201,7 @@ export class Rider {
     this.group.remove(this.model.board);
     this.model.dispose();
     this.model = buildRiderModel(spec);
+    this.model.body.onBeforeRender = this.beforeBodyRender;
     this.animator.setModel(this.model);
     this.group.add(this.model.board);
     this.group.scale.setScalar(spec.build);
@@ -311,13 +316,14 @@ export class Rider {
   }
 
   /**
-   * A ready-made near fade for the run to call each frame on riders that
-   * are not the player: solid beyond `start` metres from the camera,
-   * screen-doored to 90 % at `full` metres. The body is measured at its
+   * The near fade: solid beyond `start` metres from the camera, screen-
+   * doored away to nothing at `full` metres. The body is measured at its
    * middle and the board at the board, so a knocked-out rider's board
-   * skidding past the camera fades on its own. Returns the body's fade.
+   * skidding past the camera fades on its own. Rivals (autoNearFade) run it
+   * on every frame they are drawn, with the camera drawing them; it is
+   * public for other uses. Returns the body's fade.
    */
-  fadeNear(camera: THREE.Vector3, start = 3.8, full = 1.8): number {
+  fadeNear(camera: THREE.Vector3, start = 3.6, full = 1.5): number {
     const b = this.spec.build;
     const pivot = this.animator.bodyPivot.position;
     const board = this.model.board.position;
@@ -326,6 +332,11 @@ export class Rider {
     if (body !== this.fade || deck !== this.boardFade) this.applyFade(body, deck);
     return body;
   }
+
+  /** Runs as the body is about to be drawn: the near fade against the camera actually drawing it (no per-frame call from the run needed). */
+  private readonly beforeBodyRender = (_renderer: THREE.WebGLRenderer, _scene: THREE.Scene, camera: THREE.Camera): void => {
+    if (this.autoNearFade) this.fadeNear(_camera.setFromMatrixPosition(camera.matrixWorld));
+  };
 
   private applyFade(body: number, board: number): void {
     this.fade = body;
