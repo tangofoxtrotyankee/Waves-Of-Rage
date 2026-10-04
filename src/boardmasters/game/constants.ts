@@ -174,11 +174,14 @@ export const COMBAT = {
  *  - the rate builds while the steer is held, to about 330 degrees a second
  *  - released, the rider settles to an upright by the time it lands
  *    (predicted from its height and fall): a short stray spin unwinds, a
- *    spin with momentum past the half turn completes, and a spin held on a
- *    big enough air is helped round to land the 360
+ *    spin with momentum past the half turn completes
+ *  - held on a big enough air (about a second), the spin is helped round to
+ *    land the 360, and a completed 360 that cannot become a 720 in time is
+ *    held there rather than over-rotated
  *
- * A spin held into a landing it cannot complete still lands crooked and
- * crashes: that, and pressing too late, are the risks.
+ * A spin held into a landing it cannot complete (a half turn off a small
+ * jump) still lands crooked and crashes: that, and pressing too late, are
+ * the risks.
  */
 export const TRICKS = {
   /** Radians per second at full steer, once the rate has built up (330 degrees a second). */
@@ -189,14 +192,16 @@ export const TRICKS = {
   spinDelay: 0.1,
   /** Stopping, reversing and settling a spin is this many times quicker than building one. */
   spinBrakeMul: 4,
-  /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate. */
+  /** Settling (and helping a held spin round to land) may turn up to this multiple of spinRate... */
   spinSettleMul: 1.4,
+  /** ...and helping a held spin round, its rate may build this many times faster than spinRampSeconds allows. */
+  spinAssistMul: 2,
   /** Released, the rider approaches its upright at least this fast (proportional, per second), and faster when the water is close... */
   spinSettleGain: 6,
   /** ...and picks it from where the spin would carry it in this many seconds (momentum: past the half turn it completes). */
   spinSettleLead: 0.35,
-  /** The settle aims to be upright this long before touching down. */
-  spinLandingMargin: 0.05,
+  /** The settle aims to be upright this long before touching down (a little slack for a swell rising to meet the rider). */
+  spinLandingMargin: 0.08,
   /** Points by half-turns landed: 180, 360, 540, 720. */
   spinPoints: [0, 250, 500, 750, 1000] as const,
   grabPoints: 250,

@@ -263,7 +263,8 @@ try {
   }
   check('a carve held over the lip and into the landing does not spin: clean, no heart lost', !!carried && carried.landing.clean && carried.maxSpinDeg < 20 && carried.health === 3, JSON.stringify(carried));
   await wait(400);
-  // A spin started in the air and let go at the top of the jump settles to an upright by the landing.
+  // A spin started in the air and let go at the top of the jump (or a sixth of a turn in, when a rising swell makes
+  // the jump short) settles to an upright by the landing.
   let released = null;
   for (let tries = 0; tries < 5 && !released; tries++) {
     await grounded();
@@ -271,11 +272,11 @@ try {
     await page.keyboard.press('Space');
     if (!(await until(() => window.bm.run.surfer.airborne, 600))) { await wait(300); continue; }
     await page.keyboard.down('ArrowLeft');
-    // Let go at the top: released inside the page on the first frame the surfer falls, so a slow machine does not hold it late.
+    // Released inside the page on the first frame the surfer falls (or has turned 60 degrees), so a slow machine does not hold it late.
     const atRelease = await ev(() => new Promise((resolve) => {
       const tick = () => {
         const s = window.bm.run.surfer;
-        if (s.vy >= 0 && s.airborne) { requestAnimationFrame(tick); return; }
+        if (s.vy >= 0 && s.airborne && Math.abs(s.spin) < Math.PI / 3) { requestAnimationFrame(tick); return; }
         window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ArrowLeft', key: 'ArrowLeft' }));
         resolve(Math.abs(s.spin) * 180 / Math.PI);
       };

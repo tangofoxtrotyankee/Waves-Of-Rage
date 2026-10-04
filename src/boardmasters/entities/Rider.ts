@@ -571,10 +571,11 @@ export class Rider {
 
   /**
    * The air spin (TRICKS). Only a press made in the air spins, after the
-   * first moment of air; holding it builds the rate up to spinRate, and when
-   * the next upright can still be reached by touchdown only by turning
-   * faster, the spin is helped round (up to spinSettleMul times as fast) so a
-   * 360 held on a big air lands. Released (or not armed), the rider settles
+   * first moment of air; holding it builds the rate up to spinRate. When the
+   * next upright can still be reached by touchdown only by turning faster,
+   * the held spin is helped round (up to spinSettleMul times as fast), so a
+   * 360 held on a big air lands; a completed turn that cannot become another
+   * in time is held there and landed. Released (or not armed), the rider settles
    * to an upright by the time it lands: the one its momentum points at, or
    * the other if only that one can still be reached. `water` is the
    * surface height under the rider, for the time to touchdown.
@@ -590,11 +591,24 @@ export class Rider {
     const T = Math.max(toLand - TRICKS.spinLandingMargin, 0.06);
     if (pressed && this.spinArmed && this.spinsInAir && this.airTime > TRICKS.spinDelay) {
       const dir = Math.sign(steer);
-      let target = steer * TRICKS.spinRate;
       const ahead = (dir > 0 ? Math.floor(this.spin / TWO_PI + 1e-6) + 1 : Math.ceil(this.spin / TWO_PI - 1e-6) - 1) * TWO_PI;
+      const behind = ahead - dir * TWO_PI;
       const dist = Math.abs(ahead - this.spin);
-      if (dist / T > TRICKS.spinRate && this.spinShortfall(dist, dir, T, brake, fastest) <= SPIN_AIM) target = dir * Math.min(dist / T, fastest);
-      this.spinVel = moveTowards(this.spinVel, target, (this.spinVel * dir < 0 ? brake : accel) * dt);
+      const boost = accel * TRICKS.spinAssistMul;
+      let target = steer * TRICKS.spinRate;
+      let rate = this.spinVel * dir < 0 ? brake : accel;
+      if (this.spinShortfall(dist, dir, T, boost, fastest) <= SPIN_AIM) {
+        // The next upright can still be made by touchdown: turn faster if that is what it takes.
+        if (dist / T > TRICKS.spinRate) {
+          target = dir * Math.min(dist / T, fastest);
+          rate = boost;
+        }
+      } else if (Math.abs(behind) > 0.1 && Math.abs(this.spin - behind) <= SPIN_AIM) {
+        // A completed turn that cannot become another before touchdown is held there and landed, not over-rotated into a crash.
+        target = clamp((behind - this.spin) * Math.max(1 / T, TRICKS.spinSettleGain), -fastest, fastest);
+        rate = brake;
+      }
+      this.spinVel = moveTowards(this.spinVel, target, rate * dt);
     } else {
       let upright = Math.round((this.spin + this.spinVel * Math.min(toLand, TRICKS.spinSettleLead)) / TWO_PI) * TWO_PI;
       const d = upright - this.spin;
