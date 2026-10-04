@@ -49,12 +49,15 @@ const GROUND_SWELL = { amp: 1.2, length: 60, speed: 2.5 };
 const SWELL = { amp: 0.8, length: 26, speed: 3.0 };
 const SWELL2 = { amp: 0.12, length: 11, speed: 2.2 };
 const CHOP = { amp: 0.18 };
+/** Ramps: the lip, as a fraction of the length (the face steepens to it, then drops away), and how much of the long swells calm over one, from metres before it to metres after. */
+const RAMP = { lip: 0.85, calm: 0.6, calmBefore: 8, calmAfter: 12 };
 /** Beyond the rideable width the water rises into churning whitewater, a visible boundary. */
 const EDGE = { rise: 1.6, fade: 6 };
 /** Beyond `from` (riders never get past PHYSICS.trackHalfWidth) the sea settles to `1 - damp` of the swell at sea level by `to`, so the beaches stay dry. */
 const SHORE = { from: 15, to: 22, damp: 0.75 };
 
-const ATTRIBUTES = ['position', 'normal', 'color', 'foam', 'uv'] as const;
+/** Rewritten every rebuild; `uv` only when the window's row spacing shifts (see rebuild). */
+const ATTRIBUTES = ['position', 'normal', 'color', 'foam'] as const;
 /** Per column, how much of the whitewater rise is left under the shore (see height()). */
 const SHORE_KEEP = COLUMN_X.map((x) => 1 - smoothstep(SHORE.from, SHORE.to, Math.abs(x)));
 /** The foam's lateral break-up and drifting patches, as sines of x (per column, fixed) times sines of z (per row): sin(a + b) = sin a cos b + cos a sin b. */
@@ -88,6 +91,8 @@ export class Ocean {
   /** World z of each row of the height grid (the mesh's rows are 1 to ROWS + 1). */
   private readonly gridZ = new Float64Array(GH);
   private readonly uvs: Float32Array;
+  /** The far rows' offset from the window's origin when the uv rows were last written (they only change with it). */
+  private uvFar = -1;
   private readonly positions: Float32Array;
   private readonly normals: Float32Array;
   private readonly colors: Float32Array;
@@ -143,21 +148,50 @@ export class Ocean {
 
   /** Water height at a point on the course, metres. */
   height(x: number, z: number): number {
+    return this.heightOn(x, z, this.swellAt(z));
+  }
+
+  /** The two long swells at `z` (they do not vary across the course): rebuild works them out once per row. */
+  private swellAt(z: number): number {
     const t = this.time;
-    let h =
+    return (
       GROUND_SWELL.amp * Math.sin((z + GROUND_SWELL.speed * t) * ((2 * Math.PI) / GROUND_SWELL.length)) +
-      SWELL.amp * Math.sin((z + SWELL.speed * t) * ((2 * Math.PI) / SWELL.length)) +
-      SWELL2.amp * Math.sin((z + SWELL2.speed * t) * ((2 * Math.PI) / SWELL2.length) + x * 0.15) +
-      CHOP.amp * Math.sin(x * 1.1 + t * 2 + z * 0.25);
+      SWELL.amp * Math.sin((z + SWELL.speed * t) * ((2 * Math.PI) / SWELL.length))
+    );
+  }
+
+  /**
+   * height() given swellAt(z), so the mesh and the riders agree exactly. A
+   * ramp rises ever steeper (H times (u / RAMP.lip) squared) to its lip and
+   * drops away sharply behind it, so it throws the rider up (about 0.47 m
+   * up per metre along at the lip: some 6 m/s up at cruising speed) rather
+   * than letting it roll off a flat top; the long swells calm over it so a
+   * trough cannot swallow the lip.
+   */
+  private heightOn(x: number, z: number, swell: number): number {
+    const t = this.time;
+    let shape = 0;
+    let calm = 1;
     for (const f of this.active) {
-      if (z < f.z || z > f.z + f.length) continue;
+      const ramp = f.kind === 'ramp';
+      if (z < f.z - (ramp ? RAMP.calmBefore : 0) || z > f.z + f.length + (ramp ? RAMP.calmAfter : 0)) continue;
       const v = Math.abs(x - f.x) / f.width;
       if (v >= 1) continue;
       const lateral = 1 - smoothstep(0.55, 1, v);
       const u = (z - f.z) / f.length;
-      if (f.kind === 'ramp') h += f.height * smoothstep(0, 0.78, u) * (1 - smoothstep(0.78, 1, u)) * lateral;
-      else h -= f.height * Math.sin(Math.PI * u) * lateral;
+      if (ramp) {
+        // The calm eases in before the ramp and out well past it, so it never makes a step of its own and the landing is calm too.
+        calm -= RAMP.calm * lateral * smoothstep(f.z - RAMP.calmBefore, f.z + 2, z) * (1 - smoothstep(f.z + f.length, f.z + f.length + RAMP.calmAfter, z));
+        if (u < 0 || u > 1) continue;
+        const k = u / RAMP.lip;
+        shape += f.height * (u <= RAMP.lip ? k * k : 1 - smoothstep(RAMP.lip, 1, u)) * lateral;
+      } else shape -= f.height * Math.sin(Math.PI * u) * lateral;
     }
+    let h =
+      swell * (calm > 0.2 ? calm : 0.2) +
+      SWELL2.amp * Math.sin((z + SWELL2.speed * t) * ((2 * Math.PI) / SWELL2.length) + x * 0.15) +
+      CHOP.amp * Math.sin(x * 1.1 + t * 2 + z * 0.25) +
+      shape;
     const ax = Math.abs(x);
     if (ax > PHYSICS.trackHalfWidth) {
       const w = smoothstep(PHYSICS.trackHalfWidth, PHYSICS.trackHalfWidth + EDGE.fade, ax);
@@ -187,7 +221,7 @@ export class Ocean {
     this.originZ = Math.floor(centreZ) - BEHIND;
     const lo = this.originZ - 5;
     const hi = this.originZ + NEAR_ROWS + FAR_ROWS * 2 + 6;
-    this.active = this.features.filter((f) => f.z + f.length >= lo && f.z <= hi);
+    this.active = this.features.filter((f) => f.z + f.length + RAMP.calmAfter >= lo && f.z - RAMP.calmBefore <= hi);
     this.dirty = true;
   }
 
@@ -207,8 +241,12 @@ export class Ocean {
     for (let gr = 0; gr < GH; gr++) {
       const z = gridZ[gr];
       const row = gr * GW;
-      for (let gc = 0; gc < GW; gc++) heights[row + gc] = this.height(GRID_X[gc], z);
+      const swell = this.swellAt(z);
+      for (let gc = 0; gc < GW; gc++) heights[row + gc] = this.heightOn(GRID_X[gc], z, swell);
     }
+    // The uv rows follow the rows' offsets from the origin, which only change when the far rows' parity does.
+    const writeUv = farZ - origin !== this.uvFar;
+    this.uvFar = farZ - origin;
     const halfWidth = PHYSICS.trackHalfWidth;
     const time = this.time;
     let p = 0;
@@ -217,7 +255,7 @@ export class Ocean {
       const row = (r + 1) * GW;
       const dzSpan = gridZ[r + 2] - gridZ[r];
       const v = z - origin;
-      for (let c = 0, o = (p / 3) * 2 + 1; c <= COLS; c++, o += 2) this.uvs[o] = v / 4;
+      if (writeUv) for (let c = 0, o = (p / 3) * 2 + 1; c <= COLS; c++, o += 2) this.uvs[o] = v / 4;
       // Foam fades out towards the horizon, where the facets are a pixel wide and would sparkle.
       const far = 1 - smoothstep(22, 70, v);
       const zz = z + SWELL.speed * time;
@@ -274,6 +312,7 @@ export class Ocean {
       }
     }
     for (const name of ATTRIBUTES) this.geometry.getAttribute(name).needsUpdate = true;
+    if (writeUv) this.geometry.getAttribute('uv').needsUpdate = true;
     waterUniforms.uTime.value = time;
     (this.material.uniforms.uUvOffset.value as THREE.Vector2).set(0, this.originZ / 4);
   }
