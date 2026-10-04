@@ -2,7 +2,7 @@ import { type Hud2D, hardenAlpha, heavyWidth, makeCanvas, outlined, type Stops }
 import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
-import { IS_PORTRAIT, RIDER_ANIM, SCORING } from './constants';
+import { IS_PORTRAIT, RIDER_ANIM, SCORING, VIEW } from './constants';
 import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, pauseArt, segmentBar, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import type { FloatingText, Run } from './Run';
@@ -44,7 +44,7 @@ const INK = { tight: true, shadow: false } as const;
 const INK_BIG = { tight: true, scale: 2, shadow: false } as const;
 const INK_RIGHT = { tight: true, align: 'right', shadow: false } as const;
 const ARROW = { align: 'center', scale: 2, outline: true } as const;
-const STAT_LABELS = IS_PORTRAIT ? ['SPD', 'TRN', 'PWR', 'RGE'] : ['SPEED', 'TURN', 'POWER', 'RAGE'];
+const STAT_LABELS = ['SPEED', 'TURN', 'POWER', 'RAGE'];
 const STAT_COLORS = ['#5fe3ff', '#5fe3ff', '#5fe3ff', '#ff4d6d'];
 const CAPTION_EDGE: Record<string, string> = {
   attack: '#ff2e4d',
@@ -114,7 +114,8 @@ const POINTS = /^(.*?)\s*(\+\d+(?:\s+X\d+)?)$/;
 export class HudView {
   private readonly hud: Hud2D;
   private readonly W: number;
-  private readonly H: number;
+  /** The HUD's height: upright it follows the screen (VIEW.height), and layout() places what hangs off it again. */
+  private H = 0;
   private readonly heartArt = hearts();
   private readonly marks = stripMarkers();
   private readonly pauseButton = pauseArt();
@@ -196,17 +197,9 @@ export class HudView {
       wordX: barX - 54,
       ...segmentBar(barW, 7, 10, 3),
     };
-    const sy = IS_PORTRAIT ? 128 : 56;
     const sh = IS_PORTRAIT ? 186 : run.input.touch ? 96 : 160;
-    const playerY = sy + sh - Math.round((STRIP_BEHIND / (STRIP_AHEAD + STRIP_BEHIND)) * sh);
-    this.strip = {
-      x: 4,
-      y: sy,
-      h: sh,
-      playerY,
-      perM: (playerY - sy - 4) / STRIP_AHEAD,
-      z: 0,
-    };
+    this.strip = { x: 4, y: 0, h: sh, playerY: 0, perM: 0, z: 0 };
+    this.layout();
     const top = 25;
     this.bake('health', this.bar.hw, top, 1);
     this.bake('pos', this.bar.pw, top, 2);
@@ -214,7 +207,8 @@ export class HudView {
     this.bake('score', this.bar.sw, top, 4);
     this.panels.set(
       'strip',
-      brushPanel(22, sh, HUD_COLORS.panel, 0.5, {
+      // Faint: rivals fighting at the left edge show through it; the dots and markers carry their own outlines.
+      brushPanel(22, sh, HUD_COLORS.panel, 0.2, {
         slant: 0,
         ragged: 2,
         seed: 6,
@@ -230,8 +224,18 @@ export class HudView {
     );
   }
 
+  /** Place what depends on the HUD's height: the course strip keeps its place in the camera's frame (VIEW.frame), beside the surfer. */
+  private layout(): void {
+    this.H = this.hud.height;
+    const st = this.strip;
+    st.y = IS_PORTRAIT ? VIEW.frame.top + 128 : 56;
+    st.playerY = st.y + st.h - Math.round((STRIP_BEHIND / (STRIP_AHEAD + STRIP_BEHIND)) * st.h);
+    st.perM = (st.playerY - st.y - 4) / STRIP_AHEAD;
+  }
+
   draw(): void {
     const run = this.run;
+    if (this.hud.height !== this.H) this.layout();
     this.hud.clear();
     if (run.state === 'title') {
       this.drawTitle();
@@ -422,7 +426,7 @@ export class HudView {
     const list = this.run.floats;
     const anchorX = IS_PORTRAIT ? this.W - 3 : Math.round(this.W * 0.6);
     // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
-    const baseY = Math.round(this.H * (IS_PORTRAIT ? 0.5 : this.run.input.touch ? 0.62 : 0.8));
+    const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * (this.run.input.touch ? 0.62 : 0.8));
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
@@ -495,7 +499,7 @@ export class HudView {
       this.trail = trail;
     }
     // Upright on touch: right-aligned in the clear slot under the float stack and above the BARGE caption, off the surfer's board.
-    if (run.input.touch && IS_PORTRAIT) this.hud.text(this.W - 6, 300, this.trail, '#b8fbff', TIGHT_RIGHT_OUTLINE);
+    if (run.input.touch && IS_PORTRAIT) this.hud.text(this.W - 6, this.H - 126, this.trail, '#b8fbff', TIGHT_RIGHT_OUTLINE);
     else this.hud.text(this.W / 2, run.input.touch ? this.H - 92 : this.H - 22, this.trail, '#b8fbff', TIGHT_CENTER_OUTLINE);
   }
 
@@ -613,7 +617,7 @@ export class HudView {
     this.yellowRow('play', colX + 20, TITLE.playY, colW - 40, 'PLAY', touch ? '' : 'SPACE');
     // The character select: the name between arrows, the title, the stat bars.
     const row = TITLE.rowY;
-    const panelH = IS_PORTRAIT ? 53 : 64;
+    const panelH = 64;
     // A tall panel with a small fixed lean, so the stat bars stay inside its slanted edges.
     let charPanel = this.panels.get('character');
     if (!charPanel) {
@@ -632,17 +636,19 @@ export class HudView {
     hud.text(titleArrowX(-1) - nudge, row - 1, '<', '#ffe14d', ARROW);
     hud.text(titleArrowX(1) + nudge, row - 1, '>', '#ffe14d', ARROW);
     hud.text(TITLE.columnX, row + 15, spec.title, HUD_COLORS.label, TIGHT_CENTER);
-    const cols = IS_PORTRAIT ? 4 : 2;
-    const cw = IS_PORTRAIT ? 50 : 84;
+    // Two by two (SPEED and TURN over POWER and RAGE), so a full bar never runs into the next label.
+    const cols = 2;
+    const cw = IS_PORTRAIT ? 100 : 84;
     for (let i = 0; i < 4; i++) {
       const value = i === 0 ? spec.speed : i === 1 ? spec.turn : i === 2 ? spec.power : spec.rage;
-      const sx = Math.round(TITLE.columnX - (cols * cw) / 2) + (i % cols) * cw + 3;
+      // Upright the two columns are centred as drawn (label and bar, 66 px).
+      const sx = (IS_PORTRAIT ? Math.round(TITLE.columnX - (cw + 66) / 2) : Math.round(TITLE.columnX - (cols * cw) / 2) + 3) + (i % cols) * cw;
       const sy = row + 26 + Math.floor(i / cols) * 11;
       const filled = Math.max(1, Math.min(5, Math.round(value * 5)));
       const slot = (i === 3 ? 6 : 0) + filled;
       const bar = (this.statArt[slot] ??= statBar(5, filled, STAT_COLORS[i]));
       hud.text(sx, sy, STAT_LABELS[i], HUD_COLORS.dim, TIGHT);
-      if (bar) hud.blit(bar, sx + (IS_PORTRAIT ? 19 : 33), sy + 1);
+      if (bar) hud.blit(bar, sx + 33, sy + 1);
     }
     // Which of the seven, as pips along the panel's bottom row.
     const pipsY = row - 9 + panelH - 7;

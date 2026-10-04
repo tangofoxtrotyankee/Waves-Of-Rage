@@ -11,8 +11,8 @@ export const IS_PORTRAIT = usePortraitLayout();
 
 /**
  * Internal resolution: 426x240 keeps the PlayStation's 240 lines at 16:9
- * (240x426 upright). The HUD canvas, touch buttons and pointer mapping work
- * in these VIEW pixels. `?res=320` uses the original game's 320x180 (the
+ * (240x426 upright, the HUD taller on taller phones: see VIEW). The HUD
+ * canvas, touch buttons and pointer mapping work in these VIEW pixels. `?res=320` uses the original game's 320x180 (the
  * world at 1x too) for comparison.
  *
  * The 3D world renders at a multiple of VIEW, the render scale: 1.5 by
@@ -41,19 +41,62 @@ export const RENDER_SCALE = RENDER_SCALE_FORCED ?? RENDER_SCALES[0];
 export const RENDER_PIXEL_BUDGET = IS_PORTRAIT ? 420_000 : 1_200_000;
 /** How far the world may bleed past the HUD rectangle, as a multiple of its size per axis (past that the page shows black). */
 export const RENDER_BLEED_MAX = { x: 2.2, y: 1.6 } as const;
+/** The upright HUD's tallest height in VIEW pixels (240x540 is 9:20.25, about the tallest phones); `?res=320` scales it. */
+const PORTRAIT_MAX_H = Math.round((LONG_SIDE * 540) / 426);
+/**
+ * The upright HUD height for a safe area of `w` x `h` CSS pixels, with the
+ * HUD `scale` CSS pixels per VIEW pixel (default: filling the width): as
+ * tall as the screen allows, between LONG_SIDE (16:9) and PORTRAIT_MAX_H.
+ * Rounded down, so the HUD never ends up taller than the screen.
+ */
+export function portraitViewHeight(w: number, h: number, scale = w / SHORT_SIDE): number {
+  if (!(w > 0 && h > 0 && scale > 0)) return LONG_SIDE;
+  return Math.max(LONG_SIDE, Math.min(PORTRAIT_MAX_H, Math.floor(h / scale + 1e-6)));
+}
+
+/** The upright HUD height at load, from #game's padding-free box (the safe area) or the window; Renderer.fit refines it. */
+function initialViewHeight(): number {
+  if (!IS_PORTRAIT) return SHORT_SIDE;
+  if (typeof window === 'undefined') return LONG_SIDE;
+  let w = window.innerWidth;
+  let h = window.innerHeight;
+  const el = typeof document === 'undefined' ? null : document.getElementById('game');
+  if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+    const s = getComputedStyle(el);
+    w = el.clientWidth - (parseFloat(s.paddingLeft) || 0) - (parseFloat(s.paddingRight) || 0);
+    h = el.clientHeight - (parseFloat(s.paddingTop) || 0) - (parseFloat(s.paddingBottom) || 0);
+  }
+  return portraitViewHeight(w, h);
+}
+
 const VIEW_W = IS_PORTRAIT ? SHORT_SIDE : LONG_SIDE;
-const VIEW_H = IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE;
+const VIEW_H = initialViewHeight();
+/**
+ * The HUD's resolution. Landscape it is 426x240. Upright it is 240 wide and
+ * as tall as the screen's aspect allows (426 at 16:9 up to 540), so the top
+ * bar sits at the top of the screen and the controls at the bottom; Renderer.fit
+ * sets `height` for the safe area at load and again whenever the page
+ * resizes (fullscreen, the browser bars), and the HUD lays itself out again.
+ */
 export const VIEW = {
   width: VIEW_W,
   height: VIEW_H,
+  /**
+   * The 3D camera's framing rectangle inside the HUD, in VIEW pixels: always
+   * 240x426 (426x240 landscape), so the world is framed exactly the same on
+   * every phone; on a taller HUD it sits centred (`top`), which puts the
+   * horizon about 40 % and the board's tail about 83 % down the screen like the
+   * mockup, and the world bleeds past it to the screen edges (Renderer.fit).
+   */
+  frame: { width: VIEW_W, height: IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE, top: Math.round((VIEW_H - (IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE)) / 2) },
   /**
    * The vertex snap grid, in cells per half clip space per axis: half the
    * world buffer's pixel size, so vertices land on rendered pixels (polygons
    * still jitter as they move). Renderer.fit keeps it in step with the
    * buffer; PS1Material.syncLook reads it.
    */
-  snapGrid: { x: (VIEW_W * RENDER_SCALE) / 2, y: (VIEW_H * RENDER_SCALE) / 2 } as { x: number; y: number },
-} as const;
+  snapGrid: { x: (VIEW_W * RENDER_SCALE) / 2, y: ((IS_PORTRAIT ? LONG_SIDE : SHORT_SIDE) * RENDER_SCALE) / 2 } as { x: number; y: number },
+};
 
 /** `?character=kai` picks a rider from CHARACTERS; the character select comes later. */
 export const CHARACTER_PARAM = params.get('character');

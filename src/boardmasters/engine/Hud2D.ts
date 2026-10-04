@@ -171,8 +171,7 @@ export function outlined(src: HTMLCanvasElement, color: string, thickness: numbe
  * baked into canvases (`styledText`, `heavyText`), rects and pixel discs.
  */
 export class Hud2D {
-  readonly width: number;
-  readonly height: number;
+  private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   /** The font sheet with the extra glyphs appended, once loaded. */
   private font: HTMLCanvasElement | null = null;
@@ -182,8 +181,7 @@ export class Hud2D {
   private readonly images = new Map<string, HTMLImageElement>();
 
   constructor(canvas: HTMLCanvasElement) {
-    this.width = canvas.width;
-    this.height = canvas.height;
+    this.canvas = canvas;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas unavailable');
     this.ctx = ctx;
@@ -194,6 +192,14 @@ export class Hud2D {
     };
     font.onerror = () => console.error('HUD font failed to load', font.src);
     font.src = 'assets/sprites/font.png';
+  }
+
+  /** The canvas's size in internal pixels (VIEW; Renderer.fit may change the height upright). */
+  get width(): number {
+    return this.canvas.width;
+  }
+  get height(): number {
+    return this.canvas.height;
   }
 
   /** True once the pixel font is usable (tests wait on it). */
@@ -216,6 +222,8 @@ export class Hud2D {
   }
 
   clear(): void {
+    // Resizing the canvas (Renderer.fit) resets its context's state, smoothing included.
+    this.ctx.imageSmoothingEnabled = false;
     this.ctx.clearRect(0, 0, this.width, this.height);
   }
 

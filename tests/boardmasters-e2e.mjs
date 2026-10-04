@@ -446,26 +446,34 @@ try {
   tp.on('pageerror', (e) => phoneErrors.push(e.message));
   await tp.goto(URL); await tp.waitForTimeout(2500);
   const view = await tp.evaluate(() => ({ w: window.bm.renderer.width, h: window.bm.renderer.height, touch: window.bm.input.touch }));
-  check('phone: upright 240x426 view with touch input', view.w === 240 && view.h === 426 && view.touch, JSON.stringify(view));
+  check('phone: upright view (240 wide, 426 to 540 tall, following the screen) with touch input', view.w === 240 && view.h >= 426 && view.h <= 540 && view.touch, JSON.stringify(view));
+  const hudRect = await tp.evaluate(() => { const r = window.bm.renderer.hudCanvas.getBoundingClientRect(); return { top: r.top, height: r.height, viewport: window.innerHeight }; });
+  check('phone: the HUD spans the screen top to bottom (at least 95% of the viewport height)', hudRect.height >= 0.95 * hudRect.viewport, JSON.stringify(hudRect));
   const css = await tp.evaluate(() => ({ scale: window.bm.renderer.cssScale, ox: window.bm.renderer.offsetX, oy: window.bm.renderer.offsetY }));
   const tapAt = async (gx, gy) => tp.touchscreen.tap(css.ox + gx * css.scale, css.oy + gy * css.scale);
-  await tapAt(120, 300); await tp.waitForTimeout(400);
+  // HUD points from its real size: W x H. The touch buttons sit as in src/boardmasters/engine/TouchButtons.ts:
+  // RIGHT at (76, H - 32), UP at (52, H - 74), HIT at (W - 84, H - 32); the pause button at the top centre.
+  const W = view.w;
+  const H = view.h;
+  const BUTTON = { right: [76, H - 32], up: [52, H - 74], hit: [W - 84, H - 32] };
+  const open = [W / 2, Math.round(H * 0.7)]; // open water over the sea, clear of the buttons
+  await tapAt(...open); await tp.waitForTimeout(400);
   check('phone: a tap starts the run', (await tp.evaluate(() => window.bm.run.state)) === 'playing');
   await tp.waitForTimeout(800);
-  await tapAt(120, 300); await tp.waitForTimeout(100);
+  await tapAt(...open); await tp.waitForTimeout(100);
   check('phone: a tap jumps', await tp.evaluate(() => window.bm.run.surfer.airborne));
   let phoneKo = 0;
   for (let tries = 0; tries < 4 && !phoneKo; tries++) {
     for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
     await tp.evaluate(() => { const r = window.bm.run; const v = r.rivals[1]; v.reset(r.surfer.x + 1.0, r.surfer.z + 0.3, r.ocean); v.health = 1; });
-    await tapAt(240 - 84, 426 - 32); await tp.waitForTimeout(300);
+    await tapAt(...BUTTON.hit); await tp.waitForTimeout(300);
     phoneKo = await tp.evaluate(() => window.bm.run.knockouts);
   }
   check('phone: the HIT button punches', phoneKo >= 1);
   // Holding RIGHT on the pad carves to screen-right (world -x); a mouse press stands in for a held thumb.
   for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
   await tp.evaluate(() => { window.bm.run.surfer.heading = 0; window.bm.run.surfer.shoveVx = 0; window.bm.run.surfer.stunnedUntil = 0; });
-  await tp.mouse.move(css.ox + 76 * css.scale, css.oy + (426 - 32) * css.scale);
+  await tp.mouse.move(css.ox + BUTTON.right[0] * css.scale, css.oy + BUTTON.right[1] * css.scale);
   await tp.mouse.down();
   let headingMin = 0;
   for (let i = 0; i < 8; i++) { await tp.waitForTimeout(100); headingMin = Math.min(headingMin, await tp.evaluate(() => window.bm.run.surfer.heading)); }
@@ -474,12 +482,12 @@ try {
   let phoneRolled = false;
   for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
     for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tapAt(76, 426 - 32); await tapAt(76, 426 - 32); await tapAt(52, 426 - 74); await tp.waitForTimeout(80);
+    await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tapAt(...BUTTON.up); await tp.waitForTimeout(80);
     phoneRolled = await tp.evaluate(() => window.bm.run.surfer.rolling);
     if (!phoneRolled) await tp.waitForTimeout(500);
   }
   check('phone: RIGHT RIGHT UP on the pad barrel-rolls', phoneRolled);
-  await tapAt(120, 9); await tp.waitForTimeout(150);
+  await tapAt(W / 2, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));
   // The way back keeps the overrides too (opened with ?touch=1 here to prove it).
