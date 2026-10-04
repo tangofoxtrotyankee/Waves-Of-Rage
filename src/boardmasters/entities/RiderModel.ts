@@ -98,7 +98,7 @@ interface Proportions {
 }
 
 const PROPORTIONS: Record<RiderLook['body'], Proportions> = {
-  athletic: { shoulderX: 0.235, chestRx: 0.245, chestRz: 0.135, latRx: 0.215, waistRx: 0.148, waistRz: 0.108, hipRx: 0.168, arm: 1, leg: 1, head: 1, belly: 0 },
+  athletic: { shoulderX: 0.245, chestRx: 0.262, chestRz: 0.138, latRx: 0.235, waistRx: 0.14, waistRz: 0.105, hipRx: 0.165, arm: 1.08, leg: 1, head: 1, belly: 0 },
   heavy: { shoulderX: 0.25, chestRx: 0.265, chestRz: 0.16, latRx: 0.245, waistRx: 0.215, waistRz: 0.16, hipRx: 0.2, arm: 1.2, leg: 1.18, head: 0.95, belly: 1 },
   slim: { shoulderX: 0.205, chestRx: 0.2, chestRz: 0.115, latRx: 0.175, waistRx: 0.125, waistRz: 0.095, hipRx: 0.165, arm: 0.82, leg: 0.88, head: 1.02, belly: 0 },
 };
