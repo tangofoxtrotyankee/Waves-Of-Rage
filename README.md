@@ -244,7 +244,7 @@ Waves-Of-Rage/
         │   ├── Renderer.ts # WebGL canvas + HUD canvas at 426x240 (240x426 upright), nearest-neighbour FIT scaling
         │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud or faceted light, fog, 5-bit banding
         │   ├── Textures.ts # Textures painted at runtime (water, boards, shorts, skull buoy, crowd, banner, flag)
-        │   ├── Hud2D.ts    # Pixel-font text (shadowed or outlined), panels, gradient bars and images on the HUD canvas
+        │   ├── Hud2D.ts    # HUD canvas helpers: pixel font, heavy italic lettering, gradients, outlines, baked sprites
         │   ├── Input.ts    # Keyboard + the phone's buttons into one InputState, with every press for the combo reader
         │   ├── TouchButtons.ts # The phone pad (LEFT, UP, RIGHT) and JUMP, HIT, BRG, drawn by the HUD and hit-tested by Input
         │   ├── immersive.ts # Fullscreen + orientation lock for phones
@@ -256,17 +256,23 @@ Waves-Of-Rage/
         │   ├── Scenery.ts  # The shore: cliffs with palms and waterfalls, the pier with its crowd, tents, flags and banner
         │   └── Sky.ts      # Sunset dome, sun with rays, drifting clouds
         ├── entities/
-        │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
+        │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, hit reactions, near fade
         │   ├── Surfer.ts   # The player's rider (input -> control)
         │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
+        │   ├── RiderModel.ts # The skinned low-poly humanoid and the surfboard, built in code
+        │   ├── RiderAnimator.ts # Procedural animation: stance, carves, tricks, punch/barge clips, flinch, knockout, wipeout
+        │   ├── riderTextures.ts # Per-rider face, shorts and top atlas; deck art
+        │   ├── RiderFoam.ts # The foam round each board
+        │   ├── Wake.ts     # Foam wakes behind every rider, one mesh
         │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
         │   ├── Chevron.ts  # Boost gate: chevrons on the water, pooled; ride over them for a BOOST
-        │   └── Spray.ts    # Spray as one instanced mesh
+        │   └── Spray.ts    # Spray clumps and splashes (with foam rings), instanced
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
             ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
             ├── Combos.ts   # Input combos (RIGHT RIGHT UP = barrel roll, UP UP = boost) and the reader
-            └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera, HUD
+            ├── HudView.ts  # The HUD, title, pause and results screens (HudArt.ts: baked pixel art; HudLayout.ts: tap zones)
+            └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera
 ```
 
 ### How the pieces fit together
@@ -415,11 +421,18 @@ the device (and shown on the title). Seven rivals ride their own lanes, steer ro
 the skull buoys, keep pace with you, and the strong ones shoulder-check you
 when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
 (Shift) knock rivals about and, after two hits, out of the race for 500
-points; knockouts within four seconds of each other multiply up to x5, and a
+points. A blow has a wind-up, a strike and a recovery; when it lands the
+game freezes for a few frames, the camera shakes, a spark and HIT! or
+BARGE! burst over the rival, who flinches and is shoved away, and a
+knockout throws the rival tumbling through the air into a splash; knockouts within four seconds of each other multiply up to x5, and a
 rival shoved into a buoy or off the course is out for 750. In the air,
 Left/Right spin and X grabs: land within 50 degrees of upright and the air,
 the spin (180 to 720) and the grab score, with a clean-landing bonus; land
-badly and you crash for a heart. A skull buoy costs a heart too; three and
+badly and you crash for a heart. Spins are forgiving: only a press made in
+the air spins (a carve carried over a crest never does), a short tap or a
+spin let go settles back upright, and a held spin is helped round to a
+clean 360 when there is about a second of air; a half turn held into the
+landing still crashes. A skull buoy costs a heart too; three and
 you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
 faster for eight seconds, one hit knocks out, buoys smash for points and
 the sea turns hot pink. The title
@@ -435,23 +448,28 @@ carve, hold UP to pump) and the right thumb has JUMP, HIT and BRG; the
 pause button is top-centre and MENU is the top-left corner. The first tap
 asks for fullscreen and locks the phone upright where the browser allows it.
 
-**Combos.** Presses within about half a second of each other form combos,
+**Combos.** Presses within about a third of a second of each other form combos,
 from the keyboard or the pad alike (`src/boardmasters/game/Combos.ts`):
 RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch and a full roll
 about the board, 400 points plus the landing bonus; land before it is done
 and you crash), UP UP is a BOOST (a burst of speed, on a short cooldown).
 The HUD shows the presses it is holding, so moves can be learnt by watching.
 
-**The look.** Everything is drawn at 426x240 (240x426 upright) through one
-shader with the PlayStation's vertex snapping, affine textures and 5-bit
-dithered colour. The sea is faceted: flat-shaded, each facet its own shade,
-calming towards the horizon so the distance does not sparkle. The shore is
-built in code from the palette: cliffs with palms and waterfalls, and every
-so often the pier with its pilings, crowd, tents, flags and the BOARDMASTERS
-banner; the sky is a sunset dome with the sun's rays and drifting clouds.
-The HUD follows the gameplay mockup: boxes for hearts and position and for
-score and distance, a gradient RAGE bar, a speed bar, and a radar of the
-course ahead (buoys red, gates cyan, rivals white, you gold).
+**The look.** One shader gives everything the PlayStation's vertex
+snapping, affine textures and 5-bit dithered colour. The world renders at
+1.5 to 2.5 times the HUD's resolution (426x240, or 240 wide upright with the
+height following the phone) and fills the whole screen. The riders are
+skinned low-poly humanoids built in code, faceted and shaded, each with its
+own build, hair, face, patterned shorts and a real surfboard with deck art,
+animated by a procedural rig (stance, carves, pumping, tricks, punches,
+barges, flinches, knockouts, wipeouts). The sea is turquoise near and deep
+blue far, with dithered whitewater, the sun's glitter, wakes and big
+splashes. Towering cliffs with lit villages, palms and waterfalls run down
+the left; the festival pier with its stage, crowd, tents, flags and the
+BOARDMASTERS banner comes round on the right; mountains close the bay under
+a banded sunset sky. The HUD and title follow the mockups: HEALTH, POS,
+DIST and SCORE panels, RAGE lettering over a segmented bar, a course strip
+on the left, heavy trick lettering, and icon buttons on phones.
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
 above), imports nothing from Phaser and shares only the platform detection,

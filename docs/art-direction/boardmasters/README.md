@@ -21,11 +21,14 @@ Visual direction, in addition to the original game's:
   font, hearts, the yellow-on-dark menu rows
 - exaggerated proportions and loud board shorts; nothing is realistic
 
-`public/assets/boardmasters/logo-220x110.png` is the logo block of
-`title-concept.webp` downsampled to the game's internal resolution; the
-sequel's title screen draws it over the live 3D scene. Regenerate it with
-ImageMagick if the crop needs to change (`convert title-concept.webp -crop
-860x430+40+40 +repage -filter Lanczos -resize 220x110! logo-220x110.png`).
-Everything else in the sequel is rendered: low-poly meshes built in code
-from the palette and 16 to 32 pixel textures painted at runtime
-(`src/boardmasters/engine/Textures.ts`).
+`public/assets/boardmasters/logo-236x118.png` is the logo block of
+`title-concept.webp` cut out on a transparent background and downsampled
+to the game's internal resolution; the sequel's title screen draws it over
+the live 3D scene. It was made with ImageMagick: crop 941x520+0+0, mask the
+background by thresholding to 18 % grey and flood-filling from the edges,
+erase the two TM marks, crop 880x440+52+26, Lanczos-resize to 236x118 and
+threshold the alpha at 50 %. (`logo-220x110.png`, the earlier opaque crop,
+is no longer used.) Everything else in the sequel is rendered: skinned
+low-poly riders and the world built in code from the palette, and small
+textures painted at runtime (`src/boardmasters/engine/Textures.ts`,
+`src/boardmasters/entities/riderTextures.ts`).
