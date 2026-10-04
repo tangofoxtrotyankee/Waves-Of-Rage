@@ -1,8 +1,8 @@
-import { createPS1Material } from '../engine/PS1Material';
+import { createPS1Material, waterUniforms } from '../engine/PS1Material';
 import { rgb, smoothstep } from '../engine/math';
 import { waterTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
-import { PALETTE, PHYSICS } from '../game/constants';
+import { PALETTE, PHYSICS, WATER } from '../game/constants';
 
 /** Authored shapes the course places on the swell: a ramp (steep-backed bump that launches) or a trough (slows). */
 export interface OceanFeature {
@@ -43,20 +43,24 @@ const SWELL2 = { amp: 0.12, length: 11, speed: 2.2 };
 const CHOP = { amp: 0.18 };
 /** Beyond the rideable width the water rises into churning whitewater, a visible boundary. */
 const EDGE = { rise: 1.6, fade: 6 };
+const SHORE = { from: 19, to: 34, damp: 0.7 };
 
+const ATTRIBUTES = ['position', 'normal', 'color', 'foam'] as const;
 const DEEP = rgb(PALETTE.deepWater);
 const MID = rgb(PALETTE.water);
 const LIGHT = rgb(PALETTE.lightWater);
-const FOAM = rgb(PALETTE.foam);
 
 /**
  * The sea as terrain. A heightfield mesh that follows the rider in whole
  * cells and is resampled from `height(x, z)` once per rendered frame
  * (`rebuild()`), while the simulation only advances the swell and the
  * window (`advance()`). Riders sample the same function, so what you see is
- * what you ride. Vertex colours go from deep blue in the troughs to light
- * blue and foam on crests and steep faces; normals come from neighbouring
- * samples for the shader's per-vertex lighting.
+ * what you ride. Vertex colours go from deep blue in the troughs to
+ * turquoise on the crests; a per-vertex foam amount (crests, the breaking
+ * faces travelling towards the rider, steep ramps, the edges and drifting
+ * patches) becomes dithered whitewater in the shader's PS1_WATER block,
+ * which also tints by distance and draws the sun's glitter path. Normals
+ * come from neighbouring samples for the lighting and the glitter.
  */
 export class Ocean {
   readonly mesh: THREE.Mesh;
@@ -71,6 +75,7 @@ export class Ocean {
   private readonly positions: Float32Array;
   private readonly normals: Float32Array;
   private readonly colors: Float32Array;
+  private readonly foam: Float32Array;
   private readonly geometry: THREE.BufferGeometry;
   private readonly material: THREE.ShaderMaterial;
 
@@ -79,6 +84,7 @@ export class Ocean {
     this.positions = new Float32Array(count * 3);
     this.normals = new Float32Array(count * 3);
     this.colors = new Float32Array(count * 3);
+    this.foam = new Float32Array(count);
     const uvs = new Float32Array(count * 2);
     const index = new Uint32Array(COLS * ROWS * 6);
     let i = 0;
@@ -107,8 +113,9 @@ export class Ocean {
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geometry.setAttribute('foam', new THREE.BufferAttribute(this.foam, 1).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    this.material = createPS1Material({ map: waterTexture(), flat: 0.22 }); // faceted, like the mockup's crystal water
+    this.material = createPS1Material({ map: waterTexture(), flat: 0.22, water: 'sea' }); // faceted, like the mockup's crystal water
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.frustumCulled = false;
     this.advance(0, 0);
@@ -142,6 +149,8 @@ export class Ocean {
     if (ax > PHYSICS.trackHalfWidth) {
       const w = smoothstep(PHYSICS.trackHalfWidth, PHYSICS.trackHalfWidth + EDGE.fade, ax);
       h += EDGE.rise * w + 0.35 * w * Math.sin(z * 0.9 + t * 6 + ax);
+      // Towards the shore (well outside the rideable water) the swell dies down under the beach and the cliffs.
+      if (ax > SHORE.from) h *= 1 - SHORE.damp * smoothstep(SHORE.from, SHORE.to, ax);
     }
     return h;
   }
@@ -176,6 +185,7 @@ export class Ocean {
       for (let gc = 0; gc < GW; gc++) heights[row + gc] = this.height(GRID_X[gc], z);
     }
     const halfWidth = PHYSICS.trackHalfWidth;
+    const time = this.time;
     let p = 0;
     for (let r = 0; r <= ROWS; r++) {
       const z = this.originZ + r;
@@ -200,27 +210,37 @@ export class Ocean {
         this.normals[p + 1] = nl;
         this.normals[p + 2] = -ndz * nl;
 
-        // Deep -> mid -> light by height, then towards foam on crests, steep faces and the edges. No allocations.
-        let t = (h + 2) / 4;
+        // Deep -> mid -> light by height. No allocations.
+        let t = (h + 1.8) / 3.6;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const low = t < 0.5;
         const t2 = low ? t * 2 : (t - 0.5) * 2;
         const a = low ? DEEP : MID;
         const b = low ? MID : LIGHT;
+        // Whitewater: crests, the faces travelling towards the rider, steep ramps, the edges and drifting patches, broken up along the crest.
         const ax = x < 0 ? -x : x;
         const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
-        let foam = (smoothstep(1.3, 2.1, h) + smoothstep(0.7, 1.15, Math.hypot(dx, dz)) + edge * 0.9) * far;
-        if (foam > 1) foam = 1;
+        const zz = z + SWELL.speed * time;
+        const lateral = 0.55 + 0.45 * Math.sin(x * 0.9 + zz * 0.35);
+        const patch = Math.sin(x * 0.43 + zz * 0.19) * Math.sin(x * 0.17 - zz * 0.31 + 1.7);
+        let foam =
+          (smoothstep(WATER.crest, WATER.crestFull, h) + smoothstep(WATER.face, WATER.faceFull, dz) * smoothstep(0.1, 1.0, h)) * lateral +
+          smoothstep(0.7, 1.15, Math.hypot(dx, dz)) +
+          edge * 0.95 +
+          WATER.patches * smoothstep(0.3, 0.85, patch);
+        foam = (foam > 1 ? 1 : foam) * far;
+        this.foam[p / 3] = foam;
         for (let k = 0; k < 3; k++) {
-          // The deep-to-light ramp flattens towards mid blue in the distance, for the same reason.
+          // The deep-to-light ramp flattens towards mid blue in the distance, for the same reason; foamy water is paler underneath.
           const ramp = a[k] + (b[k] - a[k]) * t2;
           const base = ramp + (MID[k] - ramp) * (1 - far) * 0.7;
-          this.colors[p + k] = base + (FOAM[k] - base) * foam;
+          this.colors[p + k] = base + (LIGHT[k] - base) * foam * 0.5;
         }
         p += 3;
       }
     }
-    for (const name of ['position', 'normal', 'color']) this.geometry.getAttribute(name).needsUpdate = true;
+    for (const name of ATTRIBUTES) this.geometry.getAttribute(name).needsUpdate = true;
+    waterUniforms.uTime.value = time;
     (this.material.uniforms.uUvOffset.value as THREE.Vector2).set(0, this.originZ / 4);
   }
 }

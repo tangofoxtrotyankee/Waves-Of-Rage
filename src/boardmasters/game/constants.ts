@@ -45,9 +45,9 @@ export const CAMERA = {
 
 /** Short draw distance: linear fog to the sunset colour. The sky dome meets the same colour at the horizon. */
 export const FOG = {
-  color: 0xf7a04b,
-  near: IS_PORTRAIT ? 30 : 26,
-  far: IS_PORTRAIT ? 100 : 88,
+  color: 0xf79a52,
+  near: IS_PORTRAIT ? 32 : 28,
+  far: IS_PORTRAIT ? 100 : 90,
 } as const;
 
 /** One sun plus ambient; lighting is per-vertex (Gouraud) in the shader. */
@@ -55,6 +55,33 @@ export const LIGHT = {
   /** From the drawn sun, ahead and high: crests rim-light, riders read by ambient. */
   sun: [0.35, 0.8, 0.5] as const,
   ambient: 0.65,
+} as const;
+
+/** The drawn sun: its direction from the camera (low, dead ahead down the course) and distance; the sea's glitter path points at it. */
+export const SUN = {
+  dir: [0, 0.075, 1] as const,
+  distance: 92,
+} as const;
+
+/**
+ * The sea's look (world/Ocean.ts and the PS1_WATER shader block): tints
+ * multiplied in by distance (turquoise near the camera, deep blue far out),
+ * the glitter colour, the foam's pale shade, and how much whitewater the
+ * crests, breaking faces and open-water patches carry.
+ */
+export const WATER = {
+  nearTint: [0.88, 1.1, 1.05] as const,
+  farTint: [0.62, 0.72, 1.0] as const,
+  glint: 0xfff3c4,
+  foamShade: 0xa8e6f6,
+  /** Foam from height above this (metres) to full at crestFull. */
+  crest: 1.35,
+  crestFull: 2.2,
+  /** Foam on faces steeper than this slope... */
+  face: 0.17,
+  faceFull: 0.4,
+  /** ...and scattered patches of whitewater on open water, up to this much. */
+  patches: 0.45,
 } as const;
 
 /** The deliberate PlayStation artefacts, each switchable live from the dev console (`bm.look`). */
@@ -200,23 +227,31 @@ export const RAGE = {
 /** The MENU corner on touch screens (internal pixels; at least 44 CSS px on phones). */
 export const MENU_ZONE = { w: 80, h: 32 } as const;
 
-/** The original game's palette (docs/art-direction/README.md), reused for water, sky and riders. */
+/** The original game's palette (docs/art-direction/README.md), reused for water, sky and riders, plus the sequel's shore colours. */
 export const PALETTE = {
-  deepWater: 0x25307e,
-  water: 0x1f6fc2,
-  lightWater: 0x45cbe6,
+  deepWater: 0x16399a,
+  water: 0x1b7fd0,
+  lightWater: 0x3cc6d8,
   foam: 0xf8fbff,
-  cloud: 0xff9a7a,
-  cloudLit: 0xffd1a0,
-  cliff: 0x5b2f86,
-  cliffLit: 0x9a5fc4,
+  cloud: 0xff8a6a,
+  cloudLit: 0xffd7a0,
+  cloudDark: 0x5a2a7a,
+  cliff: 0x3e1f66,
+  cliffLit: 0x9a64c8,
+  cliffRim: 0xff9a7a,
+  rock: 0x4a2c5e,
+  sand: 0xe8a66a,
   palm: 0x1d6b4a,
+  palmLit: 0x3f9a4e,
   wood: 0x7a4a2a,
+  glow: 0xffc45a,
   skyTop: 0x2d0b4e,
-  skyMid: 0xf26b4e,
+  skyMid: 0xf2604e,
   horizon: 0xffcf6b,
   sun: 0xffe9a0,
   island: 0x3a1f5e,
+  mountain: 0x6a3a8e,
+  mountainFar: 0xb0628e,
   outline: 0x1a1a2e,
   ui: 0x1a0b2e,
   gold: 0xffd166,

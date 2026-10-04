@@ -1,4 +1,4 @@
-import { FOG, LIGHT, LOOK, PALETTE, VIEW } from '../game/constants';
+import { FOG, LIGHT, LOOK, PALETTE, SUN, VIEW, WATER } from '../game/constants';
 import { mixRgb, rgb, smoothstep } from './math';
 import { THREE } from './three';
 
@@ -31,6 +31,22 @@ export const sharedUniforms = {
   uFogFar: { value: FOG.far },
   uSunDir: { value: new THREE.Vector3(...LIGHT.sun).normalize() },
   uAmbient: { value: LIGHT.ambient },
+};
+
+/**
+ * The sea's own uniforms (the PS1_WATER block, `water` option): the
+ * glitter direction (towards the drawn sun), the near and far tints and the
+ * foam colours. Shared by the sea and the foam laid on it; the ocean
+ * advances `uTime`.
+ */
+export const waterUniforms = {
+  uTime: { value: 0 },
+  uGlintDir: { value: new THREE.Vector3(...SUN.dir).normalize() },
+  uGlintColor: { value: new THREE.Color(WATER.glint) },
+  uWaterNear: { value: new THREE.Vector3(...WATER.nearTint) },
+  uWaterFar: { value: new THREE.Vector3(...WATER.farTint) },
+  uFoamColor: { value: new THREE.Color(PALETTE.foam) },
+  uFoamShade: { value: new THREE.Color(WATER.foamShade) },
 };
 
 /** Push the LOOK toggles into the shared uniforms (called every frame; cheap). */
@@ -83,6 +99,25 @@ varying vec3 vUvAffine;
 varying float vFog;
 varying float vElevation;
 
+#ifdef PS1_WATER
+// The sea and the foam laid on it (wakes, rings): a per-vertex foam amount, the world position and normal for the sun's glitter.
+attribute float foam;
+varying float vFoam;
+varying vec3 vWorld;
+varying float vDepth;
+#ifdef PS1_FLAT
+flat varying vec3 vNormalW;
+#else
+varying vec3 vNormalW;
+#endif
+void waterVertex(vec3 world, vec3 worldNormal, float depth) {
+  vFoam = foam;
+  vWorld = world;
+  vDepth = depth;
+  vNormalW = worldNormal;
+}
+#endif
+
 void main() {
   vec4 localPosition = vec4(position, 1.0);
   vec3 localNormal = normal;
@@ -119,6 +154,9 @@ void main() {
     vLight *= 1.0 + (facet - 0.5) * uFacet * (1.0 - smoothstep(18.0, 60.0, depth));
   #endif
   vColor = color;
+  #ifdef PS1_WATER
+    waterVertex(worldPosition.xyz, worldNormal, depth);
+  #endif
 }
 `;
 
@@ -148,6 +186,64 @@ varying vec3 vUvAffine;
 varying float vFog;
 varying float vElevation;
 
+#ifdef PS1_WATER
+uniform float uTime;
+uniform vec3 uGlintDir;
+uniform vec3 uGlintColor;
+uniform vec3 uWaterNear;
+uniform vec3 uWaterFar;
+uniform vec3 uFoamColor;
+uniform vec3 uFoamShade;
+varying float vFoam;
+varying vec3 vWorld;
+varying float vDepth;
+#ifdef PS1_FLAT
+flat varying vec3 vNormalW;
+#else
+varying vec3 vNormalW;
+#endif
+
+float waterHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+// Chunky whitewater: the foam amount against a world-space cell hash plus the screen's 4x4 Bayer order, so foam breaks up into pixel clumps.
+float foamPattern() {
+  mat4 bayer = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0) / 16.0;
+  float b = bayer[int(mod(gl_FragCoord.x, 4.0))][int(mod(gl_FragCoord.y, 4.0))];
+  // Cells shrink in steps with distance so a clump stays a few screen pixels across near and far.
+  float level = clamp(floor(log2(max(vDepth, 1.0) / 5.0)), 0.0, 3.0);
+  float cells = waterHash(floor(vWorld.xz * vec2(5.0, 3.4) / exp2(level) + vec2(level * 17.0, floor(uTime * 3.0) * 0.37)));
+  return 0.08 + 0.7 * cells + 0.22 * b;
+}
+
+vec3 waterShade(vec3 lit) {
+  float pattern = foamPattern();
+  #ifdef PS1_FOAM
+    // Foam laid on the water: screen-door transparency, white over a pale cyan shade.
+    if (vFoam < pattern) discard;
+    return mix(uFoamShade, uFoamColor, step(pattern + 0.18, vFoam));
+  #else
+    // Turquoise and cyan close to the camera, deep blue further out.
+    vec3 col = lit * mix(uWaterNear, uWaterFar, smoothstep(5.0, 60.0, vDepth));
+    // The sun's glitter: the view reflected off each facet, jittered per cell and per moment so it breaks into sparkles near the
+    // camera, a smooth bright path towards the horizon (where cells would be smaller than a pixel).
+    vec3 v = normalize(vWorld - cameraPosition);
+    vec2 cell = floor(vWorld.xz * vec2(1.6, 0.9));
+    float flick = floor(uTime * 7.0);
+    vec3 jitter = vec3(waterHash(cell + flick) - 0.5, 0.0, waterHash(cell.yx + flick * 1.3) - 0.5) * 0.34;
+    float near = 1.0 - smoothstep(30.0, 70.0, vDepth);
+    vec3 n = normalize(vNormalW + jitter * near);
+    float g = max(dot(reflect(v, n), uGlintDir), 0.0);
+    float sparkle = pow(g, 90.0) * (near > 0.0 ? step(0.45, waterHash(floor(gl_FragCoord.xy * 0.5) + flick)) * 1.6 : 1.0);
+    float path = pow(max(dot(reflect(v, vec3(0.0, 1.0, 0.0)), uGlintDir), 0.0), 220.0) * (1.0 - near * 0.7);
+    float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) + path, 0.0, 1.0);
+    col = mix(col, uGlintColor, glint);
+    // Whitewater on crests and breaking faces.
+    if (vFoam > pattern) col = mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);
+    return col;
+  #endif
+}
+#endif
+
 // The sky by elevation; keep in step with skyColorAt() above.
 vec3 skyAt(float e) {
   if (e <= 0.0) return uFogColor;
@@ -161,6 +257,9 @@ void main() {
   vec3 base = uColor * vColor;
   if (uUseMap > 0.5) base *= texture2D(uMap, uv).rgb;
   vec3 lit = mix(base * vLight, vec3(1.0), uFlash);
+  #ifdef PS1_WATER
+    lit = waterShade(lit);
+  #endif
   vec3 col = mix(lit, skyAt(vElevation), vFog);
   if (uQuantize > 0.5) {
     // 4x4 ordered dither, then 5 bits per channel: the PlayStation's framebuffer write.
@@ -184,15 +283,18 @@ export interface PS1MaterialOptions {
   depthWrite?: boolean;
   /** Faceted: one colour and shade per triangle, with this much brightness variation between facets (0 for none). */
   flat?: number;
+  /** The PS1_WATER block: 'sea' (distance tint, glitter, dithered whitewater) or 'foam' (dithered foam on the water, discarding where thin). Needs a float `foam` attribute. */
+  water?: 'sea' | 'foam';
 }
 
 export function createPS1Material(options: PS1MaterialOptions = {}): THREE.ShaderMaterial {
-  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true, flat } = options;
+  const { map, color = 0xffffff, unlit = false, fog = true, opacity = 1, side = THREE.FrontSide, depthWrite = true, flat, water } = options;
   return new THREE.ShaderMaterial({
-    defines: flat !== undefined ? { PS1_FLAT: 1 } : {},
+    defines: { ...(flat !== undefined ? { PS1_FLAT: 1 } : {}), ...(water ? { PS1_WATER: 1 } : {}), ...(water === 'foam' ? { PS1_FOAM: 1 } : {}) },
     uniforms: {
       uFacet: { value: flat ?? 0 },
       ...sharedUniforms,
+      ...(water ? waterUniforms : {}),
       uMap: { value: map ?? null },
       uUseMap: { value: map ? 1 : 0 },
       uColor: { value: new THREE.Color(color) },

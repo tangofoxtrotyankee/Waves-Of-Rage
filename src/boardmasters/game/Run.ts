@@ -14,6 +14,7 @@ import { Chevron, chevronMaterial } from '../entities/Chevron';
 import type { Landing } from '../entities/Rider';
 import { Rival } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
+import { Wake } from '../entities/Wake';
 import { Surfer } from '../entities/Surfer';
 import { CourseGenerator, COURSES, type CourseSpec } from '../world/Course';
 import { Ocean } from '../world/Ocean';
@@ -88,6 +89,7 @@ export class Run {
   readonly buoys: Buoy[] = [];
   readonly chevrons: Chevron[] = [];
   readonly spray = new Spray();
+  readonly wake = new Wake();
   readonly scenery = new Scenery();
   /** The endless course, generated ahead of the surfer. */
   generator: CourseGenerator;
@@ -115,6 +117,7 @@ export class Run {
     this.sky = new Sky();
     const scene = renderer.scene;
     scene.add(this.ocean.mesh, this.sky.group, this.scenery.group, this.spray.mesh);
+    scene.add(this.wake.mesh);
 
     this.characterIndex = Math.max(0, CHARACTER_ORDER.indexOf(spec.id as (typeof CHARACTER_ORDER)[number]));
     this.surfer = new Surfer(spec);
@@ -263,6 +266,7 @@ export class Run {
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
     this.spray.update(dt, this.renderer.camera);
+    this.wake.update(dt, this.ocean);
   }
 
   render(): void {
@@ -303,13 +307,42 @@ export class Run {
     for (const b of this.buoys) b.update(this.time, this.ocean);
     for (const c of this.chevrons) c.update(this.time, this.ocean);
 
-    if (!s.airborne && !s.wiped && s.speed > 8) {
-      const sinH = Math.sin(s.heading);
-      const cosH = Math.cos(s.heading);
-      const bursts = this.time < s.boostUntil ? 3 : 1; // BOOST throws extra spray
-      for (let i = 0; i < bursts; i++) {
-        const side = (Math.floor(this.time * 60) + i) % 2 === 0 ? -1 : 1;
-        this.spray.emit(s.x - sinH * 0.9 + side * 0.35, s.y + 0.05, s.z - cosH * 0.9, side * (1.2 + Math.random() * 1.2) - sinH * 2, 1.2 + Math.random() * 1.5, -s.speed * 0.1);
+    // Every rider on the water leaves a foam wake and throws spray: a fan from the tail at speed, a rooster tail to the outside of a hard carve.
+    const camZ = this.renderer.camera.position.z;
+    for (let i = -1; i < this.rivals.length; i++) {
+      const r = i < 0 ? s : this.rivals[i];
+      if (r.airborne || r.wiped || r.knockedOut || r.speed < 5) continue;
+      const sinH = Math.sin(r.heading);
+      const cosH = Math.cos(r.heading);
+      const tailX = r.x - sinH * 0.9;
+      const tailZ = r.z - cosH * 0.9;
+      const carve = Math.min(1, Math.abs(r.heading) / PHYSICS.maxHeading);
+      const pace = Math.min(1, Math.max(0, (r.speed - 6) / 16));
+      this.wake.emit(tailX, r.y, tailZ, r.heading, r.speed, 0.55 + pace * 0.35 + carve * 0.4);
+      // Spray only where it can be seen; rivals throw less of it so the pool goes round.
+      if (r.z < camZ - 2 || r.z > camZ + 60) continue;
+      const boost = this.time < r.boostUntil;
+      const amount = (i < 0 ? 1 : 0.45) * (0.8 + pace * 1.2 + carve * 2.4 + (boost ? 2.5 : 0));
+      let bursts = Math.floor(amount);
+      if (Math.random() < amount - bursts) bursts++;
+      const outward = r.heading > 0 ? -1 : 1; // the outside of the turn (heading > 0 carves towards +x)
+      for (let k = 0; k < bursts; k++) {
+        if (carve > 0.3 && k % 3 !== 2) {
+          // Rooster tail: a fan thrown up and out behind the tail, carried along with most of the rider's speed.
+          const fan = 0.4 + Math.random() * 0.8;
+          this.spray.emit(
+            tailX + outward * 0.25, r.y + 0.1, tailZ,
+            outward * (1.5 + carve * 4) * fan + sinH * r.speed * 0.7, 1.2 + carve * 3.2 * Math.random() + pace, cosH * r.speed * (0.6 + Math.random() * 0.2),
+            0.7 + carve * 0.5 + Math.random() * 0.4,
+          );
+        } else {
+          const side = (Math.floor(this.time * 60) + k) % 2 === 0 ? -1 : 1;
+          this.spray.emit(
+            tailX + cosH * side * 0.3, r.y + 0.05, tailZ - sinH * side * 0.3,
+            cosH * side * (1 + Math.random() * 1.4) + sinH * r.speed * 0.7, 0.8 + Math.random() * 1.2 + pace * 0.8, cosH * r.speed * (0.65 + Math.random() * 0.2),
+            0.55 + pace * 0.35,
+          );
+        }
       }
     }
     s.group.visible = s.wiped || this.time >= this.invulnerableUntil || Math.floor(this.time * 12) % 2 === 0;
