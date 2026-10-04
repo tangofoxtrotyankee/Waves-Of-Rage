@@ -100,21 +100,66 @@ varying float vFog;
 varying float vElevation;
 
 #ifdef PS1_WATER
-// The sea and the foam laid on it (wakes, rings): a per-vertex foam amount, the world position and normal for the sun's glitter.
+// The sea and the foam laid on it (wakes, rings): a per-vertex foam amount and the world position for the foam's cells; the
+// distance tint and the sun's glitter are worked out here, per vertex, so each pixel only adds its twinkle.
 attribute float foam;
+uniform float uTime;
+uniform vec3 uGlintDir;
+uniform vec3 uWaterNear;
+uniform vec3 uWaterFar;
 varying float vFoam;
 varying vec3 vWorld;
 varying float vDepth;
+varying vec3 vTint;
+// The glitter column (x), the warm halo round it (y), and how much the column breaks into twinkles close by (z).
+varying vec3 vGlint;
+// Sparkle off each facet turned to the sun: one value per facet on the faceted sea.
 #ifdef PS1_FLAT
-flat varying vec3 vNormalW;
+flat varying float vSparkle;
 #else
-varying vec3 vNormalW;
+varying float vSparkle;
 #endif
+float waterHashV(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 void waterVertex(vec3 world, vec3 worldNormal, float depth) {
   vFoam = foam;
   vWorld = world;
   vDepth = depth;
-  vNormalW = worldNormal;
+  // Turquoise and cyan close to the camera, deep blue further out.
+  vTint = mix(uWaterNear, uWaterFar, smoothstep(4.0, 40.0, depth));
+  vGlint = vec3(0.0);
+  vSparkle = 0.0;
+  // The sun's glitter path: a column of light down the water to the sun, narrow across and long towards the camera (the swell
+  // tilts the reflection up and down more than sideways), compared with the sun across (azimuth) and up and down (elevation)
+  // off the mean surface. Only the water roughly towards the sun can glitter.
+  vec3 v = normalize(world - cameraPosition);
+  vec2 toSun = normalize(uGlintDir.xz);
+  vec2 across = normalize(v.xz);
+  float side = abs(across.x * toSun.y - across.y * toSun.x);
+  if (side < 0.2 && depth > 2.0 && dot(across, toSun) > 0.0) {
+    float near = 1.0 - smoothstep(30.0, 70.0, depth);
+    float rise = abs(-v.y - uGlintDir.y);
+    vGlint = vec3(
+      (1.0 - smoothstep(0.0, 0.055, side)) * (1.0 - smoothstep(0.0, 0.16, rise)),
+      (1.0 - smoothstep(0.0, 0.13, side)) * (1.0 - smoothstep(0.0, 0.25, rise)),
+      (1.0 - smoothstep(20.0, 45.0, depth)) * smoothstep(3.0, 9.0, depth)
+    );
+    // Facet sparkles: the reflection off the vertex normal, jittered per spot and per moment near the camera, to the 32nd power.
+    float flick = floor(uTime * 7.0);
+    vec2 cell = floor(world.xz * vec2(1.6, 0.9));
+    vec3 jitter = vec3(waterHashV(cell + flick) - 0.5, 0.0, waterHashV(cell.yx + flick * 1.3) - 0.5) * 0.34 * near;
+    float g = max(dot(reflect(v, normalize(worldNormal + jitter)), uGlintDir), 0.0);
+    g *= g;
+    g *= g;
+    g *= g;
+    g *= g;
+    g *= g;
+    // Only near and mid water sparkles: further out every flattened facet would catch the sun at once (the column covers it).
+    vSparkle = g * 1.6 * smoothstep(4.0, 12.0, depth) * (1.0 - smoothstep(35.0, 60.0, depth));
+  }
 }
 #endif
 
@@ -188,19 +233,18 @@ varying float vElevation;
 
 #ifdef PS1_WATER
 uniform float uTime;
-uniform vec3 uGlintDir;
 uniform vec3 uGlintColor;
-uniform vec3 uWaterNear;
-uniform vec3 uWaterFar;
 uniform vec3 uFoamColor;
 uniform vec3 uFoamShade;
 varying float vFoam;
 varying vec3 vWorld;
 varying float vDepth;
+varying vec3 vTint;
+varying vec3 vGlint;
 #ifdef PS1_FLAT
-flat varying vec3 vNormalW;
+flat varying float vSparkle;
 #else
-varying vec3 vNormalW;
+varying float vSparkle;
 #endif
 
 // A cheap hash without a sine (Dave Hoskins' hash12): the CPU rasterisers some phones fall back to pay for every transcendental.
@@ -214,9 +258,12 @@ float waterHash(vec2 p) {
 // noise, cheaper than indexing a Bayer matrix), so foam breaks up into pixel clumps.
 float foamPattern() {
   float order = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-  // Cells grow in steps with distance so a clump stays a few screen pixels across near and far.
+  // Cells grow in steps with distance so a clump stays a few screen pixels across near and far. They travel with the swell
+  // (towards the rider) and each re-rolls at its own moment, so the foam churns without the whole sea flickering at once.
   float level = max(1.0, floor(vDepth / 6.0));
-  float cells = waterHash(floor(vWorld.xz * vec2(5.0, 3.4) / level) + vec2(level * 17.0, floor(uTime * 3.0) * 7.0));
+  vec2 cell = floor((vWorld.xz + vec2(0.0, uTime * 3.0)) * vec2(5.0, 3.4) / level);
+  float churn = floor(uTime * 2.0 + fract(dot(cell, vec2(0.371, 0.613))) * 4.0);
+  float cells = waterHash(cell + vec2(level * 17.0, churn * 7.0));
   return 0.08 + 0.7 * cells + 0.22 * order;
 }
 
@@ -229,26 +276,14 @@ vec3 waterShade(vec3 lit) {
   #else
     // Whitewater on crests and breaking faces.
     if (vFoam > pattern) return mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);
-    // Turquoise and cyan close to the camera, deep blue further out.
-    vec3 col = lit * mix(uWaterNear, uWaterFar, smoothstep(5.0, 60.0, vDepth));
-    // The sun's glitter: the view reflected off each facet, jittered per cell and per moment so it breaks into sparkles near the
-    // camera, a smooth bright path towards the horizon (where cells would be smaller than a pixel).
-    vec3 v = normalize(vWorld - cameraPosition);
-    // Only the water roughly towards the sun can glitter: skip the work everywhere else.
-    vec2 toSun = normalize(uGlintDir.xz);
-    vec2 across = normalize(v.xz);
-    if (abs(across.x * toSun.y - across.y * toSun.x) < 0.4 && dot(across, toSun) > 0.0) {
-      vec2 cell = floor(vWorld.xz * vec2(1.6, 0.9));
-      float flick = floor(uTime * 7.0);
-      vec3 jitter = vec3(waterHash(cell + flick) - 0.5, 0.0, waterHash(cell.yx + flick * 1.3) - 0.5) * 0.34;
-      float near = 1.0 - smoothstep(30.0, 70.0, vDepth);
-      float close = smoothstep(4.0, 14.0, vDepth); // none right under the camera
-      vec3 n = normalize(vNormalW + jitter * near);
-      float g = max(dot(reflect(v, n), uGlintDir), 0.0);
-      float sparkle = pow(g, 90.0) * (near > 0.0 ? step(0.45, waterHash(floor(gl_FragCoord.xy * 0.5) + flick)) * 1.6 : 1.0);
-      float path = pow(max(dot(reflect(v, vec3(0.0, 1.0, 0.0)), uGlintDir), 0.0), 220.0) * (1.0 - near * 0.7);
-      float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) * close + path, 0.0, 1.0);
-      col = mix(col, uGlintColor, glint);
+    vec3 col = lit * vTint;
+    // The sun's glitter (worked out per vertex): a warm halo, the column breaking into twinkling pixels close by, and
+    // sparkles off the facets turned to the sun.
+    if (vGlint.y + vSparkle > 0.004) {
+      float twinkle = waterHash(floor(gl_FragCoord.xy * 0.5) + floor(uTime * 7.0));
+      float column = vGlint.x * mix(1.0, 0.25 + 1.1 * step(0.45, twinkle), vGlint.z);
+      col = mix(col, col * vec3(1.35, 1.05, 0.8) + vec3(0.1, 0.04, 0.0), vGlint.y * 0.6);
+      col = mix(col, uGlintColor, clamp(column * 0.95 + vSparkle * mix(0.6, step(0.3, twinkle), vGlint.z), 0.0, 1.0));
     }
     return col;
   #endif

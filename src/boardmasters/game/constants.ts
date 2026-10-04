@@ -57,10 +57,10 @@ export const LIGHT = {
   ambient: 0.65,
 } as const;
 
-/** The drawn sun: its direction from the camera (low, dead ahead down the course) and distance; the sea's glitter path points at it. */
+/** The drawn sun: its direction from the camera (low, dead ahead down the course) and distance (just inside the far plane, behind the world); the sea's glitter path points at it. */
 export const SUN = {
   dir: [0, 0.075, 1] as const,
-  distance: 92,
+  distance: CAMERA.far * 0.975,
 } as const;
 
 /**
@@ -70,7 +70,7 @@ export const SUN = {
  * crests, breaking faces and open-water patches carry.
  */
 export const WATER = {
-  nearTint: [0.88, 1.1, 1.05] as const,
+  nearTint: [0.78, 1.06, 1.04] as const,
   farTint: [0.62, 0.72, 1.0] as const,
   glint: 0xfff3c4,
   foamShade: 0xa8e6f6,
@@ -78,8 +78,8 @@ export const WATER = {
   crest: 1.35,
   crestFull: 2.2,
   /** Foam on faces steeper than this slope... */
-  face: 0.17,
-  faceFull: 0.4,
+  face: 0.22,
+  faceFull: 0.5,
   /** ...and scattered patches of whitewater on open water, up to this much. */
   patches: 0.45,
 } as const;
@@ -231,14 +231,15 @@ export const MENU_ZONE = { w: 80, h: 32 } as const;
 export const PALETTE = {
   deepWater: 0x16399a,
   water: 0x1b7fd0,
-  lightWater: 0x3cc6d8,
+  lightWater: 0x2cb8d4,
   foam: 0xf8fbff,
   cloud: 0xff7a50,
   cloudLit: 0xffc070,
   cloudDark: 0x5a2a7a,
-  cliff: 0x3e1f66,
-  cliffLit: 0x9a64c8,
-  cliffRim: 0xff9a7a,
+  cliffDeep: 0x180a38,
+  cliff: 0x40207e,
+  cliffLit: 0x7c4ab8,
+  cliffRim: 0xff8a5a,
   rock: 0x4a2c5e,
   sand: 0xe8a66a,
   palm: 0x1d6b4a,

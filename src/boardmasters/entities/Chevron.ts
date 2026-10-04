@@ -7,8 +7,11 @@ import type { Ocean } from '../world/Ocean';
 
 /** The gate's centre, metres ahead of its spot (the run's pickup test uses the same offset). */
 const CENTRE_Z = 1.9;
-/** Hover height of the sign's centre above the water. */
-const HOVER = 1.6;
+/** Hover height of the sign's centre above the water: high enough that riders (and the chase camera behind them) pass under it, like a gate. */
+const HOVER = 3.5;
+/** The sign's scale, pulsing by PULSE. */
+const SCALE = 1.35;
+const PULSE = 0.1;
 
 let shared: THREE.BufferGeometry | null = null;
 
@@ -73,7 +76,7 @@ export class Chevron {
   update(time: number, ocean: Ocean): void {
     if (!this.active) return;
     this.mesh.position.y = ocean.height(this.x, this.z + CENTRE_Z) + 0.15 * Math.sin(time * 3 + this.z);
-    const s = 1.6 + 0.12 * Math.sin(time * 8 + this.z);
+    const s = SCALE + PULSE * Math.sin(time * 8 + this.z);
     this.sign.scale.set(s, s, 1);
   }
 }

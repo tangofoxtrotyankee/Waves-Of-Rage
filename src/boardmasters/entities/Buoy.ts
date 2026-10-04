@@ -14,6 +14,9 @@ function plain<T extends THREE.BufferGeometry>(geometry: T, color: number): T {
 }
 
 let shared: THREE.BufferGeometry | null = null;
+/** How unlit the buoys' material is (0 lit, 1 unlit), and the materials already set so. */
+const BUOY_UNLIT = 0.45;
+const tuned = new WeakSet<THREE.Material>();
 
 /**
  * One bell buoy as a single geometry (shared by the whole pool): a tapered
@@ -77,11 +80,18 @@ export class Buoy {
   /** Pooled: an inactive buoy is hidden and free to be placed ahead. */
   active = false;
 
-  /** `skullMaterial` maps skullTexture(); the plain parts use its white rows, so the second material is no longer needed. */
+  /**
+   * `skullMaterial` maps skullTexture(); the plain parts use its white rows,
+   * so the second material is no longer needed. The first buoy built with a
+   * material sets it half unlit (BUOY_UNLIT): the buoys face away from the
+   * low sun, and the mockup's read bright red from the course.
+   */
   constructor(skullMaterial: THREE.Material, _plainMaterial?: THREE.Material) {
-    // Half lit: the buoys face away from the low sun, and the mockup's read bright red from the course.
-    const uniforms = (skullMaterial as THREE.ShaderMaterial).uniforms;
-    if (uniforms?.uUnlit) uniforms.uUnlit.value = 0.45;
+    if (!tuned.has(skullMaterial)) {
+      tuned.add(skullMaterial);
+      const uniforms = (skullMaterial as THREE.ShaderMaterial).uniforms;
+      if (uniforms?.uUnlit) uniforms.uUnlit.value = BUOY_UNLIT;
+    }
     this.group.add(new THREE.Mesh(buoyGeometry(), skullMaterial));
     this.group.visible = false;
   }

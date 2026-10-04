@@ -18,15 +18,22 @@ export interface OceanFeature {
 }
 
 /**
- * Grid: 1 m cells across the course (x from -22 to 22), then coarse columns
- * out to +/-124 m so the water reaches past the fog in every direction, and
- * 110 rows along, 12 of them behind the rider.
+ * Grid: 1 m cells across the course and its whitewater edges (x from -17 to
+ * 17), 2 m cells out to 22 m under the shore break, then coarse columns out
+ * to +/-124 m so the water reaches past the fog in every direction. Along
+ * the course, 1 m rows from 12 m behind the rider to 50 m ahead, then 2 m
+ * rows (on even metres, so they do not swim as the window moves) to about
+ * 99 m ahead, where the fog has it all.
  */
 const OUTER = [26, 32, 40, 50, 64, 80, 100, 124];
-const COLUMN_X: number[] = [...OUTER.map((x) => -x).reverse(), ...Array.from({ length: 45 }, (_, i) => i - 22), ...OUTER];
+const INNER = [18, 20, 22];
+const COLUMN_X: number[] = [...OUTER.map((x) => -x).reverse(), ...INNER.map((x) => -x).reverse(), ...Array.from({ length: 35 }, (_, i) => i - 17), ...INNER, ...OUTER];
 const COLS = COLUMN_X.length - 1;
-const ROWS = 110;
 const BEHIND = 12;
+/** Rows of vertices 1 m apart from the back edge, then rows 2 m apart. */
+const NEAR_ROWS = 62;
+const FAR_ROWS = 25;
+const ROWS = NEAR_ROWS + FAR_ROWS;
 /** The sampled height grid carries one extra ring so every vertex has neighbours for its normal. */
 const GW = COLS + 3;
 const GH = ROWS + 3;
@@ -43,9 +50,12 @@ const SWELL2 = { amp: 0.12, length: 11, speed: 2.2 };
 const CHOP = { amp: 0.18 };
 /** Beyond the rideable width the water rises into churning whitewater, a visible boundary. */
 const EDGE = { rise: 1.6, fade: 6 };
-const SHORE = { from: 19, to: 34, damp: 0.7 };
+/** Beyond `from` (riders never get past PHYSICS.trackHalfWidth) the sea settles to `1 - damp` of the swell at sea level by `to`, so the beaches stay dry. */
+const SHORE = { from: 15, to: 22, damp: 0.75 };
 
-const ATTRIBUTES = ['position', 'normal', 'color', 'foam'] as const;
+const ATTRIBUTES = ['position', 'normal', 'color', 'foam', 'uv'] as const;
+/** Per column, how much of the whitewater rise is left under the shore (see height()). */
+const SHORE_KEEP = COLUMN_X.map((x) => 1 - smoothstep(SHORE.from, SHORE.to, Math.abs(x)));
 /** The foam's lateral break-up and drifting patches, as sines of x (per column, fixed) times sines of z (per row): sin(a + b) = sin a cos b + cos a sin b. */
 const FOAM_WAVES = [0.9, 0.43, 0.17].map((k) => ({ sin: COLUMN_X.map((x) => Math.sin(x * k)), cos: COLUMN_X.map((x) => Math.cos(x * k)) }));
 const DEEP = rgb(PALETTE.deepWater);
@@ -66,14 +76,17 @@ const LIGHT = rgb(PALETTE.lightWater);
  */
 export class Ocean {
   readonly mesh: THREE.Mesh;
-  /** Metres ahead of the rider that the mesh covers. */
-  readonly ahead = ROWS - BEHIND;
+  /** Metres ahead of the rider that the mesh covers (at least). */
+  readonly ahead = NEAR_ROWS + FAR_ROWS * 2 - BEHIND;
   time = 0;
   originZ = 0;
   private features: OceanFeature[] = [];
   private active: OceanFeature[] = [];
   private dirty = true;
   private readonly heights = new Float32Array(GW * GH);
+  /** World z of each row of the height grid (the mesh's rows are 1 to ROWS + 1). */
+  private readonly gridZ = new Float64Array(GH);
+  private readonly uvs: Float32Array;
   private readonly positions: Float32Array;
   private readonly normals: Float32Array;
   private readonly colors: Float32Array;
@@ -87,7 +100,7 @@ export class Ocean {
     this.normals = new Float32Array(count * 3);
     this.colors = new Float32Array(count * 3);
     this.foam = new Float32Array(count);
-    const uvs = new Float32Array(count * 2);
+    const uvs = (this.uvs = new Float32Array(count * 2));
     const index = new Uint32Array(COLS * ROWS * 6);
     let i = 0;
     for (let r = 0; r < ROWS; r++) {
@@ -102,24 +115,21 @@ export class Ocean {
         i += 6;
       }
     }
-    // Texture coordinates never change: the window's z offset is a uniform.
-    let uv = 0;
-    for (let r = 0; r <= ROWS; r++) {
-      for (let c = 0; c <= COLS; c++) {
-        uvs[uv++] = COLUMN_X[c] / 4;
-        uvs[uv++] = r / 4;
-      }
-    }
+    // Texture coordinates across never change; along, they follow the rows (the window's z offset is a uniform).
+    for (let v = 0; v < count; v++) uvs[v * 2] = COLUMN_X[v % (COLS + 1)] / 4;
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setIndex(new THREE.BufferAttribute(index, 1));
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('foam', new THREE.BufferAttribute(this.foam, 1).setUsage(THREE.DynamicDrawUsage));
-    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    this.geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2).setUsage(THREE.DynamicDrawUsage));
     this.material = createPS1Material({ map: waterTexture(), flat: 0.22, water: 'sea' }); // faceted, like the mockup's crystal water
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.frustumCulled = false;
+    // After the other opaque things (riders, buoys, the shore): the sea's shader is the costliest, and the depth test then
+    // skips the water hidden behind the cliffs, the beaches and the pier.
+    this.mesh.renderOrder = 0.5;
     this.advance(0, 0);
     this.rebuild();
   }
@@ -151,8 +161,12 @@ export class Ocean {
     if (ax > PHYSICS.trackHalfWidth) {
       const w = smoothstep(PHYSICS.trackHalfWidth, PHYSICS.trackHalfWidth + EDGE.fade, ax);
       h += EDGE.rise * w + 0.35 * w * Math.sin(z * 0.9 + t * 6 + ax);
-      // Towards the shore (well outside the rideable water) the swell dies down under the beach and the cliffs.
-      if (ax > SHORE.from) h *= 1 - SHORE.damp * smoothstep(SHORE.from, SHORE.to, ax);
+      // Towards the shore (well outside the rideable water) the whitewater drops back and the swell dies down to a lap
+      // on the beach under the cliffs and the pier.
+      if (ax > SHORE.from) {
+        const k = smoothstep(SHORE.from, SHORE.to, ax);
+        h = h * (1 - SHORE.damp * k) - (1 - SHORE.damp) * k * EDGE.rise * w;
+      }
     }
     return h;
   }
@@ -171,7 +185,7 @@ export class Ocean {
     this.time += dt;
     this.originZ = Math.floor(centreZ) - BEHIND;
     const lo = this.originZ - 5;
-    const hi = this.originZ + ROWS + 5;
+    const hi = this.originZ + NEAR_ROWS + FAR_ROWS * 2 + 6;
     this.active = this.features.filter((f) => f.z + f.length >= lo && f.z <= hi);
     this.dirty = true;
   }
@@ -181,8 +195,16 @@ export class Ocean {
     if (!this.dirty) return;
     this.dirty = false;
     const heights = this.heights;
+    const gridZ = this.gridZ;
+    const origin = this.originZ;
+    // Mesh rows: 1 m apart, then 2 m apart on even metres; the grid adds a row before and after.
+    let farZ = origin + NEAR_ROWS + 1;
+    if (farZ % 2 !== 0) farZ += 1;
+    for (let r = 0; r <= ROWS; r++) gridZ[r + 1] = r <= NEAR_ROWS ? origin + r : farZ + (r - NEAR_ROWS - 1) * 2;
+    gridZ[0] = origin - 1;
+    gridZ[GH - 1] = gridZ[GH - 2] + 2;
     for (let gr = 0; gr < GH; gr++) {
-      const z = this.originZ + gr - 1;
+      const z = gridZ[gr];
       const row = gr * GW;
       for (let gc = 0; gc < GW; gc++) heights[row + gc] = this.height(GRID_X[gc], z);
     }
@@ -190,10 +212,13 @@ export class Ocean {
     const time = this.time;
     let p = 0;
     for (let r = 0; r <= ROWS; r++) {
-      const z = this.originZ + r;
+      const z = gridZ[r + 1];
       const row = (r + 1) * GW;
+      const dzSpan = gridZ[r + 2] - gridZ[r];
+      const v = z - origin;
+      for (let c = 0, o = (p / 3) * 2 + 1; c <= COLS; c++, o += 2) this.uvs[o] = v / 4;
       // Foam fades out towards the horizon, where the facets are a pixel wide and would sparkle.
-      const far = 1 - smoothstep(22, 70, r);
+      const far = 1 - smoothstep(22, 70, v);
       const zz = z + SWELL.speed * time;
       const s1 = Math.sin(zz * 0.35);
       const c1 = Math.cos(zz * 0.35);
@@ -207,7 +232,7 @@ export class Ocean {
         const x = COLUMN_X[c];
         const h = heights[g];
         const dx = (heights[g + 1] - heights[g - 1]) / (GRID_X[gc + 1] - GRID_X[gc - 1]);
-        const dz = (heights[g + GW] - heights[g - GW]) * 0.5;
+        const dz = (heights[g + GW] - heights[g - GW]) / dzSpan;
         // Normals flatten towards the horizon too, so the low sun does not light every distant facet differently.
         const ndx = dx * far;
         const ndz = dz * far;
@@ -222,7 +247,7 @@ export class Ocean {
         const ax = x < 0 ? -x : x;
         const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
         // Deep -> mid -> light by height (the rise at the edges does not count). No allocations.
-        let t = (h - EDGE.rise * edge + 1.8) / 3.6;
+        let t = (h - EDGE.rise * edge * SHORE_KEEP[c] + 1.8) / 3.6;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const low = t < 0.5;
         const t2 = low ? t * 2 : (t - 0.5) * 2;
@@ -234,7 +259,7 @@ export class Ocean {
         let foam =
           (smoothstep(WATER.crest, WATER.crestFull, h) + smoothstep(WATER.face, WATER.faceFull, dz) * smoothstep(0.1, 1.0, h)) * lateral +
           smoothstep(0.7, 1.15, Math.sqrt(dx * dx + dz * dz)) +
-          smoothstep(0.1, 0.8, edge) * 0.7 +
+          smoothstep(0.1, 0.8, edge) * (0.3 + 0.5 * lateral) +
           WATER.patches * smoothstep(0.3, 0.85, patch);
         foam = (foam > 1 ? 1 : foam) * far;
         this.foam[p / 3] = foam;
@@ -242,7 +267,7 @@ export class Ocean {
           // The deep-to-light ramp flattens towards mid blue in the distance, for the same reason; foamy water is paler underneath.
           const ramp = a[k] + (b[k] - a[k]) * t2;
           const base = ramp + (MID[k] - ramp) * (1 - far) * 0.7;
-          this.colors[p + k] = base + (LIGHT[k] - base) * foam * 0.5;
+          this.colors[p + k] = base + (LIGHT[k] - base) * foam * 0.2;
         }
         p += 3;
       }

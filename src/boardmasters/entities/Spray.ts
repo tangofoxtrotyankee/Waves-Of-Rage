@@ -34,10 +34,13 @@ const RING_SEGMENTS = 18;
 const RING_LIFE = 0.8;
 /** Rings sit this far above the water they were thrown on (the swell moves under them). */
 const RING_LIFT = 0.22;
+/** Clumps closer to the camera than NEAR_SKIP metres are not drawn, and shrink in over the next NEAR_FADE metres. */
+const NEAR_SKIP = 1.5;
+const NEAR_FADE = 4;
 
 /**
  * Crunchy spray: a pool of white camera-facing pixel clumps (a big square
- * with two smaller satellites, so every particle reads as a chunk of
+ * with a smaller satellite, so every particle reads as a chunk of
  * whitewater) thrown from the boards, drawn as one instanced mesh; plus a
  * small pool of expanding foam rings on the water for big splashes
  * (`splash`), drawn as a second mesh with the PS1_WATER foam block so they
@@ -59,8 +62,7 @@ export class Spray {
   constructor(count = 192) {
     const big = colorGeometry(new THREE.PlaneGeometry(0.13, 0.13), PALETTE.foam);
     const a = colorGeometry(new THREE.PlaneGeometry(0.06, 0.06).translate(0.11, 0.06, 0), 0xc8f2ff);
-    const b = colorGeometry(new THREE.PlaneGeometry(0.05, 0.05).translate(-0.09, -0.1, 0), PALETTE.foam);
-    const geometry = mergeGeometries([big, a, b]);
+    const geometry = mergeGeometries([big, a]);
     const material = createPS1Material({ unlit: true });
     this.mesh = new THREE.InstancedMesh(geometry, material, count);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -94,7 +96,7 @@ export class Spray {
     for (let i = 0; i < RINGS; i++) this.rings.push({ x: 0, y: 0, z: 0, size: 1, age: RING_LIFE });
   }
 
-  /** Throw one clump from (x, y, z) at this velocity; `size` scales it (1 is a 0.13 m clump with two satellites). */
+  /** Throw one clump from (x, y, z) at this velocity; `size` scales it (1 is a 0.13 m clump with its satellite). */
   emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, size = 1): void {
     const p = this.particles[this.next];
     this.next = (this.next + 1) % this.particles.length;
@@ -128,6 +130,14 @@ export class Spray {
     r.age = 0;
   }
 
+  /** Clear every clump and ring (a restart or a respawn on the same water). */
+  reset(): void {
+    for (const p of this.particles) p.life = 0;
+    for (const r of this.rings) r.age = RING_LIFE;
+    this.mesh.count = 0;
+    this.updateRings(0);
+  }
+
   update(dt: number, camera: THREE.Camera): void {
     let n = 0;
     const drag = Math.exp(-DRAG * dt);
@@ -141,9 +151,16 @@ export class Spray {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
+      // Next to the camera a clump would fill the screen as a flat white square: shrink it away inside NEAR_FADE metres.
+      const dx = p.x - camera.position.x;
+      const dy = p.y - camera.position.y;
+      const dz = p.z - camera.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < NEAR_SKIP * NEAR_SKIP) continue;
+      const near = d2 < (NEAR_SKIP + NEAR_FADE) * (NEAR_SKIP + NEAR_FADE) ? (Math.sqrt(d2) - NEAR_SKIP) / NEAR_FADE : 1;
       // Grows as it bursts, then shrinks away.
       const f = p.life / p.maxLife;
-      const size = p.size * (f > 0.75 ? 0.6 + (1 - f) * 1.6 : 0.35 + f * 0.85);
+      const size = p.size * near * (f > 0.75 ? 0.6 + (1 - f) * 1.6 : 0.35 + f * 0.85);
       this.matrix.compose(this.position.set(p.x, p.y, p.z), camera.quaternion, this.scale.set(size, size, size));
       this.mesh.setMatrixAt(n++, this.matrix);
     }

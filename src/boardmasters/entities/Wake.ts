@@ -11,9 +11,19 @@ const POOL = 320;
 /** Strips per stretch: the two arms of the V and the churned trail between them. Each strip is two quads across (6 vertices), foamy down the middle and clear at the edges, so it dithers out softly. */
 const PARTS = 3;
 const VERTS = 6;
-/** How many riders the emitter tells apart (by position, nearest within TRACK_RADIUS). */
+/**
+ * How many riders the emitter tells apart (by position, nearest within
+ * TRACK_RADIUS). A rider moves at most about 0.45 m a step, and riders in a
+ * fight are 1 to 1.5 m apart, so a metre keeps them apart.
+ */
 const TRACKERS = 16;
-const TRACK_RADIUS = 2.5;
+const TRACK_RADIUS = 1.0;
+/** At most this many new stretches between updates, so a pile-up of riders cannot flush everyone's wake from the pool. */
+const EMIT_CAP = 24;
+/** Each strip reaches this fraction of the distance since the rider's last stretch either side of its centre: they just overlap. */
+const HALF_LENGTH = 0.58;
+/** A strip with less foam than this down its middle would be all but invisible (the foam pattern starts at 0.08): it is not drawn. */
+const FOAM_MIN = 0.12;
 /** Height above the water, so the foam never sinks into the facets. */
 const LIFT = 0.1;
 const DYNAMIC = ['position', 'foam'] as const;
@@ -24,6 +34,8 @@ interface Stretch {
   sin: number;
   cos: number;
   speed: number;
+  /** Metres along the heading it covers (the distance since that rider's previous stretch). */
+  length: number;
   strength: number;
   age: number;
 }
@@ -53,6 +65,7 @@ export class Wake {
   private readonly trackers: Tracker[] = [];
   private next = 0;
   private clock = 0;
+  private emitted = 0;
   private readonly positions: Float32Array;
   private readonly foam: Float32Array;
   private readonly geometry: THREE.BufferGeometry;
@@ -85,7 +98,7 @@ export class Wake {
     this.mesh = new THREE.Mesh(this.geometry, material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 1; // after the sea it lies on
-    for (let i = 0; i < POOL; i++) this.stretches.push({ x: 0, z: 0, sin: 0, cos: 1, speed: 0, strength: 0, age: LIFE });
+    for (let i = 0; i < POOL; i++) this.stretches.push({ x: 0, z: 0, sin: 0, cos: 1, speed: 0, length: SPACING, strength: 0, age: LIFE });
     for (let i = 0; i < TRACKERS; i++) this.trackers.push({ x: 1e9, z: 1e9, lastX: 1e9, lastZ: 1e9, used: -1 });
   }
 
@@ -114,7 +127,8 @@ export class Wake {
     tracker.z = z;
     tracker.used = this.clock;
     const moved = (tracker.lastX - x) * (tracker.lastX - x) + (tracker.lastZ - z) * (tracker.lastZ - z);
-    if (moved < SPACING * SPACING) return;
+    if (moved < SPACING * SPACING || this.emitted >= EMIT_CAP) return;
+    this.emitted++;
     tracker.lastX = x;
     tracker.lastZ = z;
     const s = this.stretches[this.next];
@@ -124,21 +138,33 @@ export class Wake {
     s.sin = Math.sin(heading);
     s.cos = Math.cos(heading);
     s.speed = speed;
+    s.length = Math.min(SPACING * 1.8, Math.sqrt(moved));
     s.strength = strength;
     s.age = 0;
   }
 
+  /** Clear every stretch and forget the riders (a restart or a respawn on the same water). */
+  reset(): void {
+    for (const s of this.stretches) s.age = LIFE;
+    for (const t of this.trackers) {
+      t.x = t.z = t.lastX = t.lastZ = 1e9;
+      t.used = -1;
+    }
+    this.emitted = 0;
+    this.geometry.setDrawRange(0, 0);
+  }
+
   update(dt: number, ocean: Ocean): void {
     this.clock += dt;
-    // Live stretches are packed at the front of the buffers and only those are drawn.
-    let live = 0;
+    this.emitted = 0;
+    // Strips with foam enough to show are packed at the front of the buffers and only those are drawn (a thin strip would be
+    // rasterised and shaded only to be discarded).
+    let n = 0;
     for (let i = 0; i < POOL; i++) {
       const s = this.stretches[i];
       if (s.age >= LIFE) continue;
       s.age += dt;
       if (s.age >= LIFE) continue;
-      const v = live * PARTS * VERTS;
-      live++;
       const life = 1 - s.age / LIFE;
       const age = s.age;
       // Forward along the heading and across it (right-handed: +x is screen-left).
@@ -146,29 +172,29 @@ export class Wake {
       const fz = s.cos;
       const rx = s.cos;
       const rz = -s.sin;
-      const y = ocean.height(s.x, s.z) + LIFT;
       // The arms: spreading out at a fraction of the rider's speed, thinning as they go.
       const spread = 0.35 + age * (0.6 + s.speed * 0.07);
-      const armHalfW = 0.26 + age * 0.16;
-      const half = SPACING * 0.75;
-      for (let side = 0; side < 2; side++) {
-        const sign = side === 0 ? -1 : 1;
-        const cx = s.x + rx * spread * sign;
-        const cz = s.z + rz * spread * sign;
-        const ay = ocean.height(cx, cz) + LIFT;
-        // Arms angle outwards: the back end further out than the front.
-        const outB = 0.18 * sign;
-        this.strip(v + side * VERTS, cx, ay, cz, fx, fz, rx, rz, half, armHalfW, outB, Math.min(1.35, s.strength * 1.2) * life);
+      const armHalfW = 0.24 + age * 0.1;
+      const half = s.length * HALF_LENGTH;
+      const armFoam = Math.min(1.35, s.strength * 1.2) * life;
+      if (armFoam >= FOAM_MIN) {
+        for (let side = 0; side < 2; side++) {
+          const sign = side === 0 ? -1 : 1;
+          const cx = s.x + rx * spread * sign;
+          const cz = s.z + rz * spread * sign;
+          // Arms angle outwards: the back end further out than the front.
+          this.strip(n++ * VERTS, cx, ocean.height(cx, cz) + LIFT, cz, fx, fz, rx, rz, half, armHalfW, 0.18 * sign, armFoam);
+        }
       }
       // The churned trail: wide and thick at first, dissolving.
-      const trailHalfW = 0.4 + age * 0.45;
-      this.strip(v + 2 * VERTS, s.x, y, s.z, fx, fz, rx, rz, half * 1.1, trailHalfW, 0, Math.min(1.2, s.strength) * life * life * life);
+      const trailFoam = Math.min(1.2, s.strength) * life * life * life;
+      if (trailFoam >= FOAM_MIN) this.strip(n++ * VERTS, s.x, ocean.height(s.x, s.z) + LIFT, s.z, fx, fz, rx, rz, half * 1.1, 0.36 + age * 0.3, 0, trailFoam);
     }
-    this.geometry.setDrawRange(0, live * PARTS * 12);
+    this.geometry.setDrawRange(0, n * 12);
     for (const name of DYNAMIC) {
       const attribute = this.geometry.getAttribute(name) as THREE.BufferAttribute;
       attribute.clearUpdateRanges();
-      attribute.addUpdateRange(0, live * PARTS * VERTS * attribute.itemSize);
+      attribute.addUpdateRange(0, n * VERTS * attribute.itemSize);
       attribute.needsUpdate = true;
     }
   }

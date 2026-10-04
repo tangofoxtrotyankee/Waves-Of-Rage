@@ -8,10 +8,10 @@ import { THREE } from './three';
  * the shader does the rest. Hand-drawn PNGs from tools/pixelart can replace
  * any of these later by loading a texture with the same settings.
  */
-function pixelTexture(size: number, paint: (ctx: CanvasRenderingContext2D, size: number) => void): THREE.CanvasTexture {
+function pixelTexture(size: number, paint: (ctx: CanvasRenderingContext2D, size: number) => void, height = size): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = size;
-  canvas.height = size;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (ctx) paint(ctx, size);
   const texture = new THREE.CanvasTexture(canvas);
@@ -93,51 +93,92 @@ export function skullTexture(): THREE.CanvasTexture {
   });
 }
 
+/** 5x7 pixel glyphs for the banner's letters (rows top to bottom, 1 is ink): drawn by hand so the lettering is the same on every device. */
+const BANNER_GLYPHS: Record<string, readonly string[]> = {
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+  D: ['11100', '10010', '10001', '10001', '10001', '10010', '11100'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+  O: ['01110', '10001', '10001', '10001', '10001', '10001', '01110'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+  S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+};
+
+/**
+ * Chunky slanted lettering like the title's: the glyphs scaled up (6 by 7
+ * canvas pixels each), each row pushed right the higher it is, outlined in
+ * the dark outline colour with a cyan drop shadow and filled white to pink
+ * from top to bottom. Centred on (cx, cy).
+ */
+function paintBannerLettering(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number): void {
+  const sx = 6;
+  const sy = 7;
+  const slant = 0.4;
+  const width = text.length * 6 * sx - sx;
+  const height = 7 * sy;
+  const x0 = Math.round(cx - width / 2 - (height * slant) / 2);
+  const y0 = Math.round(cy - height / 2);
+  // The ink as a mask (with room round it for the outline and the shadow), then painted in layers.
+  const W = width + Math.ceil(height * slant) + 12;
+  const H = height + 12;
+  const ink = new Uint8Array(W * H);
+  for (let i = 0; i < text.length; i++) {
+    const glyph = BANNER_GLYPHS[text[i]];
+    if (!glyph) continue;
+    for (let gy = 0; gy < 7; gy++) {
+      for (let gx = 0; gx < 5; gx++) {
+        if (glyph[gy][gx] !== '1') continue;
+        for (let py = 0; py < sy; py++) {
+          const y = gy * sy + py;
+          const shift = Math.round((height - y) * slant);
+          for (let px = 0; px < sx; px++) ink[(y + 4) * W + 4 + i * 6 * sx + gx * sx + px + shift] = 1;
+        }
+      }
+    }
+  }
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < W && y < H ? ink[y * W + x] : 0);
+  const near = (x: number, y: number, r: number) => {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (at(x + dx, y + dy)) return true;
+    return false;
+  };
+  const gradient = [0xffffff, 0xffffff, 0xffe6f4, 0xffc8e6, 0xffa6d6, 0xff86c6, 0xff66b6, 0xff4fa3];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let color = -1;
+      if (at(x, y)) color = gradient[Math.min(gradient.length - 1, Math.floor(((y - 4) / height) * gradient.length))];
+      else if (near(x, y, 2)) color = PALETTE.outline;
+      else if (at(x - 3, y - 3)) color = 0x45cbe6;
+      else if (near(x - 3, y - 3, 1)) color = PALETTE.outline;
+      if (color >= 0) fill(ctx, color, x0 + x - 4, y0 + y - 4, 1, 1);
+    }
+  }
+}
+
 /** Regions of the festival atlas (u0, v0, u1, v1 in texture space, v up), for the pier's textured parts. */
 export const ATLAS = {
   banner: [0, 0.75, 1, 1],
-  crowd: [0, 0.5, 1, 0.75],
-  flag: [0, 0, 0.125, 0.5],
-  sign: [0.125, 0.25, 0.625, 0.5],
+  crowd: [0, 0.5, 0.5, 0.75],
+  flag: [0, 0, 0.0625, 0.5],
 } as const satisfies Record<string, readonly [number, number, number, number]>;
 
 /**
- * The festival atlas, 256 px square, so the pier's textured parts share one
+ * The festival atlas, 512 by 256 px, so the pier's textured parts share one
  * material: the BOARDMASTERS banner (slanted, outlined lettering on dark
- * cloth, like the title), a strip of dense crowd, the blue feather flag with
- * the wave logo, and a small sponsor sign.
+ * cloth, like the title), a strip of dense crowd and the blue feather flag
+ * with the wave logo.
  */
 export function festivalAtlas(): THREE.CanvasTexture {
-  return pixelTexture(256, (ctx) => {
-    // Banner, canvas rows 0..63.
-    fill(ctx, 0x2a1652, 0, 0, 256, 64);
-    fill(ctx, 0x3a2270, 0, 8, 256, 48);
-    fill(ctx, PALETTE.outline, 0, 0, 256, 3);
-    fill(ctx, PALETTE.outline, 0, 61, 256, 3);
-    fill(ctx, 0xff4fa3, 0, 3, 256, 2);
-    fill(ctx, 0x45cbe6, 0, 59, 256, 2);
-    ctx.save();
-    ctx.translate(128, 33);
-    ctx.transform(1, 0, -0.32, 1, 0, 0); // slanted, like the title's lettering
-    ctx.font = 'bold 40px Impact, "Arial Black", "DejaVu Sans", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const text = 'BOARDMASTERS';
-    const width = 232;
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = hex(PALETTE.outline);
-    ctx.strokeText(text, 3, 3, width);
-    ctx.fillStyle = hex(0x45cbe6);
-    ctx.fillText(text, 3, 3, width);
-    ctx.strokeText(text, 0, 0, width);
-    const gradient = ctx.createLinearGradient(0, -16, 0, 16);
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.45, '#ffb3dc');
-    gradient.addColorStop(1, '#ff4fa3');
-    ctx.fillStyle = gradient;
-    ctx.fillText(text, 0, 0, width);
-    ctx.restore();
+  return pixelTexture(512, (ctx) => {
+    // Banner, canvas rows 0..63 across the full 512 columns (the lettering needs the width to stay legible).
+    fill(ctx, 0x2a1652, 0, 0, 512, 64);
+    fill(ctx, 0x3a2270, 0, 6, 512, 52);
+    fill(ctx, PALETTE.outline, 0, 0, 512, 3);
+    fill(ctx, PALETTE.outline, 0, 61, 512, 3);
+    fill(ctx, 0xff4fa3, 0, 3, 512, 3);
+    fill(ctx, 0x45cbe6, 0, 58, 512, 3);
+    paintBannerLettering(ctx, 'BOARDMASTERS', 256, 31);
     // Crowd, rows 64..127: heads, bright shirts and raised arms, packed in three ranks.
     const rng = mulberry32(21);
     fill(ctx, 0x221238, 0, 64, 256, 64);
@@ -168,15 +209,7 @@ export function festivalAtlas(): THREE.CanvasTexture {
     }
     fill(ctx, PALETTE.foam, 4, 178, 24, 2);
     fill(ctx, 0x7ff6ff, 7, 184, 18, 2);
-    // A sponsor sign, columns 32..159, rows 128..191.
-    fill(ctx, PALETTE.gold, 32, 128, 128, 64);
-    fill(ctx, PALETTE.outline, 36, 132, 120, 56);
-    ctx.font = 'bold 22px Impact, "Arial Black", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = hex(PALETTE.gold);
-    ctx.fillText('RAGE  PIER', 96, 160, 110);
-  });
+  }, 256);
 }
 
 /** Falling water: streaks of white and pale cyan on blue, scrolled down by the scenery. */

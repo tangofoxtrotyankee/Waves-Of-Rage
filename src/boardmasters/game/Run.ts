@@ -323,6 +323,8 @@ export class Run {
       if (r.z < camZ - 2 || r.z > camZ + 60) continue;
       const boost = this.time < r.boostUntil;
       const amount = (i < 0 ? 1 : 0.45) * (0.8 + pace * 1.2 + carve * 3 + (boost ? 2.5 : 0));
+      // The local surfer's clumps stay smaller: they fly close past the camera.
+      const maxSize = i < 0 ? 1.1 : 2.2;
       let bursts = Math.floor(amount);
       if (Math.random() < amount - bursts) bursts++;
       const outward = r.heading > 0 ? -1 : 1; // the outside of the turn (heading > 0 carves towards +x)
@@ -333,14 +335,14 @@ export class Run {
           this.spray.emit(
             tailX + outward * 0.25, r.y + 0.1, tailZ,
             outward * (1.5 + carve * 4.5) * fan + sinH * r.speed * 0.7, 1.8 + carve * 4.2 * Math.random() + pace, cosH * r.speed * (0.6 + Math.random() * 0.2),
-            0.8 + carve * 0.8 + Math.random() * 0.5,
+            Math.min(maxSize, 0.8 + carve * 0.8 + Math.random() * 0.5),
           );
         } else {
           const side = (Math.floor(this.time * 60) + k) % 2 === 0 ? -1 : 1;
           this.spray.emit(
             tailX + cosH * side * 0.3, r.y + 0.05, tailZ - sinH * side * 0.3,
             cosH * side * (1 + Math.random() * 1.4) + sinH * r.speed * 0.7, 0.8 + Math.random() * 1.2 + pace * 0.8, cosH * r.speed * (0.65 + Math.random() * 0.2),
-            0.55 + pace * 0.35,
+            Math.min(maxSize, 0.55 + pace * 0.35),
           );
         }
       }
