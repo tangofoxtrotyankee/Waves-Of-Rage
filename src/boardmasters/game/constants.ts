@@ -348,7 +348,7 @@ export const COMBAT = {
  * splash sizes for Spray.splash (about 1 for a landing, 2 for a knockout).
  */
 export const IMPACT = {
-  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14 },
+  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14, buoy: 0.06 },
   shake: {
     punch: [1, 0.22],
     barge: [1.5, 0.3],
@@ -366,6 +366,8 @@ export const IMPACT = {
   landingSplash: 0.55,
   landingSplashMax: 0.6,
   buoySplash: 1.3,
+  /** Sideways speed (m/s) a buoy throws the surfer off with (decaying), enough to clear it by about 1.8 m. */
+  buoyShove: 9,
   smashSplash: 1.6,
 } as const;
 

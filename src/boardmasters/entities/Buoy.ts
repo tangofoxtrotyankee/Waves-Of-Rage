@@ -17,6 +17,13 @@ let shared: THREE.BufferGeometry | null = null;
 /** How unlit the buoys' material is (0 lit, 1 unlit), and the materials already set so. */
 const BUOY_UNLIT = 0.45;
 const tuned = new WeakSet<THREE.Material>();
+/** A strike's recoil: seconds to ring back upright, the tilt away from the rider (radians) and the dip (metres). */
+const RECOIL_SECONDS = 0.8;
+const RECOIL_TILT = 0.5;
+const RECOIL_SINK = 0.4;
+/** Near the lens the buoy screen-doors away (metres from the camera to its middle: solid beyond FADE_START, gone at FADE_FULL). */
+const FADE_START = 3.4;
+const FADE_FULL = 1.9;
 
 /**
  * One bell buoy as a single geometry (shared by the whole pool): a tapered
@@ -79,12 +86,16 @@ export class Buoy {
   smashed = false;
   /** Pooled: an inactive buoy is hidden and free to be placed ahead. */
   active = false;
+  private readonly fadeUniform: { value: number } | null;
+  private strikeAt = -Infinity;
+  private strikeDir = 0;
 
   /**
    * `skullMaterial` maps skullTexture(); the plain parts use its white rows,
    * so the second material is no longer needed. The first buoy built with a
    * material sets it half unlit (BUOY_UNLIT): the buoys face away from the
-   * low sun, and the mockup's read bright red from the course.
+   * low sun, and the mockup's read bright red from the course. Give each buoy
+   * its own material made with the `fade` option for the near fade (fadeNear).
    */
   constructor(skullMaterial: THREE.Material, _plainMaterial?: THREE.Material) {
     if (!tuned.has(skullMaterial)) {
@@ -92,8 +103,25 @@ export class Buoy {
       const uniforms = (skullMaterial as THREE.ShaderMaterial).uniforms;
       if (uniforms?.uUnlit) uniforms.uUnlit.value = BUOY_UNLIT;
     }
+    this.fadeUniform = (skullMaterial as THREE.ShaderMaterial).uniforms?.uFade ?? null;
     this.group.add(new THREE.Mesh(buoyGeometry(), skullMaterial));
     this.group.visible = false;
+  }
+
+  /** The rider hit it: it lurches away from `dir` (the side the rider is on, +1 is +x), dips, and rings back upright. */
+  strike(dir: number, time: number): void {
+    this.strikeDir = dir;
+    this.strikeAt = time;
+  }
+
+  /** Screen-door the buoy away as the camera comes right up to it (a chase camera passing a buoy the rider just clipped). */
+  fadeNear(camera: THREE.Vector3): void {
+    if (!this.fadeUniform || !this.active) return;
+    const dx = this.x - camera.x;
+    const dy = this.group.position.y + 1.0 - camera.y;
+    const dz = this.z - camera.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    this.fadeUniform.value = Math.min(1, Math.max(0, (FADE_START - d) / (FADE_START - FADE_FULL)));
   }
 
   /** Put the buoy at a spot on the course. */
@@ -102,6 +130,8 @@ export class Buoy {
     this.z = z;
     this.smashed = false;
     this.active = true;
+    this.strikeAt = -Infinity;
+    if (this.fadeUniform) this.fadeUniform.value = 0;
     this.group.visible = true;
     this.group.position.set(x, 0, z);
   }
@@ -118,8 +148,12 @@ export class Buoy {
 
   update(time: number, ocean: Ocean): void {
     if (!this.active) return;
-    this.group.position.y = ocean.height(this.x, this.z) - 0.3 + 0.1 * Math.sin(time * 2.5 + this.x);
-    this.group.rotation.z = 0.08 * Math.sin(time * 2 + this.z);
-    this.group.rotation.x = 0.06 * Math.sin(time * 1.7 + this.x);
+    // A strike's recoil: thrown over away from the rider and forward, dipping, then rocking back upright as it dies away.
+    const k = (time - this.strikeAt) / RECOIL_SECONDS;
+    const fall = k >= 0 && k < 1 ? (1 - k) * (1 - k) : 0;
+    const rock = fall > 0 ? fall * Math.cos(k * 9) : 0;
+    this.group.position.y = ocean.height(this.x, this.z) - 0.3 + 0.1 * Math.sin(time * 2.5 + this.x) - RECOIL_SINK * fall;
+    this.group.rotation.z = 0.08 * Math.sin(time * 2 + this.z) + this.strikeDir * RECOIL_TILT * rock; // +z roll tips the top towards -x
+    this.group.rotation.x = 0.06 * Math.sin(time * 1.7 + this.x) + RECOIL_TILT * 0.5 * rock;
   }
 }

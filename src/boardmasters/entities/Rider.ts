@@ -395,6 +395,11 @@ export class Rider {
     return this.y - ocean.height(this.x, this.z);
   }
 
+  /** Whether the white flash of a hit (flinch) is showing or about to: the run's own pulses leave the model alone meanwhile. */
+  get hitFlashing(): boolean {
+    return this.flashUntil > 0;
+  }
+
   /** Whiten the model (RAGE pulses, hit flashes). */
   setFlash(amount: number): void {
     this.flash = amount;

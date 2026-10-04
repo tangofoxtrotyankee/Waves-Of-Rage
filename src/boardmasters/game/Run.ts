@@ -101,6 +101,8 @@ export class Run {
   /** The combo reader (the HUD shows its held presses). */
   readonly combos = new ComboReader();
   private invulnerableUntil = 0;
+  /** Whether the surfer is pulsing white for its invulnerability (cleared when it ends). */
+  private pulsing = false;
   private bumpCooldown = 0;
   /** A blow the surfer threw that lands a moment later (when the fist arrives): its time, its kind and the word to show. */
   private impact: { at: number; kind: ImpactKind; label: string; color: string; scale: number; target: Rider } | null = null;
@@ -140,9 +142,10 @@ export class Run {
       this.rivals.push(rival);
       scene.add(rival.group, rival.shadow);
     }
-    const drum = createPS1Material({ map: skullTexture() });
+    // One material per buoy (one texture): each fades on its own as the camera comes up to it.
+    const skull = skullTexture();
     for (let i = 0; i < BUOY_POOL; i++) {
-      const buoy = new Buoy(drum);
+      const buoy = new Buoy(createPS1Material({ map: skull, fade: true }));
       this.buoys.push(buoy);
       scene.add(buoy.group);
     }
@@ -191,6 +194,7 @@ export class Run {
     this.lastLanding = null;
     this.floating = [];
     this.invulnerableUntil = 0;
+    this.pulsing = false;
     this.bumpCooldown = 0;
     this.impact = null;
     this.hitStop = 0;
@@ -379,8 +383,15 @@ export class Run {
         }
       }
     }
-    s.group.visible = s.wiped || this.time >= this.invulnerableUntil || Math.floor(this.time * 12) % 2 === 0;
+    // Invulnerable after a hit: the surfer pulses white (never blinks out of sight); RAGE has its own pulse.
     if (this.raging) s.setFlash(0.2 + 0.2 * Math.sin(this.time * 20));
+    else if (!s.wiped && this.time < this.invulnerableUntil) {
+      if (!s.hitFlashing) s.setFlash(0.3 + 0.3 * Math.sin(this.time * 30));
+      this.pulsing = true;
+    } else if (this.pulsing) {
+      this.pulsing = false;
+      if (!s.hitFlashing) s.setFlash(0);
+    }
 
     if (!live) return;
     this.distance = s.z;
@@ -553,14 +564,18 @@ export class Run {
           this.shake(amount, seconds);
           this.float(`SMASH +${RAGE.smashPoints}`, hex(PALETTE.gold), 1);
         } else if (this.time >= this.invulnerableUntil) {
+          // A thud: the surfer is thrown clear to the side (about 1.8 m, past the buoy and out of the chase camera's path),
+          // the buoy lurches away and rings back, and the run holds for a beat.
           const dir = Math.sign(s.x - b.x || 1);
           s.speed *= SCORING.hitSpeedFactor;
-          s.shoveVx = dir * 6;
+          s.shoveVx = dir * IMPACT.buoyShove;
           s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.45);
           s.flinch(dir, 1.2, this.time);
+          b.strike(dir, this.time);
           this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.buoySplash);
           const [amount, seconds] = IMPACT.shake.buoy;
           this.shake(amount, seconds);
+          this.hitStop = Math.max(this.hitStop, IMPACT.hitStop.buoy);
           this.damage('OUCH!');
         }
       }
@@ -875,6 +890,7 @@ export class Run {
       }
       this.applyNearFade(r, r.knockedOut ? 0 : Math.max(near, between));
     }
+    for (const b of this.buoys) b.fadeNear(cam);
   }
 
   /**
