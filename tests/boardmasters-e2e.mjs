@@ -222,7 +222,8 @@ try {
   const halfSpin = async () => {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
-      await ev(() => { window.bm.run.lastLanding = null; });
+      // No course buoy in the way: a buoy clipped on the jump would be a second hit, not this crash.
+      await ev(() => { const r = window.bm.run; r.lastLanding = null; r.invulnerableUntil = 0; for (const b of r.buoys) if (b.active && b.z > r.surfer.z - 5 && b.z < r.surfer.z + 80) b.retire(); });
       await page.keyboard.press('Space'); await wait(60);
       if (!(await surfer()).airborne) { await wait(300); continue; }
       await page.keyboard.down('ArrowLeft');
@@ -296,8 +297,8 @@ try {
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 3; });
     await page.keyboard.press('Space');
     if (!(await until(() => window.bm.run.surfer.airborne, 600))) { await wait(300); continue; }
-    await ev(() => { const s = window.bm.run.surfer; s.vy = Math.max(s.vy, 7); });
-    await page.keyboard.down('ArrowLeft');
+    // The jump gets a known height and LEFT goes down in the same frame, inside the page, so a slow machine cannot press it late.
+    await ev(() => { const s = window.bm.run.surfer; s.vy = Math.max(s.vy, 7); window.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowLeft', key: 'ArrowLeft' })); });
     // Released inside the page on the first frame the surfer falls (or has turned 45 degrees), so a slow machine does not hold it late.
     const atRelease = await ev(() => new Promise((resolve) => {
       const tick = () => {
@@ -309,7 +310,10 @@ try {
       tick();
     }));
     await page.keyboard.up('ArrowLeft');
-    if (await until(() => window.bm.run.lastLanding !== null, 3000)) released = { atReleaseDeg: +atRelease.toFixed(1), landing: await ev(() => window.bm.run.lastLanding), health: await ev(() => window.bm.run.health) };
+    const landedNow = await until(() => window.bm.run.lastLanding !== null, 3000);
+    // A swell rising under the jump can cut the air too short for any spin to build (the rule keeps such hops straight): try again.
+    if (atRelease <= 8) continue;
+    if (landedNow) released = { atReleaseDeg: +atRelease.toFixed(1), landing: await ev(() => window.bm.run.lastLanding), health: await ev(() => window.bm.run.health) };
   }
   check('a spin let go at the top of a jump settles upright: clean landing, no heart lost', !!released && released.atReleaseDeg > 8 && released.landing.clean && released.health === 3, JSON.stringify(released));
   await wait(400);
@@ -361,19 +365,19 @@ try {
   const rageStrike = await strike(3, 1.0, 1, 'x');
   check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9), `strike=${JSON.stringify(rageStrike)} ${await ev(() => { const r = window.bm.run; const s = r.surfer; return JSON.stringify({ state: r.state, kos: r.knockouts, health: r.health, texts: r.floating.map((f) => f.text), stun: +(s.stunnedUntil - r.time).toFixed(2), air: s.airborne, z: +s.z.toFixed(0), speed: +s.speed.toFixed(1) }); })}`);
 
-  // --- combos: JUMP RIGHT RIGHT barrel-rolls, UP UP boosts ---
+  // --- combos: RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); }
   // Retried: a roll cut short by a rising face (under half a second) is not scored, and the next flight would be read instead.
   let rolled = null;
   for (let tries = 0; tries < 5 && !(rolled && rolled.rolled); tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.surfer.rollProgress = 0; });
-    await page.keyboard.press('Space'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
     await wait(80);
     if (!(await ev(() => window.bm.run.surfer.rolling))) { await wait(400); continue; }
     rolled = await until(() => window.bm.run.lastLanding !== null, 4000) ? await ev(() => window.bm.run.lastLanding) : null;
   }
-  check('JUMP RIGHT RIGHT is a barrel roll that lands for points', !!rolled && rolled.rolled && rolled.clean && rolled.points >= 750, JSON.stringify(rolled));
+  check('RIGHT RIGHT UP is a barrel roll that lands for points', !!rolled && rolled.rolled && rolled.clean && rolled.points >= 750, JSON.stringify(rolled));
   let boosted = false;
   for (let tries = 0; tries < 3 && !boosted; tries++) {
     await grounded();
@@ -522,11 +526,11 @@ try {
   let phoneRolled = false;
   for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
     for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tapAt(...BUTTON.jump); await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tp.waitForTimeout(80);
+    await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tapAt(...BUTTON.up); await tp.waitForTimeout(80);
     phoneRolled = await tp.evaluate(() => window.bm.run.surfer.rolling);
     if (!phoneRolled) await tp.waitForTimeout(500);
   }
-  check('phone: JUMP RIGHT RIGHT on the pad barrel-rolls', phoneRolled);
+  check('phone: RIGHT RIGHT UP on the pad barrel-rolls', phoneRolled);
   await tapAt(W / 2, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));

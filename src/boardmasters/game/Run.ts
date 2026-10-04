@@ -536,7 +536,9 @@ export class Run {
       s.crashUntil = this.time + TRICKS.crashSeconds;
       s.stunnedUntil = Math.max(s.stunnedUntil, this.time + TRICKS.crashSeconds);
       s.speed *= TRICKS.badLandingSpeed;
-      this.damage('WIPEOUT -1');
+      // Like buoys, a crash costs no heart while the last one's invulnerability lasts (a buoy clipped in the air, then the landing).
+      if (this.time >= this.invulnerableUntil) this.damage('WIPEOUT -1');
+      else this.float('CRASH!', hex(PALETTE.red), 1);
       return;
     }
     const big = l.airTime >= SCORING.bigAirSeconds;

@@ -15,9 +15,10 @@ export interface Combo {
 }
 
 export const COMBOS: Combo[] = [
-  // JUMP-led, so two quick carve taps and a pump (ordinary riding on a phone) never launch an accidental roll.
-  { id: 'barrelRollRight', name: 'BARREL ROLL', sequence: ['J', 'R', 'R'] },
-  { id: 'barrelRollLeft', name: 'BARREL ROLL', sequence: ['J', 'L', 'L'] },
+  // The player's own design: RIGHT RIGHT UP (or LEFT LEFT UP). The tight COMBO_WINDOW keeps ordinary weaving and pumping from
+  // firing it by accident.
+  { id: 'barrelRollRight', name: 'BARREL ROLL', sequence: ['R', 'R', 'F'] },
+  { id: 'barrelRollLeft', name: 'BARREL ROLL', sequence: ['L', 'L', 'F'] },
   { id: 'boost', name: 'BOOST', sequence: ['F', 'F'] },
 ];
 

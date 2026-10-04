@@ -458,7 +458,7 @@ export const TRICKS = {
   /** A bad landing keeps this much speed and costs a heart. */
   badLandingSpeed: 0.5,
   crashSeconds: 0.7,
-  /** The barrel roll (JUMP RIGHT RIGHT / JUMP LEFT LEFT): a full roll about the board over this long, with a pop if the air is short. */
+  /** The barrel roll (RIGHT RIGHT UP / LEFT LEFT UP): a full roll about the board over this long, with a pop if the air is short. */
   rollSeconds: 0.55,
   /** Started in the air, the roll pops the rider up to at least this fraction of a jump's lift, so it has the air to finish. */
   rollPop: 0.75,
