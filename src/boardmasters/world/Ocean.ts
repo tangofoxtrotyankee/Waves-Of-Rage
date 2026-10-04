@@ -210,23 +210,23 @@ export class Ocean {
         this.normals[p + 1] = nl;
         this.normals[p + 2] = -ndz * nl;
 
-        // Deep -> mid -> light by height. No allocations.
-        let t = (h + 1.8) / 3.6;
+        const ax = x < 0 ? -x : x;
+        const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
+        // Deep -> mid -> light by height (the rise at the edges does not count). No allocations.
+        let t = (h - EDGE.rise * edge + 1.8) / 3.6;
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const low = t < 0.5;
         const t2 = low ? t * 2 : (t - 0.5) * 2;
         const a = low ? DEEP : MID;
         const b = low ? MID : LIGHT;
         // Whitewater: crests, the faces travelling towards the rider, steep ramps, the edges and drifting patches, broken up along the crest.
-        const ax = x < 0 ? -x : x;
-        const edge = ax > halfWidth ? smoothstep(halfWidth, halfWidth + EDGE.fade, ax) : 0;
         const zz = z + SWELL.speed * time;
         const lateral = 0.55 + 0.45 * Math.sin(x * 0.9 + zz * 0.35);
         const patch = Math.sin(x * 0.43 + zz * 0.19) * Math.sin(x * 0.17 - zz * 0.31 + 1.7);
         let foam =
           (smoothstep(WATER.crest, WATER.crestFull, h) + smoothstep(WATER.face, WATER.faceFull, dz) * smoothstep(0.1, 1.0, h)) * lateral +
           smoothstep(0.7, 1.15, Math.hypot(dx, dz)) +
-          edge * 0.95 +
+          smoothstep(0.1, 0.8, edge) * 0.7 +
           WATER.patches * smoothstep(0.3, 0.85, patch);
         foam = (foam > 1 ? 1 : foam) * far;
         this.foam[p / 3] = foam;

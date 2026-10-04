@@ -90,22 +90,22 @@ function clouds(): THREE.BufferGeometry {
   const red = rgb(0x9a2a5a);
   const purple = rgb(PALETTE.cloudDark);
   const deep = rgb(0x2a0e44);
-  for (let i = 0; i < 34; i++) {
-    const elevation = 0.06 + Math.pow(rng(), 1.1) * 0.48;
+  for (let i = 0; i < 38; i++) {
+    const elevation = 0.05 + Math.pow(rng(), 1.05) * 0.5;
     const azimuth = (rng() - 0.5) * Math.PI * 0.95;
-    const high = smoothstep(0.08, 0.45, elevation);
+    const high = smoothstep(0.06, 0.45, elevation);
     const blobs = 3 + Math.floor(rng() * 4);
-    const length = 14 + rng() * 26 * (1 - high * 0.4);
-    // Underside and top colours by height in the sky.
+    const length = 18 + rng() * 34 * (1 - high * 0.3);
+    // Underside and top colours by height in the sky: gold and orange low down, pink under purple higher up.
     const under: Rgb = high < 0.4 ? mixRgb(gold, orange, high / 0.4) : mixRgb(orange, pink, (high - 0.4) / 0.6);
     const top: Rgb = high < 0.5 ? mixRgb(red, purple, high * 2) : mixRgb(purple, deep, (high - 0.5) * 2);
     const pieces: THREE.BufferGeometry[] = [];
     for (let b = 0; b < blobs; b++) {
       const r = 3 + rng() * 4;
       const blob = new THREE.SphereGeometry(r, 6, 3);
-      blob.scale(length / (blobs * r) * 1.4, 0.32 + rng() * 0.15, 0.6);
+      blob.scale(length / (blobs * r) * 1.4, 0.4 + rng() * 0.2, 0.6);
       blob.translate(((b + 0.5) / blobs - 0.5) * length, (rng() - 0.5) * 1.2, (rng() - 0.5) * 3);
-      const h = r * 0.4;
+      const h = r * 0.5;
       pieces.push(paintGeometry(blob, (_x, y) => mixRgb(under, top, clamp((y + h) / (2 * h) - 0.15, 0, 1))));
     }
     const cloud = mergeGeometries(pieces.map((g) => g.toNonIndexed()));

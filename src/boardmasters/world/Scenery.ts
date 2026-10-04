@@ -16,7 +16,7 @@ const SPAN = 1200;
 const CHUNK = 150;
 const CHUNKS = SPAN / CHUNK;
 /** The cliffs rise at world +x (screen-left), their foot this far from the centre line. */
-const CLIFF_X = 23;
+const CLIFF_X = 20;
 /** The pier runs along world -x (screen-right): its centre line, width, deck height and extent along each span. */
 const PIER = { x: -23.5, width: 16, deck: 3.3, start: 40, end: 470 } as const;
 /** Festival stages on the pier, metres into the span. */
@@ -432,21 +432,25 @@ export class Scenery {
     }
     // Sand and rocks at the waterline, palms and lamp posts with string lights on the sand.
     for (let z = -10; z < SPAN + 10; z += 30) {
-      const sand = new THREE.BoxGeometry(9, 3, 31);
-      sand.rotateZ(-0.12);
-      sand.translate(CLIFF_X - 1.2, -0.2, z + 15);
-      b.add('solid', z + 15, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((px - 18) / 5 + (py > 0.8 ? 0.3 : 0), 0, 1))));
+      for (let k = 0; k < 3; k++) {
+        // Ragged pieces of beach, so the waterline is not one straight edge.
+        const sand = new THREE.BoxGeometry(8 + rng() * 4, 3, 10.6);
+        sand.rotateZ(0.1 + rng() * 0.06); // low at the water, rising to the cliffs
+        sand.rotateY((rng() - 0.5) * 0.16);
+        sand.translate(CLIFF_X - 1 + rng() * 1.5, -0.35 + rng() * 0.3, z + 5 + k * 10);
+        b.add('solid', z + 5 + k * 10, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((px - CLIFF_X + 3) / 4 + (py > 0.8 ? 0.3 : 0), 0, 1))));
+      }
       for (let i = 0; i < 3; i++) {
         const r = 0.8 + rng() * 1.6;
         const rock = new THREE.IcosahedronGeometry(r, 0);
         rock.scale(1, 0.7, 1.2);
-        rock.translate(18.5 + rng() * 3.5, 0.2, z + rng() * 30);
+        rock.translate(CLIFF_X - 2 + rng() * 3, 0.5, z + rng() * 30);
         b.add('solid', z, finish(rock, (_x, _y, _z, _nx, ny) => mixRgb(C.rock, C.cliffLit, clamp(ny, 0, 1) * 0.5)));
       }
-      if (rng() < 0.7) palm(b, 21 + rng() * 2, 1.0, z + rng() * 30, rng, 0.9);
+      if (rng() < 0.7) palm(b, CLIFF_X + rng() * 2, 1.4, z + rng() * 30, rng, 0.9);
       // Lamp posts every 30 m with lights strung between them.
-      b.box('solid', 0.15, 4, 0.15, 20.5, 2, z, C.darkWood);
-      stringLights(b, 20.5, 3.9, z, 20.5, 3.9, z + 30, 0.8, rng);
+      b.box('solid', 0.15, 4, 0.15, CLIFF_X - 0.5, 2.6, z, C.darkWood);
+      stringLights(b, CLIFF_X - 0.5, 4.5, z, CLIFF_X - 0.5, 4.5, z + 30, 0.8, rng);
     }
   }
 
@@ -536,9 +540,16 @@ export class Scenery {
   private buildBeach(b: Builder, rng: () => number): void {
     for (let z = -10; z < SPAN + 10; z += 30) {
       const sand = new THREE.BoxGeometry(60, 4, 31);
-      sand.rotateZ(0.06);
-      sand.translate(-49, -1, z + 15);
+      sand.rotateZ(-0.06); // rising inland
+      sand.translate(-51, -1, z + 15);
       b.add('solid', z + 15, finish(sand, (px, py) => mixRgb(C.wetSand, C.sand, clamp((-px - 19) / 4 + (py > 0.5 ? 0.3 : 0), 0, 1))));
+      for (let k = 0; k < 3; k++) {
+        const front = new THREE.BoxGeometry(6 + rng() * 3, 3, 10.6);
+        front.rotateZ(-0.1 - rng() * 0.05);
+        front.rotateY((rng() - 0.5) * 0.16);
+        front.translate(-22 - rng() * 1.5, -0.6 + rng() * 0.3, z + 5 + k * 10);
+        b.add('solid', z + 5 + k * 10, finish(front, (px, py) => mixRgb(C.wetSand, C.sand, clamp((-px - 19) / 4 + (py > 0.5 ? 0.3 : 0), 0, 1))));
+      }
       const onPier = z + 30 > PIER.start && z < PIER.end;
       // Palms, sparser behind the pier.
       for (let i = 0; i < (onPier ? 2 : 4); i++) palm(b, -(onPier ? 33 : 20) - rng() * 18, 1.0, z + rng() * 30, rng, 0.9 + rng() * 0.3);

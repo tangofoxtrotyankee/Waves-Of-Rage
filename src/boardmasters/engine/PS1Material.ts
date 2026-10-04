@@ -231,11 +231,12 @@ vec3 waterShade(vec3 lit) {
     float flick = floor(uTime * 7.0);
     vec3 jitter = vec3(waterHash(cell + flick) - 0.5, 0.0, waterHash(cell.yx + flick * 1.3) - 0.5) * 0.34;
     float near = 1.0 - smoothstep(30.0, 70.0, vDepth);
+    float close = smoothstep(4.0, 14.0, vDepth); // none right under the camera
     vec3 n = normalize(vNormalW + jitter * near);
     float g = max(dot(reflect(v, n), uGlintDir), 0.0);
     float sparkle = pow(g, 90.0) * (near > 0.0 ? step(0.45, waterHash(floor(gl_FragCoord.xy * 0.5) + flick)) * 1.6 : 1.0);
     float path = pow(max(dot(reflect(v, vec3(0.0, 1.0, 0.0)), uGlintDir), 0.0), 220.0) * (1.0 - near * 0.7);
-    float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) + path, 0.0, 1.0);
+    float glint = clamp(sparkle * mix(1.0, 0.6, 1.0 - near) * close + path, 0.0, 1.0);
     col = mix(col, uGlintColor, glint);
     // Whitewater on crests and breaking faces.
     if (vFoam > pattern) col = mix(uFoamShade, uFoamColor, step(pattern + 0.2, vFoam)) * clamp(0.5 + 0.55 * vLight, 0.0, 1.0);

@@ -33,6 +33,7 @@ function buoyGeometry(): THREE.BufferGeometry {
     new THREE.Vector2(0.0, 1.7),
   ];
   const bell = new THREE.LatheGeometry(profile, 10);
+  bell.rotateY(Math.PI / 2); // the two skulls face down the course and back up it
   const uv = bell.getAttribute('uv');
   const [v0, v1] = SKULL_BODY_V;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, v0 + (v1 - v0) * Math.min(1, uv.getY(i) * 1.2));
@@ -47,7 +48,7 @@ function buoyGeometry(): THREE.BufferGeometry {
     bar.translate(0.32, 0, 0);
     bar.rotateY(a);
     bar.translate(0, 2.2, 0);
-    parts.push(plain(bar, PALETTE.outline));
+    parts.push(plain(bar, 0x3a3048));
     const rail = new THREE.BoxGeometry(0.62, 0.08, 0.08);
     rail.translate(0, 0, 0.31);
     rail.rotateY(a + Math.PI / 4);
@@ -78,6 +79,9 @@ export class Buoy {
 
   /** `skullMaterial` maps skullTexture(); the plain parts use its white rows, so the second material is no longer needed. */
   constructor(skullMaterial: THREE.Material, _plainMaterial?: THREE.Material) {
+    // Half lit: the buoys face away from the low sun, and the mockup's read bright red from the course.
+    const uniforms = (skullMaterial as THREE.ShaderMaterial).uniforms;
+    if (uniforms?.uUnlit) uniforms.uUnlit.value = 0.45;
     this.group.add(new THREE.Mesh(buoyGeometry(), skullMaterial));
     this.group.visible = false;
   }
