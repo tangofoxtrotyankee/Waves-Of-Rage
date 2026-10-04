@@ -213,6 +213,7 @@ export class Rider {
     this.pumpIn = false;
     this.brakeIn = false;
     this.group.visible = true;
+    if (this.flash !== 0) this.setFlash(0);
     this.animator.reset();
     this.updateVisuals(1 / 60, ocean, 0);
   }
@@ -268,6 +269,21 @@ export class Rider {
     this.fade = clamp(amount, 0, 1);
     for (const m of this.model.materials) m.uniforms.uFade.value = this.fade;
     this.shadowMaterial.uniforms.uFade.value = this.fade;
+  }
+
+  /**
+   * A ready-made near fade for the run to call each frame on riders that
+   * are not the player: solid beyond `start` metres from the camera,
+   * screen-doored to 90 % at `full` metres, measured to the rider's chest.
+   * Returns the fade it set.
+   */
+  fadeNear(camera: THREE.Vector3, start = 3.8, full = 1.8): number {
+    const dx = this.x - camera.x;
+    const dy = this.y + this.spec.build - camera.y;
+    const dz = this.z - camera.z;
+    const fade = 0.9 * clamp((start - Math.sqrt(dx * dx + dy * dy + dz * dz)) / (start - full), 0, 1);
+    if (fade !== this.fade) this.setNearFade(fade);
+    return fade;
   }
 
   /** BARREL ROLL: launch (if on the water) and roll a full turn about the board. False if the rider cannot right now. */

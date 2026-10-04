@@ -96,17 +96,18 @@ function paintShorts(ctx: Ctx, spec: RiderSpec, r: Region): void {
   const light = mixColor(accent, 0xffffff, 0.35);
   switch (look.shorts) {
     case 'floral':
-      // Big jagged leaves in the accent, small flowers in a lighter tint (the mockup's teal-and-magenta print).
-      for (let i = 0; i < 9; i++) {
+      // Big jagged leaves in the accent, small flowers in a lighter tint (the mockup's teal-and-magenta print), bold enough to read at 20 pixels.
+      for (let i = 0; i < 7; i++) {
         let x = Math.floor(rng() * r.w);
-        let y = 4 + Math.floor(rng() * (r.h - 6));
+        let y = 3 + Math.floor(rng() * (r.h - 12));
         const dx = rng() < 0.5 ? 1 : -1;
-        for (let k = 0; k < 7; k++) {
-          wrapPixel(ctx, r, accent, x, y);
-          wrapPixel(ctx, r, accent, x + 1, y);
-          if (k % 2 === 0) wrapPixel(ctx, r, accent, x + 2 * dx, y);
+        for (let k = 0; k < 10; k++) {
+          const w = k < 2 || k > 7 ? 2 : 3;
+          for (let j = 0; j < w; j++) wrapPixel(ctx, r, accent, x + j, y);
+          // Jagged edges: a tooth every other row.
+          if (k % 2 === 0) wrapPixel(ctx, r, accent, x + (dx > 0 ? w : -1), y);
           x += dx;
-          y += rng() < 0.7 ? 1 : 0;
+          y += rng() < 0.8 ? 1 : 0;
         }
       }
       for (let i = 0; i < 8; i++) {

@@ -150,10 +150,11 @@ const Y_AXIS = new THREE.Vector3(0, 1, 0);
 export class RiderAnimator {
   /** The body pivots here (hip height) for the wipeout and the knockout's tumble. */
   readonly bodyPivot = new THREE.Group();
-  /** Seconds-old state that the rider's group transform reads. */
+  /** This step's extra roll and pitch for the rider's group, radians (the punch's lean, the barge's lunge, the flinch's wobble, the brake). */
   bank = 0;
   tilt = 0;
   private model: RiderModel;
+  private time = 0;
   private readonly cur: Pose = new Float32Array(N);
   private readonly target: Pose = new Float32Array(N);
   private readonly out: Pose = new Float32Array(N);
@@ -306,6 +307,7 @@ export class RiderAnimator {
 
   update(dt: number, input: AnimInput, ocean: Ocean): void {
     const t = input.time;
+    this.time = t;
     // Events the rider does not announce: a crash (bad landing) and the wipeout begin when their flags rise.
     if (input.crashing && !this.wasCrashing) this.crashAt = t;
     this.wasCrashing = input.crashing;
@@ -713,8 +715,9 @@ export class RiderAnimator {
         this.splash(this.koBoard.x, water, this.koBoard.z, 0.6);
       }
     } else {
+      // The board skids on with the field for a while rather than stopping dead in front of the camera.
       this.koBoardV.x *= Math.exp(-2 * dt);
-      this.koBoardV.z *= Math.exp(-1.5 * dt);
+      this.koBoardV.z *= Math.exp(-0.7 * dt);
       this.koBoard.x += this.koBoardV.x * dt;
       this.koBoard.z += this.koBoardV.z * dt;
       this.koBoard.y = ocean.height(this.koBoard.x, this.koBoard.z) - 0.04;
@@ -773,10 +776,9 @@ export class RiderAnimator {
     bones[BONE.chest].rotation.set(p[C.chestPitch], p[C.chestYaw], p[C.chestRoll], 'YXZ');
     bones[BONE.neck].rotation.set(p[C.headPitch] * 0.4, p[C.headYaw] * 0.4, p[C.headRoll] * 0.4, 'YXZ');
     bones[BONE.head].rotation.set(p[C.headPitch] * 0.6, p[C.headYaw] * 0.6, p[C.headRoll] * 0.6, 'YXZ');
-    // Hair hangs: undo most of the body's pitch and roll.
-    const pitchSum = p[C.hipPitch] + p[C.spinePitch] + p[C.chestPitch] + p[C.headPitch];
-    const rollSum = p[C.spineRoll] + p[C.chestRoll] + p[C.headRoll] - p[C.bank];
-    bones[BONE.hair].rotation.set(clamp(-pitchSum * 0.7, -1.2, 0.5) - 0.1, 0, clamp(-rollSum * 0.6, -0.8, 0.8));
+    // Long hair lies down the back: it ignores the head's nod (follows the chest's lean) and stands a little off the shoulders, swaying.
+    const sway = 0.06 * Math.sin(this.time * 2.3) + (this.airW > 0.5 ? 0.12 * Math.sin(this.time * 17) : 0);
+    bones[BONE.hair].rotation.set(clamp(-p[C.headPitch] + 0.18 + sway, -0.5, 1.4), 0, clamp(-p[C.headRoll] * 0.8, -0.8, 0.8));
 
     bones[BONE.upperArmL].rotation.set(-p[C.lPitch], -p[C.lSwing], p[C.lRoll], 'XYZ');
     bones[BONE.forearmL].rotation.set(-Math.max(0, p[C.lElbow]), 0, 0);

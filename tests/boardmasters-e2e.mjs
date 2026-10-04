@@ -285,6 +285,9 @@ try {
     if (!boosted) await wait(600);
   }
   check('UP UP is a boost', boosted, `speed ${(await surfer()).speed.toFixed(1)}`);
+  // The wipeout check below moves buoys[1] into the surfer's path, but the pool retires buoys left behind (and RAGE smashes
+  // them), so how long the checks above take decides whether that one is still in play. Park it far ahead, in play.
+  await ev(() => { const r = window.bm.run; const b = r.buoys[1]; if (!b.active || b.smashed) b.place(0, r.surfer.z + 450); });
 
   // --- pause ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); } // never press Escape outside play: it would leave the page

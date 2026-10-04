@@ -216,11 +216,11 @@ export const RIDER_ANIM = {
   /** The deep knee bend on landing. */
   landSeconds: 0.22,
   /** Knockout: the body is thrown up and sideways (m/s) and tumbles (rad/s); the board flies off the other way. */
-  koUp: 5.2,
-  koSide: 3.4,
+  koUp: 6,
+  koSide: 2.6,
   koTumble: 8,
-  boardUp: 3.6,
-  boardSide: 2.2,
+  boardUp: 4.2,
+  boardSide: 1.8,
   boardTumble: 11,
   /** Floating after the splash, the body sinks this far over the respawn wait. */
   koSink: 0.55,
