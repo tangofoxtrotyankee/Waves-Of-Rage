@@ -33,9 +33,10 @@ attract mode, start, forward travel, carving, pumping, braking, jumping and
 landing, the rival, buoys, ramps and finish, a wipeout, restart, the finish,
 and Escape back to the main menu, with no console errors, plus character
 select, the field of eight, punch and barge knockouts, a clean 360 and a
-crashed 180, RAGE, pause, the follow camera and terrain, and a phone-shaped
-page (touch, upright view, tap to start and jump, the HIT and pause
-buttons). Waits are on game state, not the clock, because SwiftShader runs
+crashed 180, RAGE, the barrel roll and boost combos, pause, the follow
+camera and terrain, and a phone-shaped page (touch, upright view, tap to
+start and jump, the HIT and pause buttons, a held RIGHT on the pad, and the
+pad's barrel roll). Waits are on game state, not the clock, because SwiftShader runs
 the simulation slower than real time. Both browser suites spawn Vite's own
 script so killing it really stops the server.
 
@@ -92,8 +93,12 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 4. Hazards: hitting a skull buoy flashes the surfer, shows `OUCH!` and costs
    a heart; the third hit shows `WIPEOUT` and the results panel after a
    moment; touching the rival shows `BUMP` and pushes both apart.
-5. Finish: crossing the chequered banner shows `FINISH!` with the place and
-   the bonus; Space restarts from the start line with three hearts.
+5. Endless: there is no finish; the buoys come thicker and the cruising
+   speed rises with distance; after a wipeout the results show distance,
+   place, score, knockouts and `NEW BEST!` when it is one; the title shows
+   the best; Space restarts from the start line with three hearts. Riding
+   over a set of cyan chevrons shows `BOOST!` and a burst of speed, and
+   the chevrons vanish; the radar (top right) shows them in cyan ahead.
 6. Combat: X beside a rival shows `HIT!` and flashes it, a second X shows
    `KNOCKOUT +500` and the rival tumbles, then reappears behind you; two
    knockouts within four seconds show `X2`; Shift shoves a rival hard and
@@ -109,15 +114,22 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 10. Pause: Esc (the top-centre button on touch) shows PAUSED; Space (tap)
     resumes; M (MENU corner) returns to the main menu with the sequel's
     entry highlighted.
-11. Look: `bm.look.snap = false` in the console stops the polygon jitter,
-    `bm.look.affine = false` straightens the water texture, `bm.look.quantize
-    = false` removes the banding, `bm.look.dither = false` the dither;
-    `?res=320` is blockier.
-12. Touch (`?touch=1`, or a phone): the field is upright; a held finger
-    moved sideways carves, the CARVE buttons carve, a tap jumps, HIT and BRG
-    attack, the top-centre button pauses, MENU works; the first tap goes
-    fullscreen where allowed.
-13. Console: no errors throughout, on either page.
+11. Look: the sea is faceted and calm towards the horizon (no band of
+    noise under the sun); cliffs with palms pass on both sides and the pier
+    with its crowd, flags and banner comes round about every 1,200 m; the
+    sun has rays and the clouds drift. `bm.look.snap = false` in the
+    console stops the polygon jitter, `bm.look.affine = false` straightens
+    the water texture, `bm.look.quantize = false` removes the banding,
+    `bm.look.dither = false` the dither; `?res=320` is blockier.
+12. Touch (`?touch=1`, or a phone): the field is upright; holding LEFT or
+    RIGHT on the pad carves, holding UP pumps, JUMP jumps (a tap elsewhere
+    does too), HIT and BRG attack, the top-centre button pauses, MENU works;
+    the first tap goes fullscreen where allowed.
+13. Combos: RIGHT RIGHT UP (keys or pad, within about half a second) shows
+    `BARREL ROLL!`, launches the surfer into a full roll about the board
+    and lands for `BARREL ROLL +...`; UP UP shows `BOOST!` and a burst of
+    speed and spray; the presses show briefly under the surfer.
+14. Console: no errors throughout, on either page.
 
 ## Manual test script (Waves of Rage)
 

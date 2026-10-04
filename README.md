@@ -242,28 +242,30 @@ Waves-Of-Rage/
         ├── engine/
         │   ├── three.ts    # Imports Three with colour management off (colours are written as given)
         │   ├── Renderer.ts # WebGL canvas + HUD canvas at 426x240 (240x426 upright), nearest-neighbour FIT scaling
-        │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud light, fog, 5-bit banding
-        │   ├── Textures.ts # 16/32 px textures painted at runtime (water, boards, skull buoy, chequered flag)
-        │   ├── Hud2D.ts    # Pixel-font text and images on the HUD canvas (reuses sprites/font.png)
-        │   ├── Input.ts    # Keyboard + touch (stick, taps, on-screen buttons, several fingers) into one InputState
-        │   ├── TouchButtons.ts # CARVE < >, HIT and BRG layout, drawn by the HUD and hit-tested by Input
+        │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud or faceted light, fog, 5-bit banding
+        │   ├── Textures.ts # Textures painted at runtime (water, boards, shorts, skull buoy, crowd, banner, flag)
+        │   ├── Hud2D.ts    # Pixel-font text (shadowed or outlined), panels, gradient bars and images on the HUD canvas
+        │   ├── Input.ts    # Keyboard + the phone's buttons into one InputState, with every press for the combo reader
+        │   ├── TouchButtons.ts # The phone pad (LEFT, UP, RIGHT) and JUMP, HIT, BRG, drawn by the HUD and hit-tested by Input
         │   ├── immersive.ts # Fullscreen + orientation lock for phones
         │   ├── Loop.ts     # Fixed 60 Hz step, render per frame
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
         │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
-        │   ├── Course.ts   # Course data (Sunset Bay) and the seeded layout of ramps, troughs and buoys
-        │   └── Sky.ts      # Sunset dome, sun disc, island silhouettes
+        │   ├── Course.ts   # Course data (Sunset Bay) and the endless generator of ramps, troughs, buoys and boost gates
+        │   ├── Scenery.ts  # The shore: cliffs with palms and waterfalls, the pier with its crowd, tents, flags and banner
+        │   └── Sky.ts      # Sunset dome, sun with rays, drifting clouds
         ├── entities/
         │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, rebuildable low-poly rig
         │   ├── Surfer.ts   # The player's rider (input -> control)
         │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
-        │   ├── Buoy.ts     # Skull buoy hazard (smashable in RAGE)
-        │   ├── FinishLine.ts # Posts and chequered banner
+        │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
+        │   ├── Chevron.ts  # Boost gate: chevrons on the water, pooled; ride over them for a BOOST
         │   └── Spray.ts    # Spray as one instanced mesh
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
             ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
+            ├── Combos.ts   # Input combos (RIGHT RIGHT UP = barrel roll, UP UP = boost) and the reader
             └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera, HUD
 ```
 
@@ -402,10 +404,14 @@ presentation around it. It has its first playable prototype, reached from the
 title screen's second menu entry or directly at `boardmasters.html`
 (`/boardmasters` on the production server).
 
-**What is in the prototype.** Sunset Bay, a 1,200 m course on a swell that
+**What is in the prototype.** Sunset Bay, an endless course on a swell that
 is real terrain: you climb faces, drop into troughs and launch off crests
 when you are going fast enough, and steep-backed ramps and slowing troughs
-are laid out along the way. Seven rivals ride their own lanes, steer round
+are generated ahead of you as you ride, with the buoys coming thicker and
+the cruising speed rising the further you get. Cyan chevrons on the water
+are boost gates: ride over them for a free BOOST. There is no finish line: a
+run ends with the last heart, and your best score and distance are kept on
+the device (and shown on the title). Seven rivals ride their own lanes, steer round
 the skull buoys, keep pace with you, and the strong ones shoulder-check you
 when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
 (Shift) knock rivals about and, after two hits, out of the race for 500
@@ -416,7 +422,7 @@ the spin (180 to 720) and the grab score, with a clean-landing bonus; land
 badly and you crash for a heart. A skull buoy costs a heart too; three and
 you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
 faster for eight seconds, one hit knocks out, buoys smash for points and
-the sea turns hot pink. A chequered banner marks the finish. The title
+the sea turns hot pink. The title
 screen picks the character (seven, with SPEED / TURN / POWER / RAGE bars
 that scale the physics and colour the rig); the choice is remembered.
 
@@ -424,10 +430,28 @@ that scale the physics and colour the rig); the choice is remembered.
 and tightens the carve, Space jumps (also from a crest, for more height),
 X or J punches (grabs in the air), Shift barges, Esc pauses (M on the pause
 panel for the main menu). On the title, Left/Right change character. On
-phones: hold a finger and move it sideways to carve or use the CARVE
-buttons, tap to jump, HIT and BRG are the buttons bottom-right, the pause
-button is top-centre and MENU is the top-left corner. The first tap asks
-for fullscreen and locks the phone upright where the browser allows it.
+phones the left thumb has a pad of LEFT, UP and RIGHT (hold LEFT/RIGHT to
+carve, hold UP to pump) and the right thumb has JUMP, HIT and BRG; the
+pause button is top-centre and MENU is the top-left corner. The first tap
+asks for fullscreen and locks the phone upright where the browser allows it.
+
+**Combos.** Presses within about half a second of each other form combos,
+from the keyboard or the pad alike (`src/boardmasters/game/Combos.ts`):
+RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch and a full roll
+about the board, 400 points plus the landing bonus; land before it is done
+and you crash), UP UP is a BOOST (a burst of speed, on a short cooldown).
+The HUD shows the presses it is holding, so moves can be learnt by watching.
+
+**The look.** Everything is drawn at 426x240 (240x426 upright) through one
+shader with the PlayStation's vertex snapping, affine textures and 5-bit
+dithered colour. The sea is faceted: flat-shaded, each facet its own shade,
+calming towards the horizon so the distance does not sparkle. The shore is
+built in code from the palette: cliffs with palms and waterfalls, and every
+so often the pier with its pilings, crowd, tents, flags and the BOARDMASTERS
+banner; the sky is a sunset dome with the sun's rays and drifting clouds.
+The HUD follows the gameplay mockup: boxes for hearts and position and for
+score and distance, a gradient RAGE bar, a speed bar, and a radar of the
+course ahead (buoys red, gates cyan, rivals white, you gold).
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
 above), imports nothing from Phaser and shares only the platform detection,

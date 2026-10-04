@@ -2,10 +2,10 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import { colorGeometry, createPS1Material } from '../engine/PS1Material';
 import { clamp, damp } from '../engine/math';
-import { boardTexture } from '../engine/Textures';
+import { boardTexture, shortsTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { statMultipliers, type RiderSpec } from '../game/characters';
-import { COMBAT, PALETTE, PHYSICS, TRICKS } from '../game/constants';
+import { BOOST, COMBAT, PALETTE, PHYSICS, TRICKS } from '../game/constants';
 import type { Ocean } from '../world/Ocean';
 
 /** The animation set from the character sheet, plus `punch` (the sheet's HIT, delivered rather than taken). */
@@ -26,7 +26,9 @@ export interface Landing {
   /** Total rotation in the air, degrees. */
   spinDeg: number;
   grabbed: boolean;
-  /** Landed within the tolerance of upright. */
+  /** A barrel roll completed in the air. */
+  rolled: boolean;
+  /** Landed within the tolerance of upright (and not mid-roll). */
   clean: boolean;
 }
 
@@ -110,6 +112,14 @@ export class Rider {
   /** Rotation accumulated in the air, radians. */
   spin = 0;
   grabbing = false;
+  /** A barrel roll in progress: direction, 0..1 progress, and the roll angle shown. */
+  rolling = false;
+  rollDir = 1;
+  rollProgress = 0;
+  rollAngle = 0;
+  /** The BOOST burst: extra spray and the pump pose until this time, and the next time one is allowed. */
+  boostUntil = 0;
+  boostCooldownUntil = 0;
   /** Set for the one step in which a punch or barge starts; the run resolves it. */
   attacking = false;
   barging = false;
@@ -126,6 +136,7 @@ export class Rider {
   private legR = new THREE.Mesh();
   private bodyMaterial: THREE.ShaderMaterial | null = null;
   private boardMaterial: THREE.ShaderMaterial | null = null;
+  private shortsMaterial: THREE.ShaderMaterial | null = null;
   private readonly current: PoseParams = { ...POSES.idle };
   private slopeDz = 0;
   private landing: Landing | null = null;
@@ -158,9 +169,11 @@ export class Rider {
     }
     this.bodyMaterial?.dispose();
     this.boardMaterial?.dispose();
+    this.shortsMaterial?.dispose();
     const c = spec.colors;
     this.bodyMaterial = createPS1Material();
     this.boardMaterial = createPS1Material({ map: boardTexture(c.board, c.boardStripe) });
+    this.shortsMaterial = createPS1Material({ map: shortsTexture(c.shorts, c.boardStripe) });
 
     // Board: a flat box with the nose tapered.
     const boardGeometry = new THREE.BoxGeometry(0.58, 0.08, 2.2, 1, 1, 3);
@@ -179,8 +192,21 @@ export class Rider {
     this.legR = new THREE.Mesh(legGeometry, this.bodyMaterial);
     this.legL.position.set(-0.1, 0.62, 0.32);
     this.legR.position.set(0.1, 0.62, -0.32);
-    const shorts = new THREE.Mesh(part(0.5, 0.24, 0.72, c.shorts, 0, 0.72, 0), this.bodyMaterial);
-    const torsoGeometry = mergeGeometries([part(0.5, 0.52, 0.3, c.skin, 0, 0.28, 0), part(0.26, 0.26, 0.26, c.skin, 0, 0.7, 0), part(0.34, 0.16, 0.34, c.hair, 0, 0.88, 0)]);
+    const shorts = new THREE.Mesh(part(0.5, 0.24, 0.72, 0xffffff, 0, 0.72, 0), this.shortsMaterial);
+    // Chest: wide at the shoulders, narrow at the waist; a head with the hairline and a few spikes.
+    const chest = new THREE.BoxGeometry(0.56, 0.52, 0.3);
+    const chestPos = chest.getAttribute('position');
+    for (let i = 0; i < chestPos.count; i++) if (chestPos.getY(i) < 0) chestPos.setX(i, chestPos.getX(i) * 0.78);
+    chest.translate(0, 0.28, 0);
+    const spikes: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 3; i++) spikes.push(part(0.1, 0.14, 0.1, c.hair, (i - 1) * 0.1, 1.0, (i % 2) * 0.06 - 0.03));
+    const torsoGeometry = mergeGeometries([
+      colorGeometry(chest, c.skin),
+      part(0.26, 0.26, 0.26, c.skin, 0, 0.7, 0),
+      part(0.34, 0.14, 0.34, c.hair, 0, 0.87, 0),
+      part(0.3, 0.1, 0.12, c.hair, 0, 0.74, -0.14),
+      ...spikes,
+    ]);
     this.torso = new THREE.Group();
     this.torso.add(new THREE.Mesh(torsoGeometry, this.bodyMaterial));
     this.torso.position.y = 0.84;
@@ -215,6 +241,11 @@ export class Rider {
     this.landing = null;
     this.spin = 0;
     this.grabbing = false;
+    this.rolling = false;
+    this.rollProgress = 0;
+    this.rollAngle = 0;
+    this.boostUntil = 0;
+    this.boostCooldownUntil = 0;
     this.attacking = false;
     this.barging = false;
     this.edgeShove = 0;
@@ -254,6 +285,30 @@ export class Rider {
     this.wiped = true;
     this.knockedOut = true;
     this.respawnAt = time + COMBAT.respawnSeconds;
+  }
+
+  /** BARREL ROLL: launch (if on the water) and roll a full turn about the board. False if the rider cannot right now. */
+  barrelRoll(dir: number, time: number): boolean {
+    if (this.wiped || time < this.stunnedUntil || this.rolling) return false;
+    if (!this.airborne) {
+      this.vy = PHYSICS.jumpVelocity * 0.95 + Math.max(0, this.vy);
+      this.y += 0.01;
+      this.airborne = true;
+      this.airTime = 0;
+    }
+    this.rolling = true;
+    this.rollDir = dir;
+    this.rollProgress = 0;
+    return true;
+  }
+
+  /** BOOST: a burst of speed. False while on cooldown or wiped. */
+  boost(time: number, gate = false): boolean {
+    if (this.wiped || (!gate && time < this.boostCooldownUntil)) return false;
+    this.speed = Math.min(PHYSICS.maxSpeed * this.stats.speed * 1.1, this.speed + BOOST.gain);
+    this.boostUntil = time + BOOST.seconds;
+    this.boostCooldownUntil = time + BOOST.cooldown;
+    return true;
   }
 
   /** The landing that happened this step, if any; reading it clears it. */
@@ -366,11 +421,16 @@ export class Rider {
       this.vy -= PHYSICS.gravity * dt;
       this.y += this.vy * dt;
       this.airTime += dt;
-      // Tricks: spin with the steer, grab with attack.
+      // Tricks: spin with the steer, grab with attack, and the barrel roll runs its course.
       this.spin += control.steer * TRICKS.spinRate * dt;
       if (wantsAttack && this.airTime > 0.1) {
         this.grabbing = true;
         this.attackBufferedUntil = 0;
+      }
+      if (this.rolling) {
+        this.rollProgress = Math.min(1, this.rollProgress + dt / TRICKS.rollSeconds);
+        const t = this.rollProgress;
+        this.rollAngle = this.rollDir * Math.PI * 2 * (t * t * (3 - 2 * t));
       }
       if (this.y <= h) {
         this.y = h;
@@ -378,11 +438,15 @@ export class Rider {
         this.airborne = false;
         const spinDeg = (Math.abs(this.spin) * 180) / Math.PI;
         const off = spinDeg % 360;
-        const clean = off <= TRICKS.landingToleranceDeg || off >= 360 - TRICKS.landingToleranceDeg;
-        this.landing = { airTime: this.airTime, spinDeg, grabbed: this.grabbing, clean };
+        const rolled = this.rolling && this.rollProgress >= TRICKS.rollLandingFraction;
+        const upright = off <= TRICKS.landingToleranceDeg || off >= 360 - TRICKS.landingToleranceDeg;
+        const clean = upright && (!this.rolling || rolled);
+        this.landing = { airTime: this.airTime, spinDeg, grabbed: this.grabbing, rolled, clean };
         this.airTime = 0;
         this.spin = 0;
         this.grabbing = false;
+        this.rolling = false;
+        this.rollAngle = 0;
       }
     }
 
@@ -394,7 +458,7 @@ export class Rider {
       : this.airborne ? (this.grabbing ? 'airTrick' : 'jump')
       : steer > 0.3 ? 'carveLeft'
       : steer < -0.3 ? 'carveRight'
-      : control.pump ? 'accelerate'
+      : control.pump || time < this.boostUntil ? 'accelerate'
       : 'idle';
     this.updateVisuals(dt, ocean, time);
   }
@@ -411,7 +475,7 @@ export class Rider {
     const pitch = this.airborne ? clamp(-this.vy * 0.05, -0.4, 0.4) : clamp(-Math.atan(this.slopeDz) * 0.6, -0.4, 0.4);
     this.group.rotateY(this.heading + this.spin);
     this.group.rotateX(pitch);
-    this.group.rotateZ(-this.heading * 0.45 + c.rigRoll);
+    this.group.rotateZ(-this.heading * 0.45 + c.rigRoll + this.rollAngle);
 
     this.rig.position.y = -c.crouch * 0.35;
     this.torso.rotation.set(c.lean, 0, c.roll);

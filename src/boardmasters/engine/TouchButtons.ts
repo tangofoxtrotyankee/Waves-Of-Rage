@@ -1,6 +1,7 @@
 import { PALETTE, VIEW } from '../game/constants';
+import type { ComboKey } from '../game/Combos';
 
-export type ButtonId = 'carveLeft' | 'carveRight' | 'attack' | 'barge';
+export type ButtonId = 'carveLeft' | 'forward' | 'carveRight' | 'jump' | 'attack' | 'barge';
 
 export interface TouchButton {
   id: ButtonId;
@@ -10,21 +11,30 @@ export interface TouchButton {
   r: number;
   label: string;
   color: number;
+  /** What a press feeds the combo reader. */
+  key: ComboKey;
 }
 
-const R = 17;
-const Y = VIEW.height - 30;
+const R = 18;
+const ROW = VIEW.height - 32;
+const ROW2 = VIEW.height - 74;
 
-/** The on-screen buttons from the gameplay mockup: CARVE < > bottom-left, HIT and BARGE bottom-right. Drawn by the HUD, hit-tested by Input. */
+/**
+ * The on-screen controls for phones. Left thumb: a pad of LEFT, UP and
+ * RIGHT (hold LEFT/RIGHT to carve, hold UP to pump; taps feed combos).
+ * Right thumb: JUMP, HIT and BRG. Drawn by the HUD, hit-tested by Input.
+ */
 export const TOUCH_BUTTONS: TouchButton[] = [
-  { id: 'carveLeft', x: 26, y: Y, r: R, label: '<', color: PALETTE.cyan },
-  { id: 'carveRight', x: 68, y: Y, r: R, label: '>', color: PALETTE.cyan },
-  { id: 'attack', x: VIEW.width - 68, y: Y, r: R, label: 'HIT', color: PALETTE.red },
-  { id: 'barge', x: VIEW.width - 26, y: Y, r: R, label: 'BRG', color: PALETTE.gold },
+  { id: 'carveLeft', x: 28, y: ROW, r: R, label: '<', color: PALETTE.cyan, key: 'L' },
+  { id: 'carveRight', x: 76, y: ROW, r: R, label: '>', color: PALETTE.cyan, key: 'R' },
+  { id: 'forward', x: 52, y: ROW2, r: R, label: 'UP', color: PALETTE.gold, key: 'F' },
+  { id: 'jump', x: VIEW.width - 34, y: ROW, r: 22, label: 'JUMP', color: PALETTE.foam, key: 'J' },
+  { id: 'attack', x: VIEW.width - 84, y: ROW, r: R, label: 'HIT', color: PALETTE.red, key: 'H' },
+  { id: 'barge', x: VIEW.width - 59, y: ROW2, r: R, label: 'BRG', color: PALETTE.gold, key: 'B' },
 ];
 
 /** The button under a point, with a little slack around each. */
 export function buttonAt(x: number, y: number): TouchButton | null {
-  for (const b of TOUCH_BUTTONS) if (Math.hypot(x - b.x, y - b.y) <= b.r + 6) return b;
+  for (const b of TOUCH_BUTTONS) if (Math.hypot(x - b.x, y - b.y) <= b.r + 5) return b;
   return null;
 }

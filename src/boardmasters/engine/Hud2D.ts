@@ -4,11 +4,14 @@ import { hex } from './math';
 const GLYPH = 8;
 const PER_ROW = 16;
 const SHADOW = '#1a0b2e';
+const OUTLINE: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, 2], [1, 2]];
 
 export interface TextOptions {
   align?: 'left' | 'center' | 'right';
   scale?: number;
   shadow?: boolean;
+  /** Draw a 1px dark outline all round (big floating text, labels over the water). */
+  outline?: boolean;
 }
 
 /**
@@ -64,6 +67,29 @@ export class Hud2D {
     this.ctx.globalAlpha = 1;
   }
 
+  /** A dark panel with a coloured 1px frame, the HUD's box style. */
+  panel(x: number, y: number, w: number, h: number, frame: number, alpha = 0.7): void {
+    this.rect(x, y, w, h, 0x1a0b2e, alpha);
+    this.frame(x, y, w, h, frame);
+  }
+
+  frame(x: number, y: number, w: number, h: number, color: number): void {
+    this.ctx.strokeStyle = hex(color);
+    this.ctx.lineWidth = 1;
+    this.ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+  }
+
+  /** A horizontal bar filled left to right with a gradient from `from` to `to`, in whole pixels. */
+  gradientBar(x: number, y: number, w: number, h: number, fill: number, from: number, to: number): void {
+    const width = Math.round(w * Math.max(0, Math.min(1, fill)));
+    if (width <= 0) return;
+    const g = this.ctx.createLinearGradient(Math.round(x), 0, Math.round(x + w), 0);
+    g.addColorStop(0, hex(from));
+    g.addColorStop(1, hex(to));
+    this.ctx.fillStyle = g;
+    this.ctx.fillRect(Math.round(x), Math.round(y), width, Math.round(h));
+  }
+
   circle(x: number, y: number, r: number, color: number, alpha = 1): void {
     this.ctx.globalAlpha = alpha;
     this.ctx.fillStyle = hex(color);
@@ -94,12 +120,14 @@ export class Hud2D {
   /** Draw upper-case pixel text; `x` is the left, centre or right edge per `align`. */
   text(x: number, y: number, text: string, color = '#ffffff', options: TextOptions = {}): void {
     if (!this.font) return;
-    const { align = 'left', scale = 1, shadow = true } = options;
+    const { align = 'left', scale = 1, shadow = true, outline = false } = options;
     const upper = text.toUpperCase();
     const width = this.textWidth(upper, scale);
     const left = Math.round(align === 'left' ? x : align === 'center' ? x - width / 2 : x - width);
     const top = Math.round(y);
-    if (shadow) this.draw(upper, left + 1, top + 1, SHADOW, scale);
+    if (outline) {
+      for (const [dx, dy] of OUTLINE) this.draw(upper, left + dx, top + dy, SHADOW, scale);
+    } else if (shadow) this.draw(upper, left + 1, top + 1, SHADOW, scale);
     this.draw(upper, left, top, color, scale);
   }
 

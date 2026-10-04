@@ -109,8 +109,10 @@ export const SCORING = {
   airBonus: 100,
   bigAirSeconds: 1.0,
   bigAirBonus: 250,
-  finishBonus: 1000,
-  firstPlaceBonus: 500,
+  /** The endless course: cruising speed grows with distance up to this much more... */
+  speedRampMax: 0.3,
+  /** ...reached after this many metres. */
+  speedRampOver: 4000,
   startHealth: 3,
   buoyDamage: 1,
   invulnerableSeconds: 1.2,
@@ -167,6 +169,19 @@ export const TRICKS = {
   /** A bad landing keeps this much speed and costs a heart. */
   badLandingSpeed: 0.5,
   crashSeconds: 0.7,
+  /** The barrel roll (RIGHT RIGHT UP / LEFT LEFT UP): a launch plus a full roll about the board over this long. */
+  rollSeconds: 0.55,
+  barrelRollPoints: 400,
+  /** Land before this much of the roll is done and it is a crash. */
+  rollLandingFraction: 0.85,
+} as const;
+
+/** BOOST (UP UP): a burst of speed, on a cooldown. */
+export const BOOST = {
+  gain: 5,
+  cooldown: 1.5,
+  /** Seconds of extra spray and the pump pose after the burst. */
+  seconds: 0.4,
 } as const;
 
 /** The RAGE meter: tricks and knockouts fill it; full, the surfer goes faster, hits harder and smashes buoys. */
@@ -174,6 +189,8 @@ export const RAGE = {
   seconds: 8,
   perTrick: 0.12,
   perKnockout: 0.2,
+  /** Riding through a boost gate. */
+  perGate: 0.06,
   decayPerSecond: 0.015,
   speedMul: 1.3,
   attackDamage: 2,
@@ -185,10 +202,16 @@ export const MENU_ZONE = { w: 80, h: 32 } as const;
 
 /** The original game's palette (docs/art-direction/README.md), reused for water, sky and riders. */
 export const PALETTE = {
-  deepWater: 0x1e4fa3,
-  water: 0x2a66c4,
-  lightWater: 0x5fb3f0,
+  deepWater: 0x25307e,
+  water: 0x1f6fc2,
+  lightWater: 0x45cbe6,
   foam: 0xf8fbff,
+  cloud: 0xff9a7a,
+  cloudLit: 0xffd1a0,
+  cliff: 0x5b2f86,
+  cliffLit: 0x9a5fc4,
+  palm: 0x1d6b4a,
+  wood: 0x7a4a2a,
   skyTop: 0x2d0b4e,
   skyMid: 0xf26b4e,
   horizon: 0xffcf6b,
