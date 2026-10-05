@@ -215,7 +215,8 @@ try {
   const touchPage = await browser.newPage({ viewport: { width: 390, height: 780 } });
   await touchPage.goto(`${URL}?touch=1`);
   await touchPage.waitForFunction(() => window.game && window.game.scene.isActive('TitleScene') && window.game.scene.getScene('TitleScene').buttonCentres.length === 2, null, { timeout: 30000 });
-  await touchPage.waitForTimeout(600); // the title's input grace
+  // The title ignores input for a moment (a scene timer); wait for it to accept input rather than for wall time, which a busy machine stretches.
+  await touchPage.waitForFunction(() => window.game.scene.getScene('TitleScene').acceptInput === true, null, { timeout: 15000 });
   const tScenes = () => touchPage.evaluate(() => window.game.scene.getScenes(true).map((s) => s.scene.key).join());
   const box = await touchPage.evaluate(() => { const c = document.querySelector('canvas').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width }; });
   const scale = box.w / 180; // portrait field: 180 game pixels wide
