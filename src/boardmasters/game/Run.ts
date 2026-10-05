@@ -11,7 +11,7 @@ import { THREE } from '../engine/three';
 import { Buoy } from '../entities/Buoy';
 import { Chevron, chevronMaterial } from '../entities/Chevron';
 import type { Landing, Rider } from '../entities/Rider';
-import { Rival } from '../entities/Rival';
+import { Rival, type RivalContext } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
 import { Wake } from '../entities/Wake';
 import { Surfer } from '../entities/Surfer';
@@ -147,6 +147,9 @@ export class Run {
   /** Whether the surfer is pulsing white for its invulnerability (cleared when it ends). */
   private pulsing = false;
   private bumpCooldown = 0;
+  /** What the rivals are told each step, and the run time before which no rival may start another attack (COMBAT.rivalStagger). */
+  private readonly rivalContext: RivalContext = { fight: false, attackOpen: true };
+  private rivalAttackGate = 0;
   /**
    * Blows on their way (the surfer's punches and barges, and rivals'
    * shoulder checks on the surfer), oldest first: each lands a moment later,
@@ -267,6 +270,7 @@ export class Run {
     this.invulnerableUntil = 0;
     this.pulsing = false;
     this.bumpCooldown = 0;
+    this.rivalAttackGate = 0;
     this.impacts = [];
     this.sparks = [];
     this.focusTarget = null;
@@ -422,11 +426,17 @@ export class Run {
     s.targetSpeed = PHYSICS.baseSpeed * s.stats.speed * ramp * (this.raging ? RAGE.speedMul : 1);
     s.update(dt, s.fromInput(input), this.ocean, this.time);
     const buoyPositions = this.buoys.filter((b) => b.active && !b.smashed);
+    const ctx = this.rivalContext;
+    ctx.fight = live;
     for (const r of this.rivals) {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
       // On the title the rivals ride parked in their slots ahead, clear of the selected character.
       const slot = this.state === 'title' ? TITLE_GRID[r.index % TITLE_GRID.length] : null;
-      r.update(dt, r.think(s, buoyPositions, this.time, slot), this.ocean, this.time);
+      ctx.attackOpen = this.time >= this.rivalAttackGate;
+      const control = r.think(s, buoyPositions, this.time, slot, ctx);
+      // One rival's attack closes the gate for the others for a moment, so two rarely come at once.
+      if (r.startedAttack) this.rivalAttackGate = this.time + COMBAT.rivalStagger;
+      r.update(dt, control, this.ocean, this.time);
     }
     this.splashFrom(s);
     for (const r of this.rivals) this.splashFrom(r);
@@ -499,8 +509,9 @@ export class Run {
 
     const landing = s.takeLanding();
     if (landing) this.resolveLanding(landing);
-    if (this.impacts.length > 0 && this.time >= this.impacts[0].at) this.landImpacts();
     this.resolveAttacks();
+    this.resolveRivalPunches();
+    if (this.impacts.length > 0 && this.time >= this.impacts[0].at) this.landImpacts();
     this.resolveHazards();
   }
 
@@ -623,6 +634,9 @@ export class Run {
       if (target) {
         const dir = Math.sign(target.x - s.x || 1);
         s.strikeDir = dir; // the clip swings at the rider the run shoves
+        // Struck in its wind-up (or as it strikes, before contact), a rival's punch is called off: the counter.
+        const countered = target.attackPhase !== 'none';
+        if (countered) target.cancelAttack();
         const damage = this.raging ? RAGE.attackDamage : barge ? COMBAT.bargeDamage : COMBAT.punchDamage;
         const shove = dir * (barge ? COMBAT.bargeShove : COMBAT.punchShove) * s.stats.power;
         if (barge) s.stunnedUntil = Math.max(s.stunnedUntil, this.time + COMBAT.bargeSelfStun);
@@ -630,12 +644,12 @@ export class Run {
         // The word waits for the blow too, over the victim: HIT!, BARGE!, or the knockout with its points.
         const out = target.takeHit(damage, shove, this.time);
         // A knocked-out body is thrown along with the surfer (beside and level with them), so the tumble and splash play out in frame.
-        const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false, s.speed) : barge ? 'BARGE!' : 'HIT!';
+        const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false, s.speed) : countered ? 'COUNTER!' : barge ? 'BARGE!' : 'HIT!';
         // Keep the victim in sight through its flinch (or its knockout flight): the camera's near fade must not screen-door it out.
         this.strikeTarget = target;
         this.strikeUntil = this.time + RIDER_ANIM.impactDelay + (out ? CAMERA.fightKoSeconds : RIDER_ANIM.flinchSeconds);
         const kind = out ? 'knockout' : barge ? 'barge' : 'punch';
-        this.impacts.push({
+        this.queueImpact({
           damage: 0,
           at: this.time + RIDER_ANIM.impactDelay,
           hitStop: IMPACT.hitStop[kind],
@@ -663,7 +677,7 @@ export class Run {
       s.flinch(dir, Math.abs(push) / 4, at);
       // No second blow while this one is on its way (the health goes when it lands).
       this.invulnerableUntil = Math.max(this.invulnerableUntil, at + HEALTH.blowInvulnerable);
-      this.impacts.push({
+      this.queueImpact({
         damage: HEALTH.barge * r.stats.power,
         at,
         hitStop: 0,
@@ -677,6 +691,51 @@ export class Run {
         slow: 0.9,
       });
     }
+  }
+
+  /**
+   * Rivals' telegraphed punches reaching their contact time: each lands if
+   * the surfer is still in punch reach and not high in the air (and not
+   * invulnerable), with the flinch, a short hit-stop, the shake, a spark
+   * and PUNCHED! over the surfer; out of reach it is DODGED!.
+   */
+  private resolveRivalPunches(): void {
+    const s = this.surfer;
+    for (const r of this.rivals) {
+      if (!r.takePunchImpact(this.time) || r.knockedOut || r.wiped || s.wiped) continue;
+      const dx = s.x - r.x;
+      if (Math.abs(dx) > COMBAT.punchRangeX || Math.abs(s.z - r.z) > COMBAT.punchRangeZ || s.airHeight(this.ocean) > 1.0) {
+        this.float('DODGED!', hex(PALETTE.cyan), 1, s);
+        continue;
+      }
+      if (this.time < this.invulnerableUntil) continue;
+      const dir = Math.sign(dx || 1);
+      const push = dir * COMBAT.rivalPunchShove * r.stats.power;
+      s.shoveAt(push, this.time);
+      s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.25);
+      s.flinch(dir, Math.max(0.8, Math.abs(push) / 3), this.time);
+      this.invulnerableUntil = Math.max(this.invulnerableUntil, this.time + HEALTH.blowInvulnerable);
+      this.queueImpact({
+        damage: HEALTH.punch * r.stats.power,
+        at: this.time,
+        hitStop: IMPACT.hitStop.punched,
+        shake: IMPACT.shake.punched,
+        label: 'PUNCHED!',
+        color: hex(PALETTE.red),
+        scale: 1,
+        over: s,
+        from: r,
+        to: s,
+        slow: 0.92,
+      });
+    }
+  }
+
+  /** A blow on its way, kept in order of arrival. */
+  private queueImpact(impact: PendingImpact): void {
+    let i = this.impacts.length;
+    while (i > 0 && this.impacts[i - 1].at > impact.at) i--;
+    this.impacts.splice(i, 0, impact);
   }
 
   /** Buoys (smashed in RAGE), the course edge, and rider-on-rider bumps. */
@@ -885,6 +944,11 @@ export class Run {
     if (!a) return false;
     const s = this.surfer;
     return this.renderer.worldToHud(s.x + a.x, s.y + a.y, s.z + a.z, out);
+  }
+
+  /** Where the point `lift` metres over a rider's head shows on the HUD (VIEW pixels, into `out`); false behind the camera. */
+  headPoint(r: Rider, lift: number, out: { x: number; y: number }): boolean {
+    return this.renderer.worldToHud(r.x, r.y + FLOAT_HEAD * r.spec.build + lift, r.z, out);
   }
 
   /** Where a point given in metres from the surfer (a hit spark) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */

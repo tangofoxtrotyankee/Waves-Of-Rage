@@ -25,6 +25,8 @@ const MILESTONE = 500;
 const BIG = new BigDigits();
 /** Scratch for a float's projected point (no allocation per frame). */
 const FLOAT_AT = { x: 0, y: 0 };
+/** Scratch for a rival's head on the HUD. */
+const HEAD_AT = { x: 0, y: 0 };
 /** Scratch for a hit spark's projected centre and a point above it (its size on screen). */
 const SPARK_AT = { x: 0, y: 0 };
 const SPARK_UP = { x: 0, y: 0 };
@@ -36,10 +38,12 @@ const FLOAT_CACHE = 48;
 const FLOAT_VOCABULARY: [string, string, number][] = [
   ['HIT!', '#ffffff', 1],
   ['BARGE!', '#ffffff', 1],
-  ['SHOVED!', hex(PALETTE.cyan), 1],
   ['OUCH!', hex(PALETTE.red), 1],
   ['CRASH!', hex(PALETTE.red), 1],
   ['SHOVED!', hex(PALETTE.red), 1],
+  ['PUNCHED!', hex(PALETTE.red), 1],
+  ['COUNTER!', '#ffffff', 1],
+  ['DODGED!', hex(PALETTE.cyan), 1],
   ['BOOST!', hex(PALETTE.cyan), 1],
   ['BOOST!', hex(PALETTE.gold), 1],
   ['BARREL ROLL!', hex(PALETTE.cyan), 1],
@@ -124,7 +128,7 @@ function stopsFor(color: string): Stops {
 }
 
 /** Contact words get a comic impact burst behind them. */
-const IMPACT = /^(HIT!|BARGE!|BUMP|SHOVED!|OUCH!)$/;
+const IMPACT = /^(HIT!|BARGE!|BUMP|SHOVED!|OUCH!|PUNCHED!|COUNTER!)$/;
 /** "NAME +250" or "NAME +1000 X2": the points go on their own line above the name. */
 const POINTS = /^(.*?)\s*(\+\d+(?:\s+X\d+)?)$/;
 
@@ -286,6 +290,7 @@ export class HudView {
     this.drawRage();
     this.drawStrip();
     if (run.state !== 'paused') {
+      this.drawRivalMarks();
       this.drawSparks();
       this.drawFloats();
     }
@@ -482,6 +487,33 @@ export class HudView {
     hud.blit(m.flag, this.stripX(next, 0) - 1, fy);
     hud.text(st.x + 21, fy + 1, this.milestone.get(next), '#ffffff', TIGHT_OUTLINE);
     hud.blit(m.arrow, this.stripX(s.z, s.x) - 3, st.playerY - 4);
+  }
+
+  /**
+   * Over the rivals: a small health bar for a while after a blow lands on
+   * one (HEALTH.rivalBarSeconds), and a red "!" over one winding up a punch.
+   */
+  private drawRivalMarks(): void {
+    const run = this.run;
+    const hud = this.hud;
+    for (const r of run.rivals) {
+      if (r.knockedOut) continue;
+      const since = run.time - r.lastHitAt;
+      const bar = since >= 0 && since < HEALTH.rivalBarSeconds;
+      const warn = r.windingUp;
+      if (!bar && !warn) continue;
+      if (!run.headPoint(r, -0.2, HEAD_AT) || HEAD_AT.y < FLOAT_TOP - 20) continue;
+      const x = Math.round(HEAD_AT.x);
+      const y = Math.round(HEAD_AT.y);
+      if (bar) {
+        const w = 20;
+        const frac = Math.max(0, Math.min(1, r.health / r.maxHealth));
+        hud.rect(x - w / 2 - 1, y - 1, w + 2, 5, 0x0d0820, 0.9);
+        hud.rect(x - w / 2, y, w, 3, 0x2b2346, 1);
+        if (frac > 0) hud.rect(x - w / 2, y, Math.max(1, Math.round(w * frac)), 3, frac < HEALTH.low ? 0xff2e4d : frac < HEALTH.warn ? 0xffc21a : 0x3fe0b0, 1);
+      }
+      if (warn && Math.floor(run.time * 16) % 2 === 0) hud.text(x, y - 12, '!', '#ff4d6d', ARROW);
+    }
   }
 
   /** Hit sparks: a comic star where each blow lands, sized by its distance from the camera, playing over SPARK_SECONDS. */

@@ -352,12 +352,35 @@ export const COMBAT = {
   comboMax: 5,
   respawnSeconds: 3,
   respawnBehind: 20,
-  /** Rivals with POWER at least this shoulder-check the player when alongside. */
+  /**
+   * Rivals fight back: those with POWER at least this, alongside the surfer
+   * (within rivalReachX across and rivalReachZ along) with their attack
+   * ready, throw a telegraphed PUNCH (RIDER_ANIM.rivalPunch: a long wind-up,
+   * then the strike, which lands only if the surfer is still in punch reach
+   * and not high in the air) or a shoulder check (steering in for
+   * rivalCheckSeconds, then a barge). Hitting a rival in its wind-up cancels
+   * the punch. Never in the first rivalGraceSeconds of a race, nor while the
+   * rival is stunned, airborne, wiped or knocked out.
+   */
   rivalAggression: 0.5,
+  rivalReachX: 1.6,
+  rivalReachZ: 2.0,
+  /** A rival whose attack is ready closes in from this far (across and along) to get alongside. */
+  rivalSeekX: 3.5,
+  rivalSeekZ: 3.5,
+  /** Where an attacking rival keeps station: this far to the side of the surfer. */
+  rivalStation: 1.15,
+  /** Each rival waits rivalCooldown[0] plus up to rivalCooldown[1] seconds more between attacks... */
+  rivalCooldown: [3, 2] as const,
+  /** ...and once any rival starts one, no other starts for this long, so two rarely attack at once. */
+  rivalStagger: 1.4,
+  /** The chance an attacking rival throws the punch rather than the shoulder check. */
+  rivalPunchChance: 0.6,
+  /** A rival's punch shoves the surfer (m/s, times its POWER); its shoulder check harder. */
+  rivalPunchShove: 2.5,
   rivalShove: 4,
-  rivalCheckCooldown: 4,
   rivalCheckSeconds: 0.7,
-  /** No shoulder checks in the first seconds of a run (the field settles first). */
+  /** No rival attacks in the first seconds of a run (the field settles first). */
   rivalGraceSeconds: 3,
 } as const;
 
@@ -403,9 +426,11 @@ export const HEALTH = {
  * splash sizes for Spray.splash (about 1 for a landing, 2 for a knockout).
  */
 export const IMPACT = {
-  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14, buoy: 0.06 },
+  /** `punched`: a rival's punch landing on the surfer (shorter than the surfer's own). */
+  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14, buoy: 0.06, punched: 0.045 },
   shake: {
     punch: [1, 0.22],
+    punched: [1.3, 0.26],
     barge: [1.5, 0.3],
     knockout: [2.2, 0.42],
     shoved: [0.9, 0.25],
@@ -510,6 +535,13 @@ export const RIDER_ANIM = {
   /** The punch's hold is longer than a real one so the fist stays out long enough to read on a phone. */
   punch: { windup: 0.07, strike: 0.08, hold: 0.12, recover: 0.2 },
   barge: { windup: 0.06, strike: 0.08, hold: 0.1, recover: 0.2 },
+  /**
+   * A rival's punch: the anticipation stretched into a readable wind-up
+   * (shoulder pulled back, fist cocked by the ear, weight back) so it can be
+   * seen coming, then the same strike. It connects at impactDelay minus the
+   * punch's windup after the strike starts, like the surfer's own.
+   */
+  rivalPunch: { windup: 0.28, strike: 0.08, hold: 0.12, recover: 0.2 },
   /** A punch or barge connects this long after it starts (mid-strike): the victim's shove and flinch wait for the fist. */
   impactDelay: 0.09,
   /** The flinch's length, and how long the board wobbles after a hit. */

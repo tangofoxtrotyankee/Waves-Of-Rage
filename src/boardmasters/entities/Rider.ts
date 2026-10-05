@@ -137,6 +137,13 @@ export class Rider {
   edgeShove = 0;
   /** Recently shoved by a punch or barge: whatever it hits before this time knocks it out. */
   shovedUntil = 0;
+  /**
+   * A telegraphed punch under way (rivals, telegraphPunch): the run time the
+   * strike starts after the wind-up, and the time it connects (the run
+   * decides then whether it lands: takePunchImpact); -1 when none.
+   */
+  strikeAt = -1;
+  impactAt = -1;
 
   private model: RiderModel;
   private readonly animator: RiderAnimator;
@@ -157,6 +164,8 @@ export class Rider {
   private slopeDx = 0;
   private slopeDz = 0;
   private landing: Landing | null = null;
+  /** The run clock at the last update (for the attack phase getters). */
+  private clock = 0;
   private punchUntil = 0;
   private bargeUntil = 0;
   private attackCooldownUntil = 0;
@@ -252,6 +261,8 @@ export class Rider {
     this.strikeDir = 0;
     this.edgeShove = 0;
     this.shovedUntil = 0;
+    this.strikeAt = -1;
+    this.impactAt = -1;
     this.punchUntil = 0;
     this.bargeUntil = 0;
     this.attackCooldownUntil = 0;
@@ -300,6 +311,49 @@ export class Rider {
     this.flashUntil = impact + RIDER_ANIM.hitFlashSeconds;
     this.flinch(Math.sign(shove) || 1, clamp(Math.abs(shove) / 4, 0.6, 1.5), impact);
     return this.health <= 0;
+  }
+
+  /**
+   * Throw a telegraphed punch at the rider on the `dir` side (world-x sign):
+   * the long wind-up (RIDER_ANIM.rivalPunch) now, the strike after it,
+   * contact at `impactAt`, where the run resolves it (takePunchImpact).
+   */
+  telegraphPunch(time: number, dir: number): void {
+    const P = RIDER_ANIM.rivalPunch;
+    this.strikeDir = dir;
+    this.strikeAt = time + P.windup;
+    this.impactAt = this.strikeAt + RIDER_ANIM.impactDelay - RIDER_ANIM.punch.windup;
+    this.punchUntil = this.strikeAt + P.strike + P.hold;
+    this.attackCooldownUntil = Math.max(this.attackCooldownUntil, this.punchUntil);
+    this.animator.punch(time, P, true);
+  }
+
+  /** Where a telegraphed punch is: winding up, striking (before contact), or none. */
+  get attackPhase(): 'windup' | 'strike' | 'none' {
+    if (this.impactAt < 0) return 'none';
+    return this.clock < this.strikeAt ? 'windup' : 'strike';
+  }
+
+  /** In the wind-up of a telegraphed punch: a blow now cancels it. */
+  get windingUp(): boolean {
+    return this.attackPhase === 'windup';
+  }
+
+  /** Call off a telegraphed punch before it connects (hit in the wind-up, stunned, wiped). */
+  cancelAttack(): void {
+    if (this.impactAt < 0) return;
+    this.strikeAt = -1;
+    this.impactAt = -1;
+    this.punchUntil = 0;
+    this.animator.cancelPunch();
+  }
+
+  /** True once, at the step a telegraphed punch reaches its contact time: the run then decides whether it lands. */
+  takePunchImpact(time: number): boolean {
+    if (this.impactAt < 0 || time < this.impactAt) return false;
+    this.strikeAt = -1;
+    this.impactAt = -1;
+    return true;
   }
 
   /** A sideways shove (m/s, decaying) that lands at run time `at` (a blow on its way). */
@@ -434,7 +488,10 @@ export class Rider {
   }
 
   update(dt: number, control: RiderControl, ocean: Ocean, time: number): void {
+    this.clock = time;
     this.landing = null;
+    // A punch still winding up is called off if the rider is stunned or wiped meanwhile.
+    if (this.impactAt >= 0 && (this.wiped || time < this.stunnedUntil)) this.cancelAttack();
     this.attacking = false;
     this.barging = false;
     this.edgeShove = 0;
