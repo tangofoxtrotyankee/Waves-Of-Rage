@@ -579,7 +579,11 @@ export class Rider {
     this.slopeDx = slope.dx;
     this.slopeDz = slope.dz;
     if (!this.airborne) {
-      const surfaceVy = (h - this.y) / dt;
+      // A jump in the surface bigger than PHYSICS.surfaceSnap in one step is not the sea moving (that is under about 0.35 m a
+      // step, even up a ramp at full speed) but the rider or the course being moved (a respawn, features generated under a
+      // rider placed far ahead): settle onto the water rather than reading it as a 100 m/s climb that would throw it skywards.
+      const rise = h - this.y;
+      const surfaceVy = Math.abs(rise) > PHYSICS.surfaceSnap ? 0 : rise / dt;
       const ballisticVy = this.vy - PHYSICS.gravity * dt;
       const ballisticY = this.y + ballisticVy * dt;
       if (wantsJump) {

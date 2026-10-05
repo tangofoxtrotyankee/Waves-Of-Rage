@@ -293,6 +293,8 @@ export const PHYSICS = {
   coyoteHeight: 0.15,
   /** The water must drop away faster than gravity by this much (m/s^2) before the rider leaves it; step-rate independent. */
   launchAccel: 10,
+  /** Metres the surface may move under a rider in one step and still count as the sea moving (see Rider.update). */
+  surfaceSnap: 0.5,
   /** Rideable water is this wide either side of the centre line; beyond it is whitewater. */
   trackHalfWidth: 11,
   /** Sideways shoves from contact decay at this rate per second... */
