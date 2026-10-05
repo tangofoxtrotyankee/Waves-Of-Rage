@@ -155,6 +155,8 @@ export class Run {
   readonly finishOrder: Finisher[] = [];
   /** The finish line across the course at its length. */
   readonly finishLine = new FinishLine();
+  /** The latest race callout ("500 M TO GO", "FINAL STRETCH", "FINISH!") and the run time it was called: the HUD sweeps it across the screen. */
+  callout: { text: string; at: number } | null = null;
   /** The race clock frozen when the race ended for the surfer (finished or wiped out), else -1. */
   private raceOver = -1;
   /** How many of RACE.callouts have shown, and every rider's z on the step before (for crossing the line). */
@@ -310,6 +312,8 @@ export class Run {
     this.finishOrder.length = 0;
     this.raceOver = -1;
     this.calloutsShown = 0;
+    this.callout = null;
+    this.finishLine.calm();
     this.playerPrevZ = this.surfer.z;
     this.rivals.forEach((r, i) => {
       r.finishedAt = -1;
@@ -979,7 +983,8 @@ export class Run {
     this.invulnerableUntil = 0;
     this.endRage();
     this.combos.clear();
-    this.float('FINISH!', hex(PALETTE.gold), 2, s, 1.4);
+    this.callout = { text: 'FINISH!', at: this.time };
+    this.finishLine.celebrate(this.time);
     this.saveBest(true);
   }
 
@@ -1002,7 +1007,7 @@ export class Run {
     const left = this.course.length - this.surfer.z;
     let text = '';
     while (this.calloutsShown < RACE.callouts.length && left <= RACE.callouts[this.calloutsShown][0]) text = RACE.callouts[this.calloutsShown++][1];
-    if (text) this.float(text, hex(PALETTE.cyan), 2);
+    if (text) this.callout = { text, at: this.time };
   }
 
   /** Give back `amount` of health (clean tricks), up to HEALTH.max. */

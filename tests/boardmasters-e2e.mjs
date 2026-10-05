@@ -540,8 +540,10 @@ try {
       lateGates: r.chevrons.filter((c) => c.active && c.z > L - 60).length,
       buoysBefore: r.buoys.filter((b) => b.active && b.z > r.surfer.z && b.z <= L - 60).length,
       rampsAfter: r.generator.features.filter((f) => f.kind === 'ramp' && f.z > L).length,
+      callout: r.callout && r.callout.text,
     };
   });
+  check('the callout sweeps in as the line nears (the latest passed: FINAL STRETCH at 200 m to go)', nearEnd.callout === 'FINAL STRETCH', JSON.stringify(nearEnd));
   check('the finish line stands at 2,000 m; buoys and gates stop 60 m short of it, ramps run on past it', nearEnd.L === 2000 && nearEnd.line === nearEnd.L && nearEnd.generatedTo > nearEnd.L && nearEnd.lateBuoys === 0 && nearEnd.lateGates === 0 && nearEnd.buoysBefore > 0 && nearEnd.rampsAfter > 0, JSON.stringify(nearEnd));
 
   // --- crossing it: two rivals just ahead cross first and the rest are far behind, so the surfer finishes 3rd ---
@@ -557,10 +559,13 @@ try {
       return { score: r.score };
     });
     await until(() => window.bm.run.state !== 'playing', 20000);
-    crossed = await ev(() => { const r = window.bm.run; return { state: r.state, place: r.place, time: r.finishTime, raceTime: r.raceTime, bonus: r.placeBonus, score: r.score, order: r.finishOrder.map((f) => (f.player ? '*' : '') + f.name), newBest: r.newBest }; });
+    crossed = await ev(() => { const r = window.bm.run; return { state: r.state, place: r.place, time: r.finishTime, raceTime: r.raceTime, bonus: r.placeBonus, score: r.score, order: r.finishOrder.map((f) => (f.player ? '*' : '') + f.name), newBest: r.newBest, callout: r.callout && r.callout.text }; });
     crossed.before = before.score;
   }
   check('the surfer crosses the line: finished, 3rd behind the two rivals over first, with the race time', !!crossed && crossed.state === 'finished' && crossed.place === 3 && crossed.order[2] === '*SAM' && crossed.time > 1 && crossed.raceTime === crossed.time, JSON.stringify(crossed));
+  await gameWait(0.3);
+  const fireworks = await ev(() => window.bm.run.finishLine.fireworks.visible);
+  check('FINISH! is called over the line and the fireworks go up', !!crossed && crossed.callout === 'FINISH!' && fireworks, JSON.stringify({ callout: crossed && crossed.callout, fireworks }));
   check('the place bonus (800 for 3rd) is added to the score', !!crossed && crossed.bonus === 800 && crossed.score >= crossed.before + 800, JSON.stringify(crossed));
   await gameWait(0.5);
   check('the race clock stops at the line', !!crossed && (await ev(() => window.bm.run.raceTime)) === crossed.time);
@@ -573,7 +578,7 @@ try {
   const allOver = await page.waitForFunction(() => window.bm.run.finishOrder.length === 6, null, { timeout: 60000, polling: 100 }).then(() => true, () => false);
   const order = await ev(() => window.bm.run.finishOrder.map((f) => ({ name: f.name, time: +f.time.toFixed(2) })));
   check('the rivals race on and cross after the surfer, recorded in order', allOver && order.every((f, i) => i === 0 || f.time >= order[i - 1].time) && order[2].name === 'SAM', JSON.stringify(order));
-  await until(() => window.bm.run.stateTime > 2.1);
+  await until(() => window.bm.run.stateTime > 2.6); // RACE.resultsSeconds: the results take input
   // --- a restart after a long run brings the shore back to the start line ---
   const spansFar = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
   await page.keyboard.press('Space');

@@ -342,9 +342,9 @@ export const RACE = {
     [500, '500 M TO GO'],
     [200, 'FINAL STRETCH'],
   ] as const,
-  /** After the line: seconds before the results show (the FINISH! callout first), and before they take input. */
-  resultsDelay: 1.0,
-  resultsSeconds: 2.0,
+  /** After the line: seconds before the results show (the FINISH! callout and the fireworks first), and before they take input. */
+  resultsDelay: 1.5,
+  resultsSeconds: 2.5,
   /** Rival pacing: a rival rides its own pace from `packBehind` metres behind the surfer to `packAhead` ahead... */
   packBehind: 8,
   packAhead: 12,

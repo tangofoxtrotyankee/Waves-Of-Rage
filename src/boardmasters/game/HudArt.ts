@@ -21,6 +21,9 @@ export const HUD_COLORS = {
   rage: ['#fff27a', '#ffd23a', '#ff9a1f', '#ff5a1f', '#e8203a'] as Stops,
   rageHot: ['#ffffff', '#ffe0f0', '#ff8fd0', '#ff4fa3', '#e8203a'] as Stops,
   wipeout: ['#ffe0e6', '#ff8a9a', '#ff3a55', '#d0103a', '#8a0a2a'] as Stops,
+  green: ['#ffffff', '#d0ffe4', '#6cf2a8', '#22b878'] as Stops,
+  silver: ['#ffffff', '#eef2fc', '#bcc6dc', '#7c86a4'] as Stops,
+  bronze: ['#fff0dc', '#ffc184', '#e0843e', '#93491c'] as Stops,
 } as const;
 
 type Ctx = CanvasRenderingContext2D;
@@ -171,6 +174,63 @@ export function statBar(n: number, filled: number, color: string): HTMLCanvasEle
   return canvas;
 }
 
+/** The health bar's fills, left to right: cyan-green while healthy, gold when low, red when nearly gone. */
+const HEALTH_FILLS = {
+  good: ['#1fc48e', '#36dca8', '#4ff0c4', '#6ff8e4', '#8ffcff'],
+  warn: ['#ff9a12', '#ffb21f', '#ffc83a', '#ffd84a', '#ffe66a'],
+  low: ['#a8102a', '#d01834', '#ff2e4d', '#ff4a62', '#ff6a7f'],
+} as const;
+
+export interface HealthBarArt {
+  empty: HTMLCanvasElement;
+  good: HTMLCanvasElement;
+  warn: HTMLCanvasElement;
+  low: HTMLCanvasElement;
+  /** White-hot (a heal sweeps it in) and solid red (the flash as a blow lands). */
+  hot: HTMLCanvasElement;
+  flash: HTMLCanvasElement;
+  /** Pixels from the sprites' left edge to the bar's first column, and the bar's drawn width. */
+  inset: number;
+  w: number;
+}
+
+/**
+ * The HEALTH bar: `n` chunky slanted cells across `w` (like the RAGE bar,
+ * shorter), in a dark well. Each fill is a whole bar, blitted cut to the
+ * health left; the cells shade lighter on top and darker underneath.
+ */
+export function healthBar(w: number, h: number, n: number, slant: number): HealthBarArt {
+  const inset = 1;
+  const make = (fill: (i: number, row: number) => string | null) => {
+    const { canvas, ctx } = makeCanvas(w + inset * 2, h + 2);
+    segments(ctx, inset, 1, w, h, n, slant, fill);
+    return canvas;
+  };
+  const tone = (stops: readonly string[]) => (i: number, row: number) => {
+    const base = stops[Math.min(stops.length - 1, Math.round((i / Math.max(1, n - 1)) * (stops.length - 1)))];
+    if (row === 0) return mixHex(base, '#ffffff', 0.55);
+    if (row === 1) return mixHex(base, '#ffffff', 0.2);
+    if (row === h - 1) return mixHex(base, '#0d0820', 0.4);
+    return base;
+  };
+  // The well: the empty cells, each ringed in ink (the fills sit inside the ring).
+  const cells = make((_i, row) => (row === 0 ? '#3a3158' : '#231d3c'));
+  const ink = make(() => HUD_COLORS.ink);
+  const { canvas: empty, ctx } = makeCanvas(w + inset * 2, h + 2);
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) ctx.drawImage(ink, dx, dy);
+  ctx.drawImage(cells, 0, 0);
+  return {
+    empty,
+    good: make(tone(HEALTH_FILLS.good)),
+    warn: make(tone(HEALTH_FILLS.warn)),
+    low: make(tone(HEALTH_FILLS.low)),
+    hot: make((_i, row) => (row === h - 1 ? '#d8fff4' : '#ffffff')),
+    flash: make((_i, row) => (row === 0 ? '#ffd0d8' : '#ff2e4d')),
+    inset,
+    w,
+  };
+}
+
 /**
  * Chunky 6x9 digits with 2px strokes (the mockup's POS, DIST and SCORE
  * values), baked with a two-tone gradient and a 1px outline, one sheet per
@@ -247,20 +307,120 @@ export class BigDigits {
   }
 }
 
-/** The course strip's player arrow, finish flag, and rival, buoy and gate dots. */
+/** Small 3x5 digits for the race clock under DIST (with a 1px outline, one sheet per colour). */
+const MINI_GLYPHS: Record<string, string[]> = {
+  '0': ['###', '#.#', '#.#', '#.#', '###'],
+  '1': ['.#.', '##.', '.#.', '.#.', '###'],
+  '2': ['###', '..#', '###', '#..', '###'],
+  '3': ['###', '..#', '.##', '..#', '###'],
+  '4': ['#.#', '#.#', '###', '..#', '..#'],
+  '5': ['###', '#..', '###', '..#', '###'],
+  '6': ['###', '#..', '###', '#.#', '###'],
+  '7': ['###', '..#', '.#.', '.#.', '.#.'],
+  '8': ['###', '#.#', '###', '#.#', '###'],
+  '9': ['###', '#.#', '###', '..#', '###'],
+  ':': ['.', '#', '.', '#', '.'],
+  '.': ['.', '.', '.', '.', '#'],
+};
+const MINI_CHARS = Object.keys(MINI_GLYPHS);
+const MINI_INDEX = new Int8Array(128).fill(-1);
+MINI_CHARS.forEach((c, i) => (MINI_INDEX[c.charCodeAt(0)] = i));
+const MINI_CELL = 6;
+
+export class MiniDigits {
+  static readonly height = 7;
+  private readonly sheets = new Map<string, HTMLCanvasElement>();
+
+  width(text: string): number {
+    let w = 0;
+    for (let i = 0; i < text.length; i++) {
+      const index = MINI_INDEX[text.charCodeAt(i)] ?? -1;
+      if (index >= 0) w += MINI_GLYPHS[MINI_CHARS[index]][0].length + 1;
+    }
+    return w > 0 ? w + 1 : 0;
+  }
+
+  draw(hud: Hud2D, text: string, x: number, y: number, color: string, align: 'left' | 'right' = 'left'): void {
+    let sheet = this.sheets.get(color);
+    if (!sheet) {
+      const { canvas, ctx } = makeCanvas(MINI_CHARS.length * MINI_CELL, MiniDigits.height);
+      MINI_CHARS.forEach((c, i) => ctx.drawImage(outlined(paint(MINI_GLYPHS[c], { '#': color }), HUD_COLORS.ink, 1, 0), i * MINI_CELL, 0));
+      sheet = canvas;
+      this.sheets.set(color, sheet);
+    }
+    let left = align === 'left' ? x : x - this.width(text);
+    for (let i = 0; i < text.length; i++) {
+      const index = MINI_INDEX[text.charCodeAt(i)] ?? -1;
+      if (index < 0) continue;
+      const gw = MINI_GLYPHS[MINI_CHARS[index]][0].length;
+      hud.blitPart(sheet, index * MINI_CELL, 0, gw + 2, MiniDigits.height, left, y);
+      left += gw + 1;
+    }
+  }
+}
+
+/** A stopwatch, 7x9 with its outline (beside the race clock): the crown, the case and a red hand. */
+export function stopwatchIcon(): HTMLCanvasElement {
+  return outlined(paint(['.WWW.', '..W..', '.WWW.', 'W.R.W', 'W.R.W', 'W...W', '.WWW.'], { W: '#e9ecff', R: '#ff4d6d' }), HUD_COLORS.ink, 1, 0);
+}
+
+/** A small gold cup (the title's BEST row). */
+export function trophyIcon(): HTMLCanvasElement {
+  return outlined(
+    paint(['YYYYYYY', 'YLYYYOY', '.YLYYO.', '..YYO..', '...O...', '..YYY..', '.OOOOO.'], { Y: '#ffe14d', L: '#fff7b0', O: '#c98a10' }),
+    HUD_COLORS.ink,
+    1,
+    0,
+  );
+}
+
+/** A gold star (a new best on a results row). */
+export function starIcon(): HTMLCanvasElement {
+  return outlined(paint(['...Y...', '..YYY..', 'YYYLYYY', '.YYYYY.', '..YOY..', '.YO.OY.', 'O.....O'], { Y: '#ffe14d', L: '#ffffff', O: '#c98a10' }), HUD_COLORS.ink, 1, 0);
+}
+
+/**
+ * The warning over a rival winding up a punch at the surfer: a red comic
+ * burst with a fat "!" in it; `bright` is the flash frame (a white-hot burst).
+ */
+export function warnIcon(bright: boolean): HTMLCanvasElement {
+  const canvas = burst(21, 9, 10.4, 6.6, bright ? '#ffe14d' : '#ff2e4d');
+  const ctx = canvas.getContext('2d') as Ctx;
+  ctx.drawImage(burst(21, 9, 7.6, 4.8, bright ? '#ffffff' : '#ff6a55'), 0, 0);
+  const mark = outlined(paint(['WWW', 'WWW', 'WWW', 'WWW', '.W.', '.W.', '...', 'WWW', 'WWW'], { W: bright ? '#ff2e4d' : '#ffffff' }), HUD_COLORS.ink, 1, 0);
+  ctx.drawImage(mark, Math.round((21 - mark.width) / 2), Math.round((21 - mark.height) / 2));
+  return outlined(canvas, HUD_COLORS.ink, 1, 0);
+}
+
+/** A strip of checks, `w` by `rows` cells of `cell` pixels (the finished results' header, the FINISH! banner). */
+export function checkerStrip(w: number, rows: number, cell: number): HTMLCanvasElement {
+  const { canvas, ctx } = makeCanvas(w, rows * cell);
+  for (let y = 0; y < rows; y++)
+    for (let x = 0; x * cell < w; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#f4f4fa' : '#14142a';
+      ctx.fillRect(x * cell, y * cell, cell, cell);
+    }
+  return canvas;
+}
+
+/** The course strip's player arrow, the finish flag (two frames: it flies), a rival, and the milestone nodes (ahead and passed). */
 export function stripMarkers(): {
   arrow: HTMLCanvasElement;
-  flag: HTMLCanvasElement;
+  flags: [HTMLCanvasElement, HTMLCanvasElement];
   rival: HTMLCanvasElement;
-  buoy: HTMLCanvasElement;
-  gate: HTMLCanvasElement;
+  node: HTMLCanvasElement;
+  nodeDone: HTMLCanvasElement;
 } {
   const arrow = outlined(paint(['...Y...', '..YYY..', '..YYY..', '.YYYYY.', '.YYYYY.', 'YYYOYYY', 'YO...OY'], { Y: '#ffe14d', O: '#ff9a12' }), HUD_COLORS.ink, 1, 0);
-  const flag = outlined(paint(['PWKWKWK', 'PKWKWKW', 'PWKWKWK', 'PKWKWKW', 'P......', 'P......', 'P......'], { P: '#d8d8e8', W: '#ffffff', K: '#1a1a2e' }), HUD_COLORS.ink, 1, 0);
-  const rival = outlined(paint(['.WW.', 'WWWW', 'WWWW', '.WW.'], { W: '#c9cfe0' }), HUD_COLORS.ink, 1, 0);
-  const buoy = outlined(paint(['.RR.', 'RLRR', 'RRRR', '.RR.'], { R: '#ff2e4d', L: '#ffb3c0' }), HUD_COLORS.ink, 1, 0);
-  const gate = outlined(paint(['..C..', '.CCC.', 'CC.CC'], { C: '#7ff6ff' }), HUD_COLORS.ink, 1, 0);
-  return { arrow, flag, rival, buoy, gate };
+  const flag = (map: string[]) => outlined(paint(map, { P: '#d8d8e8', W: '#ffffff', K: '#1a1a2e' }), HUD_COLORS.ink, 1, 0);
+  const flags: [HTMLCanvasElement, HTMLCanvasElement] = [
+    flag(['PWWKKWWKK..', 'PWWKKWWKKK.', 'PKKWWKKWWWW', 'PKKWWKKWWWW', 'PWWKKWWKKKK', 'PWWKKWW..KK', 'P..........', 'P..........', 'P..........']),
+    flag(['P..........', 'PWWKKWWKK..', 'PWWKKWWKKWW', 'PKKWWKKWWWW', 'PKKWWKKWWKK', 'PWWKKWWKKKK', 'PWW.....KK.', 'P..........', 'P..........']),
+  ];
+  const rival = outlined(paint(['.RR.', 'RLRR', 'RRRR', '.RR.'], { R: '#ff3a55', L: '#ffb3c0' }), HUD_COLORS.ink, 1, 0);
+  const node = outlined(paint(['.GGG.', 'GLGGG', 'GGGGG', 'GGGGG', '.GGG.'], { G: '#8a92aa', L: '#c9cfe0' }), HUD_COLORS.ink, 1, 0);
+  const nodeDone = outlined(paint(['.CCC.', 'CWWWC', 'CWWWC', 'CWWWC', '.CCC.'], { C: '#5fe3ff', W: '#ffffff' }), HUD_COLORS.ink, 1, 0);
+  return { arrow, flags, rival, node, nodeDone };
 }
 
 // --- button icons -----------------------------------------------------------
