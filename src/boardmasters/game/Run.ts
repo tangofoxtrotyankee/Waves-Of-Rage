@@ -1,47 +1,49 @@
 import { platformOverrideQuery } from '../../game/platform';
+import { type HighScore, HighScores } from '../../systems/HighScores';
+import { ScoreService, type ScoreSource } from '../../systems/ScoreService';
 import { loadJSON, saveJSON } from '../../systems/Storage';
+import { promptForName } from '../../ui/NameEntry';
 import type { Hud2D } from '../engine/Hud2D';
 import { requestImmersiveMode } from '../engine/immersive';
 import type { Input, InputState } from '../engine/Input';
 import { createPS1Material, sharedUniforms, syncLook } from '../engine/PS1Material';
 import type { Renderer } from '../engine/Renderer';
-import { clamp, damp, hex } from '../engine/math';
+import { damp, hex } from '../engine/math';
 import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
+import { Boat, boatMaterial } from '../entities/Boat';
 import { Buoy } from '../entities/Buoy';
 import { Chevron, chevronMaterial } from '../entities/Chevron';
-import { ARCH_BOX, archBoost, FinishLine } from '../entities/FinishLine';
 import type { Landing, Rider } from '../entities/Rider';
 import { Rival, type RivalContext } from '../entities/Rival';
+import { Shark, sharkMaterial } from '../entities/Shark';
 import { Spray } from '../entities/Spray';
 import { Wake } from '../entities/Wake';
 import { Surfer } from '../entities/Surfer';
-import { CourseGenerator, COURSES, type CourseSpec } from '../world/Course';
+import { type BoatSpot, COURSE, CourseGenerator, type CourseSpec, type Spot } from '../world/Course';
 import { Ocean } from '../world/Ocean';
 import { Scenery } from '../world/Scenery';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
 import { type Combo, ComboReader } from './Combos';
-import { CAMERA, COMBAT, FOG, HEALTH, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RACE, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
+import { BOAT, CAMERA, COMBAT, ENDLESS, FOG, HEALTH, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RAGE, RIDER_ANIM, SCORING, SHARK, TRICKS } from './constants';
 import { PAUSE_ZONE, titleArrowX, titleRow } from './HudLayout';
 import { HudView } from './HudView';
 
-/** The title (attract and character select), a race in play, paused, and the two ends of a race: wiped out (did not finish) or over the line. */
-export type RunState = 'title' | 'playing' | 'paused' | 'wipeout' | 'finished';
+/** The title (attract and character select), a run in play, paused, and its end: the wipeout and its results. */
+export type RunState = 'title' | 'playing' | 'paused' | 'wipeout';
 
-/** The best race on this device for one course: the fastest finish (race seconds) and best place (null until one finishes), and the best score (a wipeout can set it). */
-export interface RaceBest {
-  time: number | null;
-  place: number | null;
+/** The best run on this device for one course: the score and the distance it was set at. */
+export interface RunBest {
   score: number;
+  distance: number;
 }
 
-/** A rider over the finish line: who, whether it is the surfer, and the race time they crossed it. */
-export interface Finisher {
-  name: string;
-  id: string;
-  player: boolean;
-  time: number;
+/** The shared top 10 as the results show it: the table, where it came from (or that it is still loading), and this run's row in it (-1 for none). */
+export interface Scoreboard {
+  list: readonly HighScore[];
+  source: ScoreSource | 'loading';
+  rank: number;
 }
 
 export interface FloatingText {
@@ -74,12 +76,20 @@ const TITLE_GRID: [number, number][] = [[-4.5, 13], [4.5, 17], [-7.5, 22], [7.5,
 /** Seconds a hit spark (the comic star at the point of contact) shows. */
 export const SPARK_SECONDS = 0.24;
 
-/** localStorage key prefix (through systems/Storage) for a course's best race (RaceBest), followed by the course id. */
+/** localStorage key prefix (through systems/Storage) for a course's best run (RunBest), followed by the course id. */
+const BEST_KEY = 'bm.best.';
+/** The race prototype's key for the same (its score is carried over as the best). */
 const RACE_KEY = 'bm.race.';
 /** Pooled skull buoys: enough for the generated stretch ahead at the tightest spacing. */
 const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
 const CHEVRON_POOL = 8;
+/** Pooled sharks and boats: only those within their spawn window are on the water. */
+const SHARK_POOL = 6;
+const BOAT_POOL = 3;
+/** A shark takes the water this far ahead of the surfer (it swims the rest of the way); a boat starts its crossing this far ahead. */
+const SHARK_SPAWN = 110;
+const BOAT_SPAWN = 75;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: number, h: number): boolean => x !== null && y !== null && x >= zx && x < zx + w && y >= zy && y < zy + h;
 
@@ -115,23 +125,40 @@ export interface HitSpark {
   size: number;
 }
 
+/** The gestures a phone player has used this run (the HUD's hints go once each has been). */
+export interface GesturesUsed {
+  steer: boolean;
+  jump: boolean;
+  hit: boolean;
+}
+
+/** A hazard a rider can run into: where it is, its half-extents, the height that clears it, and what it is. */
+interface HazardHit {
+  kind: 'buoy' | 'shark' | 'boat';
+  x: number;
+  z: number;
+  hx: number;
+  hz: number;
+  clear: number;
+}
+
 /**
- * One course, one surfer, the field of rivals and the hazards, and the
- * rules that join them: distance and score, air and tricks, buoy hits and
- * health, HIT and BARGE with knockouts and combos, the RAGE meter, the
- * finish, and the title (with the character select), pause and results
- * overlays.
+ * One endless course, one surfer, the pack of rivals and the hazards, and
+ * the rules that join them: distance and score (the original game's: the
+ * distance plus the tricks and knockouts), the pace rising with distance,
+ * air and tricks, buoy, shark and boat hits and health, HIT and BARGE with
+ * knockouts and combos, the RAGE meter, the wipeout with the shared top 10,
+ * and the title (with the character select), pause and results overlays.
  */
 export class Run {
   state: RunState = 'title';
   score = 0;
-  /** The surfer's health, 0..HEALTH.max: blows, buoys and crashes take it, clean tricks give it back; at zero the surfer wipes out. */
+  /** The surfer's health, 0..HEALTH.max: blows, hazards and crashes take it, clean tricks give it back; at zero the surfer wipes out. */
   health: number = HEALTH.max;
   distance = 0;
   /** Seconds on the run clock (never reset; timers compare against it). */
   time = 0;
   stateTime = 0;
-  rank = 1;
   rage = 0;
   raging = false;
   rageUntil = 0;
@@ -141,40 +168,31 @@ export class Run {
   characterIndex = 0;
   /** The last landing with the points it scored (tests read it). */
   lastLanding: (Landing & { points: number }) | null = null;
-  /** The best race on this device for this course; whether this race set any of it, and which. */
-  best: RaceBest;
+  /** The best run on this device for this course, and whether this run beat it. */
+  best: RunBest;
   newBest = false;
-  readonly newBests = { time: false, place: false, score: false };
-  /** The run time the race started (Run.start). */
-  raceStart = 0;
-  /** Over the line: the surfer's race time (seconds), place (1 to 6; 0 until then) and the place bonus added to the score. */
-  finishTime = 0;
-  place = 0;
-  placeBonus = 0;
-  /** Everyone over the line so far, in order (rivals keep racing after the surfer finishes). */
-  readonly finishOrder: Finisher[] = [];
-  /** The finish line across the course at its length. */
-  readonly finishLine = new FinishLine();
-  /** The latest race callout ("500 M TO GO", "FINAL STRETCH", "FINISH!") and the run time it was called: the HUD sweeps it across the screen. */
-  callout: { text: string; at: number } | null = null;
-  /** The race clock frozen when the race ended for the surfer (finished or wiped out), else -1. */
-  private raceOver = -1;
-  /** How many of RACE.callouts have shown, and every rider's z on the step before (for crossing the line). */
-  private calloutsShown = 0;
-  private playerPrevZ = 0;
-  private readonly rivalPrevZ: number[] = [];
+  /** The shared top 10 on the results, and whether the name prompt is open (input waits for it). */
+  scoreboard: Scoreboard = { list: [], source: 'loading', rank: -1 };
+  entering = false;
+  /** Which gestures the player has used this run (touch; the HUD's hints). */
+  readonly gestures: GesturesUsed = { steer: false, jump: false, hit: false };
   readonly ocean = new Ocean();
   readonly sky: Sky;
   readonly surfer: Surfer;
   readonly rivals: Rival[] = [];
   readonly buoys: Buoy[] = [];
   readonly chevrons: Chevron[] = [];
+  readonly sharks: Shark[] = [];
+  readonly boats: Boat[] = [];
   readonly spray = new Spray();
   readonly wake = new Wake();
   readonly scenery = new Scenery();
-  /** The race course, generated ahead of the surfer. */
+  /** The course, generated ahead of the surfer. */
   generator: CourseGenerator;
   private featureCount = -1;
+  /** Shark and boat spots generated ahead, waiting to come within their spawn window. */
+  private pendingSharks: Spot[] = [];
+  private pendingBoats: BoatSpot[] = [];
   private floating: FloatingText[] = [];
   private changes: HealthChange[] = [];
   /** The combo reader (the HUD shows its held presses). */
@@ -184,8 +202,10 @@ export class Run {
   private pulsing = false;
   private bumpCooldown = 0;
   /** What the rivals are told each step, and the run time before which no rival may start another attack (COMBAT.rivalStagger). */
-  private readonly rivalContext: RivalContext = { fight: false, attackOpen: true, length: 1 };
+  private readonly rivalContext: RivalContext = { fight: false, attackOpen: true, pace: 1, attackGap: 1 };
   private rivalAttackGate = 0;
+  /** Every hazard on the water this step, for the rivals' steering and the contact rules (rebuilt each step, one array). */
+  private readonly hazards: HazardHit[] = [];
   /**
    * Blows on their way (the surfer's punches and barges, and rivals'
    * shoulder checks on the surfer), oldest first: each lands a moment later,
@@ -200,8 +220,6 @@ export class Run {
   private focusUntil = 0;
   /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
   hitStop = 0;
-  /** Seconds (real) of the finish's slow motion left. */
-  private slowMo = 0;
   /** The rival the surfer's last blow is aimed at, and the run time until which its reaction must stay in sight (updateNearFade). */
   private strikeTarget: Rival | null = null;
   private strikeUntil = 0;
@@ -211,29 +229,30 @@ export class Run {
   private readonly lookOffset = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
-  private readonly boxPoint = { x: 0, y: 0 };
+  /** The shared top 10 for the sequel, and whether this run's row has been offered to it. */
+  private readonly scores = new ScoreService('boardmasters');
+  private submitted = false;
+  private scoresLoaded = false;
 
   constructor(
     private readonly renderer: Renderer,
     readonly hud: Hud2D,
     readonly input: Input,
     spec: RiderSpec,
-    readonly course: CourseSpec = COURSES.sunsetBay,
+    readonly course: CourseSpec = COURSE,
   ) {
-    this.generator = new CourseGenerator(course);
+    this.generator = new CourseGenerator(course, this.hazardGap);
     this.best = Run.loadBest(course.id);
-    this.finishLine.place(course.length);
     this.sky = new Sky();
     const scene = renderer.scene;
-    scene.add(this.ocean.mesh, this.sky.group, this.scenery.group, this.spray.mesh);
-    scene.add(this.wake.mesh, this.finishLine.group);
+    scene.add(this.ocean.mesh, this.sky.group, this.scenery.group, this.spray.mesh, this.wake.mesh);
 
     this.characterIndex = Math.max(0, CHARACTER_ORDER.indexOf(spec.id as (typeof CHARACTER_ORDER)[number]));
     this.surfer = new Surfer(spec);
     scene.add(this.surfer.group, this.surfer.shadow);
     // Never a clone of the player's own character (selectCharacter swaps one out if the player picks a rival's look).
     const pool = [...RIVALS, ...CHARACTER_ORDER.filter((id) => id !== spec.id).map((id) => CHARACTERS[id])];
-    for (let i = 0; i < course.rivals; i++) {
+    for (let i = 0; i < COMBAT.rivals; i++) {
       const rival = new Rival(pool[i % pool.length], i);
       rival.autoNearFade = false; // the camera's rule (updateNearFade) decides, sight line included
       this.rivals.push(rival);
@@ -252,31 +271,43 @@ export class Run {
       this.chevrons.push(chevron);
       scene.add(chevron.mesh);
     }
+    const fin = sharkMaterial();
+    for (let i = 0; i < SHARK_POOL; i++) {
+      const shark = new Shark(fin);
+      this.sharks.push(shark);
+      scene.add(shark.group);
+    }
+    const hull = boatMaterial();
+    for (let i = 0; i < BOAT_POOL; i++) {
+      const boat = new Boat(hull);
+      this.boats.push(boat);
+      scene.add(boat.group);
+    }
     this.reset(true);
   }
 
-  /** A course's saved best, normalised: anything missing, corrupt or hand-edited reads as no best. */
-  private static loadBest(id: string): RaceBest {
-    const raw = loadJSON<Partial<RaceBest> | null>(RACE_KEY + id, null);
-    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  /** How much wider the hazards' gaps are on this device (phones: ENDLESS.touchHazardGap). */
+  private get hazardGap(): number {
+    return this.input.touch ? ENDLESS.touchHazardGap : 1;
+  }
+
+  /** A course's saved best, normalised: anything missing, corrupt or hand-edited reads as no best; the race prototype's best score carries over. */
+  private static loadBest(id: string): RunBest {
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+    const raw = loadJSON<Partial<RunBest> | null>(BEST_KEY + id, null);
     const saved = raw !== null && typeof raw === 'object' ? raw : null;
-    const place = num(saved?.place);
-    return { time: num(saved?.time), place: place !== null && place >= 1 ? place : null, score: num(saved?.score) ?? 0 };
+    if (saved) return { score: num(saved.score), distance: num(saved.distance) };
+    const race = loadJSON<{ score?: unknown } | null>(RACE_KEY + id, null);
+    return { score: num(race !== null && typeof race === 'object' ? race.score : 0), distance: 0 };
   }
 
   get spec(): RiderSpec {
     return this.surfer.spec;
   }
 
-  /** The surfer's progress along the race, 0 at the start to 1 at the finish line (where they wiped out, after a wipeout). */
-  get raceProgress(): number {
-    return clamp((this.state === 'wipeout' ? this.distance : this.surfer.z) / this.course.length, 0, 1);
-  }
-
-  /** Seconds since the start of the race (the run clock, so hit-stops do not count), frozen when it ends; 0 on the title. */
-  get raceTime(): number {
-    if (this.state === 'title') return 0;
-    return this.raceOver >= 0 ? this.raceOver : this.time - this.raceStart;
+  /** Everyone's pace for the distance ridden: 1 at the start, up to 1 + ENDLESS.rampMax (the surfer's and the rivals' cruising speed). */
+  get pace(): number {
+    return 1 + ENDLESS.rampMax * Math.min(1, this.distance / ENDLESS.rampMetres);
   }
 
   /** The floating texts on screen, oldest first (the HUD draws them). */
@@ -299,20 +330,22 @@ export class Run {
     return this.changes;
   }
 
-  /** Everyone back to the start line, with a fresh course ahead; `title` parks the rivals in the title's slots instead. */
+  /** Everyone back to the start, with a fresh course ahead; `title` parks the rivals in the title's slots instead. */
   reset(title = this.state === 'title'): void {
-    this.generator = new CourseGenerator(this.course);
+    this.generator = new CourseGenerator(this.course, this.hazardGap);
     this.featureCount = -1;
+    this.pendingSharks = [];
+    this.pendingBoats = [];
     for (const b of this.buoys) b.retire();
     for (const c of this.chevrons) c.retire();
+    for (const sh of this.sharks) sh.retire();
+    for (const bt of this.boats) bt.retire();
+    this.distance = 0;
     this.extendCourse(0);
     this.ocean.advance(0, 0);
     this.surfer.reset(0, 0, this.ocean);
     this.surfer.maxHealth = HEALTH.max;
     this.surfer.health = HEALTH.max;
-    // The field's two fastest (by SPEED) sprint for the line hardest.
-    const bySpeed = [...this.rivals].sort((a, b) => b.spec.speed - a.spec.speed);
-    for (const r of this.rivals) r.sprinter = bySpeed.indexOf(r) < 2;
     const grid = title ? TITLE_GRID : RIVAL_GRID;
     this.rivals.forEach((rival, i) => {
       const [x, z] = grid[i % grid.length];
@@ -320,25 +353,9 @@ export class Run {
       rival.holdChecks(this.time + COMBAT.rivalGraceSeconds); // no shoulder checks in the first seconds of a run
     });
     this.newBest = false;
-    this.newBests.time = this.newBests.place = this.newBests.score = false;
-    this.finishTime = 0;
-    this.place = 0;
-    this.placeBonus = 0;
-    this.finishOrder.length = 0;
-    this.raceOver = -1;
-    this.calloutsShown = 0;
-    this.callout = null;
-    this.finishLine.calm();
-    this.playerPrevZ = this.surfer.z;
-    this.rivals.forEach((r, i) => {
-      r.finishedAt = -1;
-      this.rivalPrevZ[i] = r.z;
-    });
     this.score = 0;
     this.health = HEALTH.max;
     this.changes = [];
-    this.distance = 0;
-    this.rank = 1;
     this.knockouts = 0;
     this.combo = 0;
     this.comboUntil = 0;
@@ -353,9 +370,13 @@ export class Run {
     this.focusTarget = null;
     this.focusUntil = 0;
     this.hitStop = 0;
-    this.slowMo = 0;
     this.strikeTarget = null;
     this.strikeUntil = 0;
+    this.scoreboard = { list: this.scores.list, source: 'loading', rank: -1 };
+    this.submitted = false;
+    this.scoresLoaded = false;
+    this.entering = false;
+    this.gestures.steer = this.gestures.jump = this.gestures.hit = false;
     this.wake.reset();
     this.spray.reset();
     this.snapCamera = true;
@@ -368,10 +389,9 @@ export class Run {
     this.reset(false);
     this.state = 'playing';
     this.stateTime = 0;
-    this.raceStart = this.time;
   }
 
-  /** Generate the course ahead of `z`, hand new spots to pooled buoys and gates, and retire what is left behind. */
+  /** Generate the course ahead of `z`, hand new spots to pooled buoys and gates, queue the sharks and boats, and retire what is left behind. */
   private extendCourse(z: number): void {
     const added = this.generator.extend(z);
     if (added.buoys.length > 0 || this.generator.features.length !== this.featureCount) {
@@ -380,6 +400,8 @@ export class Run {
     }
     for (const b of this.buoys) if (b.active && b.z < z - 60) b.retire();
     for (const c of this.chevrons) if (c.active && c.z < z - 30) c.retire();
+    for (const sh of this.sharks) if (sh.active && sh.z < z - SHARK.behind) sh.retire();
+    for (const bt of this.boats) if (bt.active && bt.z < z - 30) bt.retire();
     // Spots already behind (a jump down the course generates the stretch passed over too) take no pooled mesh.
     for (const spot of added.buoys) {
       if (spot.z < z - 60) continue;
@@ -391,6 +413,22 @@ export class Run {
       const free = this.chevrons.find((c) => !c.active);
       if (free) free.place(spot.x, spot.z);
     }
+    for (const spot of added.sharks) if (spot.z > z) this.pendingSharks.push(spot);
+    for (const spot of added.boats) if (spot.z > z) this.pendingBoats.push(spot);
+  }
+
+  /** Sharks and boats take the water as their spots come within their spawn windows ahead of the surfer. */
+  private spawnHazards(z: number): void {
+    while (this.pendingSharks.length > 0 && this.pendingSharks[0].z <= z + SHARK_SPAWN) {
+      const spot = this.pendingSharks.shift() as Spot;
+      const free = this.sharks.find((sh) => !sh.active);
+      if (free) free.place(spot.x, spot.z, this.time);
+    }
+    while (this.pendingBoats.length > 0 && this.pendingBoats[0].z <= z + BOAT_SPAWN) {
+      const spot = this.pendingBoats.shift() as BoatSpot;
+      const free = this.boats.find((bt) => !bt.active);
+      if (free) free.place(spot.z, spot.direction);
+    }
   }
 
   /** Title screen: cycle the character; the choice is remembered. */
@@ -398,7 +436,7 @@ export class Run {
     const n = CHARACTER_ORDER.length;
     this.characterIndex = (this.characterIndex + direction + n) % n;
     const spec = CHARACTERS[CHARACTER_ORDER[this.characterIndex]];
-    // The rival riding in the new character's look takes the one just given up, so the player never races a clone.
+    // The rival riding in the new character's look takes the one just given up, so the player never rides with a clone.
     const given = this.surfer.spec;
     for (const r of this.rivals) if (r.spec.id === spec.id) r.setSpec(given);
     this.surfer.setSpec(spec);
@@ -406,11 +444,6 @@ export class Run {
   }
 
   update(dt: number): void {
-    // Over the line: a beat of slow motion (RACE.finishSlow) as FINISH! goes up and the first fireworks burst.
-    if (this.slowMo > 0) {
-      this.slowMo = Math.max(0, this.slowMo - dt);
-      dt *= RACE.finishSlow[0];
-    }
     if (this.hitStop > 0) {
       // Hit-stop: the world holds still for a few frames as a blow lands (the run clock too, so every timer
       // and animation picks up where it stopped); the camera shake and the words on the HUD keep moving.
@@ -421,12 +454,11 @@ export class Run {
       this.updateCamera(dt);
       return;
     }
-    // Paused, the run clock holds (the race time, rivals' wind-ups, invulnerability and RAGE all wait); the panel's own clock runs.
+    // Paused, the run clock holds (rivals' wind-ups, invulnerability and RAGE all wait); the panel's own clock runs.
     if (this.state !== 'paused') this.time += dt;
     this.stateTime += dt;
     syncLook();
-    this.input.buttonsActive = this.state === 'playing';
-    const input = this.input.poll();
+    let input = this.input.poll();
     const idle: InputState = { ...input, steer: 0, pump: false, brake: false, jump: false, attack: false, barge: false };
     const W = this.hud.width;
 
@@ -439,8 +471,8 @@ export class Run {
           if (this.input.touch) void requestImmersiveMode();
           this.start();
         }
-        // The attract ride starts over before it reaches the finish line.
-        if (this.state === 'title' && this.surfer.z > this.course.length - 150) this.reset(true);
+        // The attract ride starts over before it gets too far.
+        if (this.state === 'title' && this.surfer.z > ENDLESS.attractResetMetres) this.reset(true);
         this.simulate(dt, idle, false);
         break;
       case 'playing':
@@ -453,6 +485,7 @@ export class Run {
           const combo = this.combos.push(key, this.time);
           if (combo) this.performCombo(combo);
         }
+        if (this.input.touch) input = this.gestureInput(input);
         this.simulate(dt, input, true);
         break;
       case 'paused':
@@ -463,9 +496,10 @@ export class Run {
         }
         break;
       case 'wipeout':
-      case 'finished':
-        // The results: the surfer rides on (or floats) behind them with the field still racing; input after a moment.
-        if (this.stateTime > (this.state === 'finished' ? RACE.resultsSeconds : SCORING.wipeoutSeconds)) {
+        // The results: the surfer floats behind them with the pack riding on; the shared table comes in, the name is asked for a
+        // run that makes it, and input is taken after a moment (not while the name prompt is open).
+        if (this.scoresLoaded && !this.submitted && this.stateTime > SCORING.wipeoutSeconds) void this.offerScore();
+        if (!this.entering && this.stateTime > SCORING.wipeoutSeconds) {
           if (input.back || this.tappedMenu(input)) this.mainMenu();
           else if (input.start) this.start();
         }
@@ -482,9 +516,31 @@ export class Run {
     this.updateCamera(dt);
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
-    this.finishLine.update(this.time, this.ocean, this.renderer.camera.position, this.renderer.renderScale);
     this.spray.update(dt, this.renderer.camera);
     this.wake.update(dt, this.ocean);
+  }
+
+  /**
+   * The phone's gestures in play (Input turns them into the same flags as
+   * the keys): a flick up in the air is a BARREL ROLL rather than a buffered
+   * jump (past the lip pop's moment, which it still is), a flick down in the
+   * air is a grab, and what the player has used is noted for the hints.
+   */
+  private gestureInput(input: InputState): InputState {
+    const s = this.surfer;
+    const g = this.gestures;
+    if (Math.abs(input.steer) > 0.3) g.steer = true;
+    if (input.jump) g.jump = true;
+    if (input.attack) g.hit = true;
+    if (!s.airborne || s.wiped) return input;
+    let out = input;
+    if (input.jump && s.airTime > PHYSICS.lipPopSeconds) {
+      // Screen-right is world -x; the roll follows the carve (or goes screen-right).
+      if (s.barrelRoll(input.steer > 0.05 ? -1 : input.steer < -0.05 ? 1 : -1, this.time)) this.float('BARREL ROLL!', hex(PALETTE.cyan), 1);
+      out = { ...out, jump: false };
+    }
+    if (input.barge) out = { ...out, barge: false, attack: true };
+    return out;
   }
 
   private ageSparks(dt: number): void {
@@ -508,26 +564,28 @@ export class Run {
     return inZone(input.tapX, input.tapY, 0, 0, MENU_ZONE.w, MENU_ZONE.h);
   }
 
-  /** Advance the world one step; `live` applies the rules (score, damage, combat, finish). */
+  /** Advance the world one step; `live` applies the rules (score, damage, combat). */
   private simulate(dt: number, input: InputState, live: boolean): void {
     const s = this.surfer;
     this.extendCourse(s.z);
+    this.spawnHazards(s.z);
     // The sea moves first so every rider samples the surface that is drawn this frame.
     this.ocean.advance(dt, s.z);
-    // The pace rises with race progress (rivals' too, in Rival.think); RAGE on top.
-    const ramp = 1 + RACE.speedRampMax * this.raceProgress;
-    s.targetSpeed = PHYSICS.baseSpeed * s.stats.speed * ramp * (this.raging ? RAGE.speedMul : 1);
+    // The pace rises with distance (rivals' too, in Rival.think); RAGE on top.
+    const pace = this.pace;
+    s.targetSpeed = PHYSICS.baseSpeed * s.stats.speed * pace * (this.raging ? RAGE.speedMul : 1);
     s.update(dt, s.fromInput(input), this.ocean, this.time);
-    const buoyPositions = this.buoys.filter((b) => b.active && !b.smashed);
+    this.collectHazards();
     const ctx = this.rivalContext;
     ctx.fight = live;
-    ctx.length = this.course.length;
+    ctx.pace = pace;
+    ctx.attackGap = this.input.touch ? ENDLESS.touchAttackGap : 1;
     for (const r of this.rivals) {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
       // On the title the rivals ride parked in their slots ahead, clear of the selected character.
       const slot = this.state === 'title' ? TITLE_GRID[r.index % TITLE_GRID.length] : null;
       ctx.attackOpen = this.time >= this.rivalAttackGate;
-      const control = r.think(s, buoyPositions, this.time, slot, ctx);
+      const control = r.think(s, this.hazards, this.time, slot, ctx);
       // One rival's attack closes the gate for the others for a moment, so two rarely come at once.
       if (r.startedAttack) this.rivalAttackGate = this.time + COMBAT.rivalStagger;
       r.update(dt, control, this.ocean, this.time);
@@ -536,6 +594,8 @@ export class Run {
     for (const r of this.rivals) this.splashFrom(r);
     for (const b of this.buoys) b.update(this.time, this.ocean);
     for (const c of this.chevrons) c.update(this.time, this.ocean);
+    for (const sh of this.sharks) sh.update(dt, this.time, this.ocean);
+    for (const bt of this.boats) bt.update(dt, this.time, this.ocean);
 
     // Every rider on the water leaves a foam wake and throws spray: a fan from the tail at speed, a rooster tail to the outside of a hard carve.
     const camZ = this.renderer.camera.position.z;
@@ -547,12 +607,12 @@ export class Run {
       const tailX = r.x - sinH * 0.9;
       const tailZ = r.z - cosH * 0.9;
       const carve = Math.min(1, Math.abs(r.heading) / PHYSICS.maxHeading);
-      const pace = Math.min(1, Math.max(0, (r.speed - 6) / 16));
-      this.wake.emit(tailX, r.y, tailZ, r.heading, r.speed, 0.4 + pace * 0.3 + carve * 0.4);
+      const paceAmount = Math.min(1, Math.max(0, (r.speed - 6) / 16));
+      this.wake.emit(tailX, r.y, tailZ, r.heading, r.speed, 0.4 + paceAmount * 0.3 + carve * 0.4);
       // Spray only where it can be seen; rivals throw less of it so the pool goes round.
       if (r.z < camZ - 2 || r.z > camZ + 60) continue;
       const boost = this.time < r.boostUntil;
-      const amount = (i < 0 ? 1 : 0.45) * (0.8 + pace * 1.2 + carve * 3 + (boost ? 2.5 : 0));
+      const amount = (i < 0 ? 1 : 0.45) * (0.8 + paceAmount * 1.2 + carve * 3 + (boost ? 2.5 : 0));
       // Clumps stay small (a rival's big ones read as white tiles over the riders); the surfer's fly close past the camera.
       const maxSize = i < 0 ? 1.4 : 1.25;
       let bursts = Math.floor(amount);
@@ -564,15 +624,15 @@ export class Run {
           const fan = 0.4 + Math.random() * 0.8;
           this.spray.emit(
             tailX + outward * 0.25, r.y + 0.1, tailZ,
-            outward * (1.5 + carve * 4.5) * fan + sinH * r.speed * 0.7, 1.8 + carve * 4.2 * Math.random() + pace, cosH * r.speed * (0.6 + Math.random() * 0.2),
+            outward * (1.5 + carve * 4.5) * fan + sinH * r.speed * 0.7, 1.8 + carve * 4.2 * Math.random() + paceAmount, cosH * r.speed * (0.6 + Math.random() * 0.2),
             Math.min(maxSize, 0.8 + carve * 0.8 + Math.random() * 0.5),
           );
         } else {
           const side = (Math.floor(this.time * 60) + k) % 2 === 0 ? -1 : 1;
           this.spray.emit(
             tailX + cosH * side * 0.3, r.y + 0.05, tailZ - sinH * side * 0.3,
-            cosH * side * (1 + Math.random() * 1.4) + sinH * r.speed * 0.7, 0.8 + Math.random() * 1.2 + pace * 0.8, cosH * r.speed * (0.65 + Math.random() * 0.2),
-            Math.min(maxSize, 0.55 + pace * 0.35),
+            cosH * side * (1 + Math.random() * 1.4) + sinH * r.speed * 0.7, 0.8 + Math.random() * 1.2 + paceAmount * 0.8, cosH * r.speed * (0.65 + Math.random() * 0.2),
+            Math.min(maxSize, 0.55 + paceAmount * 0.35),
           );
         }
       }
@@ -587,15 +647,9 @@ export class Run {
       if (!s.hitFlashing) s.setFlash(0);
     }
 
-    // The line: rivals' crossings are recorded as they happen, through the results too; the surfer's ends the race.
-    if (this.state !== 'title') this.trackFinish(dt);
     if (!live || this.state !== 'playing') return;
     this.distance = s.z;
     this.score += s.speed * Math.cos(s.heading) * dt * SCORING.perMetre;
-    let ahead = 0;
-    for (const r of this.rivals) if (r.finishedAt >= 0 || r.z > s.z) ahead++;
-    this.rank = 1 + ahead;
-    this.callouts();
 
     // RAGE: drains while raging, decays slowly otherwise.
     if (this.raging) {
@@ -612,6 +666,15 @@ export class Run {
     this.resolveRivalPunches();
     if (this.impacts.length > 0 && this.time >= this.impacts[0].at) this.landImpacts();
     this.resolveHazards();
+  }
+
+  /** The hazards on the water this step (buoys standing, sharks, boats), into one reused array. */
+  private collectHazards(): void {
+    const list = this.hazards;
+    list.length = 0;
+    for (const b of this.buoys) if (b.active && !b.smashed) list.push({ kind: 'buoy', x: b.x, z: b.z, hx: 1.05, hz: 1.1, clear: 1.0 });
+    for (const sh of this.sharks) if (sh.active) list.push({ kind: 'shark', x: sh.x, z: sh.z, hx: SHARK.hitX, hz: SHARK.hitZ, clear: SHARK.clearHeight });
+    for (const bt of this.boats) if (bt.active) list.push({ kind: 'boat', x: bt.x, z: bt.z, hx: BOAT.hitX, hz: BOAT.hitZ, clear: BOAT.clearHeight });
   }
 
   /** Throw a splash for every body or board that hit the water this step (knockouts, wipeouts, crashes). */
@@ -669,7 +732,7 @@ export class Run {
       s.crashUntil = this.time + TRICKS.crashSeconds;
       s.stunnedUntil = Math.max(s.stunnedUntil, this.time + TRICKS.crashSeconds);
       s.speed *= TRICKS.badLandingSpeed;
-      // Like buoys, a crash costs no health while the last hit's invulnerability lasts (a buoy clipped in the air, then the landing).
+      // Like hazards, a crash costs no health while the last hit's invulnerability lasts (a buoy clipped in the air, then the landing).
       if (this.time >= this.invulnerableUntil) this.damage(HEALTH.crash, 'CRASH!');
       else this.float('CRASH!', hex(PALETTE.red), 1);
       return;
@@ -704,7 +767,7 @@ export class Run {
     this.addRage(RAGE.perTrick * (1 + halfTurns * 0.5 + (l.grabbed ? 0.5 : 0) + (l.rolled ? 1 : 0)));
   }
 
-  /** A completed input combo: the move it names, if the surfer can do it right now. */
+  /** A completed input combo (keyboard): the move it names, if the surfer can do it right now. */
   private performCombo(combo: Combo): void {
     const s = this.surfer;
     switch (combo.id) {
@@ -846,7 +909,12 @@ export class Run {
     this.impacts.splice(i, 0, impact);
   }
 
-  /** Buoys (smashed in RAGE), the course edge, and rider-on-rider bumps. */
+  /** Whether a rider at (x, z) is on hazard `h` (within its box, and not high enough over it). */
+  private onHazard(h: HazardHit, r: Rider): boolean {
+    return Math.abs(r.x - h.x) < h.hx && Math.abs(r.z - h.z) < h.hz && r.airHeight(this.ocean) < h.clear;
+  }
+
+  /** Boost gates, the hazards (buoys smashed in RAGE; sharks and boats), the course edge, and rider-on-rider bumps. */
   private resolveHazards(): void {
     const s = this.surfer;
     const near = (ax: number, az: number, bx: number, bz: number, rx: number, rz: number) => Math.abs(ax - bx) < rx && Math.abs(az - bz) < rz;
@@ -860,32 +928,34 @@ export class Run {
         this.float('BOOST!', hex(PALETTE.cyan), 1);
       }
     }
-    for (const b of this.buoys) {
-      if (!b.active || b.smashed || Math.abs(b.z - s.z) > 4) continue;
-      if (near(s.x, s.z, b.x, b.z, 1.05, 1.1) && s.airHeight(this.ocean) < 1.0) {
-        if (this.raging) {
-          b.smash();
-          this.score += RAGE.smashPoints;
-          this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.smashSplash);
-          const [amount, seconds] = IMPACT.shake.smash;
-          this.shake(amount, seconds);
-          this.float(`SMASH +${RAGE.smashPoints}`, hex(PALETTE.gold), 1);
-        } else if (this.time >= this.invulnerableUntil) {
-          // A thud: the surfer is thrown clear to the side (about 1.8 m, past the buoy and out of the chase camera's path),
-          // the buoy lurches away and rings back, and the run holds for a beat.
-          const dir = Math.sign(s.x - b.x || 1);
-          s.speed *= SCORING.hitSpeedFactor;
-          s.shoveVx = dir * IMPACT.buoyShove;
-          s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.45);
-          s.flinch(dir, 1.2, this.time);
-          b.strike(dir, this.time);
-          this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.buoySplash);
-          const [amount, seconds] = IMPACT.shake.buoy;
-          this.shake(amount, seconds);
-          this.hitStop = Math.max(this.hitStop, IMPACT.hitStop.buoy);
-          this.damage(HEALTH.buoy, 'OUCH!');
-        }
+    for (const h of this.hazards) {
+      if (Math.abs(h.z - s.z) > 5 || !this.onHazard(h, s)) continue;
+      if (h.kind === 'buoy' && this.raging) {
+        // RAGE smashes buoys for points (sharks and boats are still solid).
+        const b = this.buoyAt(h);
+        if (!b) continue;
+        b.smash();
+        this.score += RAGE.smashPoints;
+        this.spray.splash(b.x, this.ocean.height(b.x, b.z), b.z, IMPACT.smashSplash);
+        const [amount, seconds] = IMPACT.shake.smash;
+        this.shake(amount, seconds);
+        this.float(`SMASH +${RAGE.smashPoints}`, hex(PALETTE.gold), 1);
+        continue;
       }
+      if (this.time < this.invulnerableUntil) continue;
+      // A thud: the surfer is thrown clear to the side (about 1.8 m, past the hazard and out of the chase camera's path), the
+      // buoy lurches away and rings back, and the run holds for a beat.
+      const dir = Math.sign(s.x - h.x || 1);
+      s.speed *= SCORING.hitSpeedFactor;
+      s.shoveVx = dir * IMPACT.buoyShove;
+      s.stunnedUntil = Math.max(s.stunnedUntil, this.time + 0.45);
+      s.flinch(dir, 1.2, this.time);
+      if (h.kind === 'buoy') this.buoyAt(h)?.strike(dir, this.time);
+      this.spray.splash(h.x, this.ocean.height(h.x, h.z), h.z, h.kind === 'shark' ? IMPACT.sharkSplash : h.kind === 'boat' ? IMPACT.boatSplash : IMPACT.buoySplash);
+      const [amount, seconds] = IMPACT.shake[h.kind];
+      this.shake(amount, seconds);
+      this.hitStop = Math.max(this.hitStop, IMPACT.hitStop[h.kind]);
+      this.damage(h.kind === 'shark' ? HEALTH.shark : h.kind === 'boat' ? HEALTH.boat : HEALTH.buoy, h.kind === 'shark' ? 'SHARK!' : h.kind === 'boat' ? 'BOAT!' : 'OUCH!');
     }
     for (const r of this.rivals) {
       if (r.knockedOut) continue;
@@ -895,17 +965,17 @@ export class Run {
         continue;
       }
       if (r.airborne) continue;
-      for (const b of this.buoys) {
-        if (!b.active || b.smashed || Math.abs(b.z - r.z) > 4 || !near(r.x, r.z, b.x, b.z, 1.05, 1.1)) continue;
+      for (const h of this.hazards) {
+        if (Math.abs(h.z - r.z) > 5 || !this.onHazard(h, r)) continue;
         if (shoved) {
-          this.knockout(r, 'INTO THE BUOY', COMBAT.environmentPoints);
+          this.knockout(r, h.kind === 'shark' ? 'SHARK FOOD' : h.kind === 'boat' ? 'INTO THE BOAT' : 'INTO THE BUOY', COMBAT.environmentPoints);
           break;
         }
         if (this.time >= r.stunnedUntil) {
-          r.shoveVx = Math.sign(r.x - b.x || 1) * 5;
+          r.shoveVx = Math.sign(r.x - h.x || 1) * 5;
           r.speed *= SCORING.hitSpeedFactor;
           r.stunnedUntil = this.time + 0.4;
-          r.flinch(Math.sign(r.x - b.x || 1), 1, this.time);
+          r.flinch(Math.sign(r.x - h.x || 1), 1, this.time);
         }
       }
     }
@@ -928,10 +998,15 @@ export class Run {
     }
   }
 
+  /** The pooled buoy standing at a hazard entry's spot. */
+  private buoyAt(h: HazardHit): Buoy | undefined {
+    return this.buoys.find((b) => b.active && !b.smashed && b.x === h.x && b.z === h.z);
+  }
+
   /**
    * Take `amount` of health (halved while raging) with `label` floated
    * beside the surfer ('' for none), then `invulnerableFor` seconds without
-   * further damage. At zero the surfer wipes out: the race is over for them.
+   * further damage. At zero the surfer wipes out: the run is over.
    */
   damage(amount: number, label: string, invulnerableFor: number = HEALTH.hazardInvulnerable): void {
     if (this.state !== 'playing') return;
@@ -952,95 +1027,49 @@ export class Run {
       this.shake(amount, seconds);
       this.endRage();
       this.float('WIPEOUT', hex(PALETTE.red), 2);
-      // The race is over unfinished: only the best score can improve.
       this.distance = s.z;
-      this.raceOver = this.time - this.raceStart;
-      this.saveBest(false);
+      this.score = Math.min(SCORING.maxScore, Math.floor(this.score));
+      this.saveBest();
+      void this.loadScores();
     } else {
       this.invulnerableUntil = Math.max(this.invulnerableUntil, this.time + invulnerableFor);
       if (label) this.float(label, hex(PALETTE.red), 1);
     }
   }
 
-  /**
-   * Who crossed the line this step: each rival's crossing is recorded in
-   * order (the moment within the step it crossed), and the surfer's ends
-   * the race (finish). A knocked-out body flying over the line does not
-   * count; the rival crosses when it is back in the race.
-   */
-  private trackFinish(dt: number): void {
-    const L = this.course.length;
-    const stepStart = this.time - dt;
-    const crossAt = (prev: number, z: number) => stepStart + dt * clamp((L - prev) / Math.max(1e-6, z - prev), 0, 1);
-    for (let i = 0; i < this.rivals.length; i++) {
-      const r = this.rivals[i];
-      const prev = this.rivalPrevZ[i];
-      this.rivalPrevZ[i] = r.z;
-      if (r.finishedAt >= 0 || r.knockedOut || prev >= L || r.z < L) continue;
-      r.finishedAt = crossAt(prev, r.z);
-      this.addFinisher(r.spec.name, r.spec.id, false, r.finishedAt - this.raceStart);
-    }
-    const s = this.surfer;
-    const prev = this.playerPrevZ;
-    this.playerPrevZ = s.z;
-    if (this.state === 'playing' && !s.wiped && prev < L && s.z >= L) this.finish(crossAt(prev, s.z));
-  }
-
-  private addFinisher(name: string, id: string, player: boolean, time: number): void {
-    let i = this.finishOrder.length;
-    while (i > 0 && this.finishOrder[i - 1].time > time) i--;
-    this.finishOrder.splice(i, 0, { name, id, player, time });
-  }
-
-  /**
-   * Over the line at run time `at`: the race time, the place (one behind
-   * every rival already over), the place bonus on the score, FINISH! and
-   * the best kept; the surfer rides on behind the results.
-   */
-  private finish(at: number): void {
-    const s = this.surfer;
-    this.state = 'finished';
-    this.stateTime = 0;
-    this.finishTime = at - this.raceStart;
-    this.raceOver = this.finishTime;
-    let before = 0;
-    for (const r of this.rivals) if (r.finishedAt >= 0 && r.finishedAt <= at) before++;
-    this.place = before + 1;
-    this.rank = this.place;
-    this.placeBonus = RACE.placeBonus[Math.min(this.place, RACE.placeBonus.length) - 1];
-    this.score += this.placeBonus;
-    this.addFinisher(s.spec.name, s.spec.id, true, this.finishTime);
-    // Blows still on their way no longer count, and the surfer stops pulsing and raging.
-    this.impacts = [];
-    this.invulnerableUntil = 0;
-    this.endRage();
-    this.combos.clear();
-    this.callout = { text: 'FINISH!', at: this.time };
-    this.finishLine.celebrate(this.time);
-    this.slowMo = RACE.finishSlow[1];
-    this.saveBest(true);
-  }
-
-  /** Keep this race's best on the device (per course): time and place only from a finish, the score either way. */
-  private saveBest(finished: boolean): void {
-    const b = this.best;
-    const nb = this.newBests;
+  /** Keep this run's best on the device (per course): the score, with the distance it was set at. */
+  private saveBest(): void {
     const score = Math.floor(this.score);
-    nb.score = score > b.score;
-    nb.time = finished && (b.time === null || this.finishTime < b.time);
-    nb.place = finished && (b.place === null || this.place < b.place);
-    this.newBest = nb.score || nb.time || nb.place;
+    this.newBest = score > this.best.score;
     if (!this.newBest) return;
-    this.best = { time: nb.time ? this.finishTime : b.time, place: nb.place ? this.place : b.place, score: nb.score ? score : b.score };
-    saveJSON(RACE_KEY + this.course.id, this.best);
+    this.best = { score, distance: Math.floor(this.distance) };
+    saveJSON(BEST_KEY + this.course.id, this.best);
   }
 
-  /** "500 M TO GO" and "FINAL STRETCH" as the line nears (only the latest, if several are passed at once). */
-  private callouts(): void {
-    const left = this.course.length - this.surfer.z;
-    let text = '';
-    while (this.calloutsShown < RACE.callouts.length && left <= RACE.callouts[this.calloutsShown][0]) text = RACE.callouts[this.calloutsShown++][1];
-    if (text) this.callout = { text, at: this.time };
+  /** Fetch the shared top 10 for the results (the device's table meanwhile, and if the API is unreachable). */
+  private async loadScores(): Promise<void> {
+    const list = await this.scores.load();
+    if (this.state !== 'wipeout') return;
+    this.scoreboard = { list, source: this.scores.source, rank: -1 };
+    this.scoresLoaded = true;
+  }
+
+  /** A run that makes the table: ask for a name (the original game's form) and put it on the table; the results wait meanwhile. */
+  private async offerScore(): Promise<void> {
+    this.submitted = true;
+    const score = Math.floor(this.score);
+    if (!this.scores.qualifies(score)) return;
+    this.entering = true;
+    try {
+      const name = await promptForName();
+      if (this.state !== 'wipeout') return;
+      if (name === null) return; // skipped: the run stays off the table
+      const result = await this.scores.submit(HighScores.cleanName(name), score, Math.min(SCORING.maxDistance, Math.floor(this.distance)));
+      if (this.state !== 'wipeout') return;
+      this.scoreboard = { list: result.list, source: result.source, rank: result.rank };
+    } finally {
+      this.entering = false;
+    }
   }
 
   /** Give back `amount` of health (clean tricks), up to HEALTH.max. */
@@ -1136,31 +1165,6 @@ export class Run {
   headPoint(r: Rider, lift: number, out: { x: number; y: number }): boolean {
     const head = r.headTop(this.tmp2);
     return this.renderer.worldToHud(head.x, head.y + lift, head.z, out);
-  }
-
-  /**
-   * Where the finish arch shows on the HUD (VIEW pixels: its box into `out`)
-   * while it stands well ahead (from 25 m up to FinishLine's HIDE); false
-   * otherwise. Its corners are taken along the camera's lines of sight,
-   * nearer, so they stay inside the far plane however far the arch is.
-   */
-  finishBox(out: { x0: number; y0: number; x1: number; y1: number }): boolean {
-    const cam = this.renderer.camera.position;
-    const ahead = this.course.length - cam.z;
-    if (ahead < 25 || ahead > 320) return false;
-    const k = Math.min(1, 100 / ahead);
-    const boost = archBoost(ahead);
-    const hw = ARCH_BOX.halfWidth * boost;
-    const corner = (x: number, y: number) => this.renderer.worldToHud(cam.x + (x - cam.x) * k, cam.y + (y - cam.y) * k, cam.z + ahead * k, this.boxPoint);
-    if (!corner(hw, ARCH_BOX.height * boost)) return false;
-    const ax = this.boxPoint.x;
-    const ay = this.boxPoint.y;
-    if (!corner(-hw, 0)) return false;
-    out.x0 = Math.min(ax, this.boxPoint.x);
-    out.x1 = Math.max(ax, this.boxPoint.x);
-    out.y0 = Math.min(ay, this.boxPoint.y);
-    out.y1 = Math.max(ay, this.boxPoint.y);
-    return true;
   }
 
   /** Where a point given in metres from the surfer (a hit spark) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */

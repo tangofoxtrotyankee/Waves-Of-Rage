@@ -1,52 +1,14 @@
 import { type Hud2D, hardenAlpha, heavyWidth, makeCanvas, outlined, type Stops } from '../engine/Hud2D';
-import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
 import { hex } from '../engine/math';
-import { COMBAT, HEALTH, IS_PORTRAIT, PALETTE, RACE, RIDER_ANIM, SCORING, VIEW } from './constants';
-import {
-  BigDigits,
-  brushPanel,
-  type ButtonArt,
-  buttonArt,
-  captionPill,
-  checkerStrip,
-  drawnRadius,
-  type HealthBarArt,
-  healthBar,
-  HUD_COLORS,
-  hitSparkFrame,
-  MiniDigits,
-  pauseArt,
-  segmentBar,
-  SPARK_FRAMES,
-  starIcon,
-  statBar,
-  stopwatchIcon,
-  stripMarkers,
-  trophyIcon,
-  warnIcon,
-} from './HudArt';
+import { COMBAT, HEALTH, IS_PORTRAIT, PALETTE, RIDER_ANIM, SCORING, VIEW } from './constants';
+import { BigDigits, brushPanel, type HealthBarArt, healthBar, HUD_COLORS, hitSparkFrame, pauseArt, segmentBar, SPARK_FRAMES, starIcon, statBar, trophyIcon, warnIcon } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import { type FloatingText, type Run, SPARK_SECONDS } from './Run';
 
 /** Seconds after the wipeout before the results panel slams in: the fall plays first. */
 const RESULTS_DELAY = RIDER_ANIM.wipeoutFall + 0.3;
-
-/** 1ST, 2ND, 3RD, 4TH... */
-export function ordinal(n: number): string {
-  const tens = n % 100;
-  const suffix = tens >= 11 && tens <= 13 ? 'TH' : n % 10 === 1 ? 'ST' : n % 10 === 2 ? 'ND' : n % 10 === 3 ? 'RD' : 'TH';
-  return `${n}${suffix}`;
-}
-
-/** A race time as m:ss.s (tenths: false gives m:ss). */
-export function raceClock(seconds: number, tenths = true): string {
-  const t = Math.max(0, Math.floor(seconds * 10 + 1e-6));
-  const m = Math.floor(t / 600);
-  const s = Math.floor(t / 10) % 60;
-  return `${m}:${s < 10 ? '0' : ''}${s}${tenths ? `.${t % 10}` : ''}`;
-}
 
 /** How long a floating text lives (Run drops it after 1.3 s); it fades over the last part. */
 const FLOAT_LIFE = 1.3;
@@ -54,9 +16,8 @@ const FLOAT_FADE = 0.3;
 const FLOAT_POP = 0.14;
 /** Floating texts stay below the top bar, the RAGE row and the combo. */
 const FLOAT_TOP = 71;
-/** The top bar's panels' height (DIST hangs lower, with the race clock under the percentage), and the RAGE row's top under it. */
+/** The top bar's panels' height, and the RAGE row's top under it. */
 const BAR_H = 25;
-const DIST_H = 33;
 const RAGE_Y = 37;
 /** A blow's shake of the HEALTH panel, its red flash and the edges' red glow (seconds), and a heal's bright sweep along the bar. */
 const HURT_SECONDS = 0.32;
@@ -64,23 +25,18 @@ const HEAL_SECONDS = 0.5;
 /** The bar's lost chunk waits this long, then drains at this many health points a second (the surfer's and the rivals'). */
 const TRAIL_HOLD = 0.3;
 const TRAIL_RATE = 110;
-/** Callouts sweeping across: seconds on screen, sliding in and out. */
-const CALLOUT_SECONDS = 2.2;
-const CALLOUT_IN = 0.16;
-const CALLOUT_OUT = 0.25;
-/** The course strip maps the whole race: the start this far above the panel's bottom, the finish flag's line this far below its top. */
-const STRIP_BOTTOM = 6;
-const STRIP_TOP = 14;
-const STRIP_W = 22;
+/** The phone's gesture hints show for this long into a run (each goes sooner once its gesture has been used). */
+const HINT_SECONDS = 10;
+const HINT_FADE = 0.4;
+/** The shared table on the results: "NN NAME.... 000000" is 17 glyphs of 8 px; rows this far apart. */
+const TABLE_CHARS = 17;
+const TABLE_ROW = 11;
 const BIG = new BigDigits();
 /** Scratch for a float's projected point (no allocation per frame). */
 const FLOAT_AT = { x: 0, y: 0 };
-/** The finish arch's box on the HUD this frame (Run.finishBox), for keeping words off it. */
-const ARCH_AT = { x0: 0, y0: 0, x1: 0, y1: 0 };
 /** Scratch for a rival's head and the surfer's on the HUD. */
 const HEAD_AT = { x: 0, y: 0 };
 const SURFER_AT = { x: 0, y: 0 };
-const MINI = new MiniDigits();
 /** Metres over the top of a rider's head where its marks sit. */
 const HEAD_LIFT = 0.12;
 /** Scratch for a hit spark's projected centre and a point above it (its size on screen). */
@@ -95,6 +51,8 @@ const FLOAT_VOCABULARY: [string, string, number][] = [
   ['HIT!', '#ffffff', 1],
   ['BARGE!', '#ffffff', 1],
   ['OUCH!', hex(PALETTE.red), 1],
+  ['SHARK!', hex(PALETTE.red), 1],
+  ['BOAT!', hex(PALETTE.red), 1],
   ['CRASH!', hex(PALETTE.red), 1],
   ['SHOVED!', hex(PALETTE.red), 1],
   ['PUNCHED!', hex(PALETTE.red), 1],
@@ -120,26 +78,23 @@ LOGO.src = 'assets/boardmasters/logo-236x118.png';
 const TIGHT = { tight: true } as const;
 const TIGHT_RIGHT = { tight: true, align: 'right' } as const;
 const TIGHT_CENTER = { tight: true, align: 'center' } as const;
-const TIGHT_OUTLINE = { tight: true, outline: true } as const;
 const TIGHT_CENTER_OUTLINE = {
   tight: true,
   align: 'center',
   outline: true,
 } as const;
-const TIGHT_RIGHT_OUTLINE = { tight: true, align: 'right', outline: true } as const;
 const INK = { tight: true, shadow: false } as const;
 const INK_BIG = { tight: true, scale: 2, shadow: false } as const;
 const INK_RIGHT = { tight: true, align: 'right', shadow: false } as const;
 const ARROW = { align: 'center', scale: 2, outline: true } as const;
 const STAT_LABELS = ['SPEED', 'TURN', 'POWER', 'RAGE'];
 const STAT_COLORS = ['#5fe3ff', '#5fe3ff', '#5fe3ff', '#ff4d6d'];
-const CAPTION_EDGE: Record<string, string> = {
-  attack: '#ff2e4d',
-  barge: '#2a8cff',
-  forward: '#ffc21a',
-  jump: '#c8d2e8',
-  carveLeft: '#9aa6c4',
-};
+/** The phone's gesture hints, in the order they stack, each with the gesture that dismisses it. */
+const HINTS: [string, 'steer' | 'jump' | 'hit'][] = [
+  ['SWIPE TO CARVE', 'steer'],
+  ['SWIPE UP TO JUMP', 'jump'],
+  ['TAP TO PUNCH', 'hit'],
+];
 
 /** Whole number with thousands separators ("12,480"). */
 export function withCommas(value: number): string {
@@ -184,16 +139,16 @@ function stopsFor(color: string): Stops {
 }
 
 /** Contact words get a comic impact burst behind them. */
-const IMPACT = /^(HIT!|BARGE!|BUMP|SHOVED!|OUCH!|PUNCHED!|COUNTER!)$/;
+const IMPACT = /^(HIT!|BARGE!|BUMP|SHOVED!|OUCH!|SHARK!|BOAT!|PUNCHED!|COUNTER!)$/;
 /** "NAME +250" or "NAME +1000 X2": the points go on their own line above the name. */
 const POINTS = /^(.*?)\s*(\+\d+(?:\s+X\d+)?)$/;
 
 /**
  * Everything on the 2D overlay, per the gameplay and title mockups: the
- * top bar (HEALTH, POS, DIST, SCORE), the RAGE lettering and segmented bar,
- * the course strip on the left edge, floating trick text beside the surfer,
- * the input trail, the touch buttons with icons and captions, the title's
- * menu rows and character select, and the pause and results panels.
+ * top bar (HEALTH, DIST, SCORE), the RAGE lettering and segmented bar,
+ * floating trick text beside the surfer, the input trail (keyboard), the
+ * phone's gesture hints, the title's menu rows and character select, and
+ * the pause and results panels (the results with the shared top 10).
  * Reads the run and changes nothing. Art is baked once (HudArt, or on first
  * use for anything that needs the pixel font) and blitted; the in-play path
  * allocates nothing per frame beyond a string when a shown number changes.
@@ -201,14 +156,9 @@ const POINTS = /^(.*?)\s*(\+\d+(?:\s+X\d+)?)$/;
 export class HudView {
   private readonly hud: Hud2D;
   private readonly W: number;
-  /** The HUD's height: upright it follows the screen (VIEW.height), and layout() places what hangs off it again. */
+  /** The HUD's height: upright it follows the screen (VIEW.height). */
   private H = 0;
-  private readonly marks = stripMarkers();
   private readonly pauseButton = pauseArt();
-  /** Button sprites; a button lettered inside its disc is baked again once the font has loaded. */
-  private readonly buttons: ButtonArt[] = TOUCH_BUTTONS.map((b) => buttonArt(b));
-  private buttonsLettered = false;
-  private readonly captions: (HTMLCanvasElement | null)[] = TOUCH_BUTTONS.map(() => null);
   /** Float sprites per float (no key string per frame), backed by floatCache by text, colour and scale. */
   private readonly floatArt = new WeakMap<FloatingText, HTMLCanvasElement>();
   /** Baked float sprites by `text|color|scale`, most recently used last (a small LRU): the same word is baked once. */
@@ -222,6 +172,7 @@ export class HudView {
   private readonly names = new Map<string, HTMLCanvasElement | null>();
   private readonly comboArt: (HTMLCanvasElement | null)[] = [];
   private readonly statArt: (HTMLCanvasElement | null)[] = [];
+  private readonly hintArt: (HTMLCanvasElement | null)[] = [];
   private rageWord: HTMLCanvasElement | null = null;
   private rageHot: HTMLCanvasElement | null = null;
   private titles: {
@@ -229,8 +180,6 @@ export class HudView {
     wipeout: HTMLCanvasElement;
     best: HTMLCanvasElement;
   } | null = null;
-  /** The finished results' big place titles ("1ST PLACE!"), by place. */
-  private readonly placeTitles = new Map<number, HTMLCanvasElement>();
   /** The HEALTH bar's art, the health its lost chunk still shows (draining after a blow), and the run time of the last frame drawn. */
   private readonly healthArt: HealthBarArt;
   private healthTrail: number = HEALTH.max;
@@ -241,40 +190,27 @@ export class HudView {
   private readonly rivalTrail: number[] = [];
   /** The "+n HP" words beside the surfer after a heal, by amount. */
   private readonly hpArt = new Map<number, HTMLCanvasElement>();
-  /** The POS panel's DNF after a wipeout (baked on first use). */
-  private dnf: HTMLCanvasElement | null = null;
   private readonly warnSince: number[] = [];
   private readonly warnArt = [warnIcon(false), warnIcon(true)];
-  /** Callout banners by text (the stripe and the lettering), made on first use or ahead on the title. */
-  private readonly calloutArt = new Map<string, HTMLCanvasElement>();
-  private calloutsBaked = false;
-  private readonly stopwatch = stopwatchIcon();
   private readonly trophy = trophyIcon();
   private readonly star = starIcon();
-  private checker: HTMLCanvasElement | null = null;
-  private paths: [HTMLCanvasElement, HTMLCanvasElement] | null = null;
   private promptPill: HTMLCanvasElement | null = null;
   private readonly score = new Memo(withCommas);
   private readonly dist = new Memo((v) => String(v));
-  private readonly percent = new Memo((v) => `${v}%`);
-  private readonly toGo = new Memo((v) => `${v}M`);
-  /** The race clock (m:ss.s, by tenths): under DIST in play, and in the results. */
-  private readonly clockTenths = new Memo((v) => raceClock(v / 10));
-  private readonly bonus = new Memo((v) => `+${withCommas(v)}`);
   private readonly bestRow = new Memo(() => this.bestText());
-  private readonly small = new Memo((v) => String(v));
   private readonly kos = new Memo((v) => String(v));
   private readonly change = new Memo((v) => (v > 0 ? `+${v}` : String(v)));
-  private readonly pauseLine = new Memo(() => `DIST ${this.percent.get(this.run.raceProgress * 100)}   SCORE ${this.score.get(this.run.score)}`);
-  private readonly field: string;
+  private readonly pauseLine = new Memo(() => `DIST ${this.dist.get(this.run.distance)} M   SCORE ${this.score.get(this.run.score)}`);
+  /** The table's rows, rebuilt only when the table changes (its identity and the highlighted row). */
+  private tableRows: string[] = [];
+  private tableFor: unknown = null;
+  private tableRank = -2;
   private trail = '';
   private trailSig = 0;
   /** Top bar panels: x and width each. */
   private readonly bar: {
     hx: number;
     hw: number;
-    px: number;
-    pw: number;
     dx: number;
     dw: number;
     sx: number;
@@ -289,23 +225,14 @@ export class HudView {
     full: HTMLCanvasElement;
     hot: HTMLCanvasElement;
   };
-  /** The course strip: its box. */
-  private readonly strip: {
-    x: number;
-    y: number;
-    h: number;
-  };
 
   constructor(private readonly run: Run) {
     this.hud = run.hud;
     this.W = this.hud.width;
     this.H = this.hud.height;
     const W = this.W;
-    this.field = `/${run.rivals.length + 1}`;
-    // HEALTH and POS from the left, SCORE and DIST from the right, the pause button between (240 wide upright: 1/55/131/181).
-    this.bar = IS_PORTRAIT
-      ? { hx: 1, hw: 52, px: 55, pw: 38, dx: W - 109, dw: 48, sx: W - 59, sw: 58 }
-      : { hx: 4, hw: 58, px: 66, pw: 44, dx: W - 130, dw: 56, sx: W - 70, sw: 66 };
+    // HEALTH from the left, SCORE and DIST from the right, the pause button between (240 wide upright: 1/132/182).
+    this.bar = IS_PORTRAIT ? { hx: 1, hw: 70, dx: 132, dw: 48, sx: W - 58, sw: 57 } : { hx: 4, hw: 70, dx: W - 152, dw: 62, sx: W - 86, sw: 82 };
     const barW = IS_PORTRAIT ? Math.min(132, W - 108) : 150;
     const barX = IS_PORTRAIT ? W - barW - 22 : Math.round(W / 2 - 40);
     this.rage = {
@@ -315,24 +242,11 @@ export class HudView {
       wordX: barX - 54,
       ...segmentBar(barW, 7, 10, 3),
     };
-    const sh = IS_PORTRAIT ? 186 : run.input.touch ? 96 : 160;
-    this.strip = { x: 4, y: 0, h: sh };
-    this.layout();
     this.bake('health', this.bar.hw, BAR_H, 1);
     this.bake('healthHurt', this.bar.hw, BAR_H, 1, '#7a0c26', 0.9, '#ff6a7f');
-    this.bake('pos', this.bar.pw, BAR_H, 2);
-    this.bake('dist', this.bar.dw, DIST_H, 3);
+    this.bake('dist', this.bar.dw, BAR_H, 3);
     this.bake('score', this.bar.sw, BAR_H, 4);
     this.healthArt = healthBar(this.bar.hw - 12, 8, 5, 2);
-    this.panels.set(
-      'strip',
-      // Faint: rivals fighting at the left edge show through it; the dots and markers carry their own outlines.
-      brushPanel(STRIP_W, sh, HUD_COLORS.panel, 0.2, {
-        slant: 0,
-        ragged: 2,
-        seed: 6,
-      }),
-    );
     this.panels.set(
       'menu',
       brushPanel(58, 16, HUD_COLORS.panel, 0.85, {
@@ -343,15 +257,9 @@ export class HudView {
     );
   }
 
-  /** Place what depends on the HUD's height: the course strip keeps its place in the camera's frame (VIEW.frame), beside the surfer. */
-  private layout(): void {
-    this.H = this.hud.height;
-    this.strip.y = IS_PORTRAIT ? VIEW.frame.top + 128 : 56;
-  }
-
   draw(): void {
     const run = this.run;
-    if (this.hud.height !== this.H) this.layout();
+    this.H = this.hud.height;
     this.hud.clear();
     const dt = Math.max(0, Math.min(0.1, run.time - this.lastDrawAt));
     this.lastDrawAt = run.time;
@@ -363,26 +271,23 @@ export class HudView {
     this.updateTrails(dt);
     this.drawEdges();
     this.drawTopBar();
-    if (run.state === 'wipeout' || run.state === 'finished') {
-      // The results wait until the surfer has gone over the nose into the water, or for FINISH! over the line.
-      if (run.stateTime < (run.state === 'finished' ? RACE.resultsDelay : RESULTS_DELAY)) {
+    if (run.state === 'wipeout') {
+      // The results wait until the surfer has gone over the nose into the water.
+      if (run.stateTime < RESULTS_DELAY) {
         this.drawSparks();
         this.drawFloats();
-        this.drawCallout();
       } else this.drawResults();
       return;
     }
     this.drawRage();
-    this.drawStrip();
     if (run.state !== 'paused') {
       this.drawRivalMarks();
       this.drawSparks();
       this.drawFloats();
-      this.drawCallout();
     }
     if (run.state === 'playing') {
-      this.drawTrail();
-      if (run.input.touch) this.drawButtons();
+      if (run.input.touch) this.drawHints();
+      else this.drawTrail();
     }
     if (run.state === 'paused') this.drawPause();
   }
@@ -397,7 +302,7 @@ export class HudView {
   /**
    * The lost chunks of the health bars: after a blow the bar drops at once
    * and the chunk lost stays lit for a moment, then drains down to it; on a
-   * heal (or a new race) the chunk goes. Also notes when each rival starts
+   * heal (or a new run) the chunk goes. Also notes when each rival starts
    * winding up a punch (its warning pops in).
    */
   private updateTrails(dt: number): void {
@@ -527,24 +432,13 @@ export class HudView {
       this.drawHealthBar(x + 5, valueY + 1);
       this.drawHealthChange(b.hx + 3, top + BAR_H);
     }
-    // POS: the place big, the field size small.
-    hud.blit(this.panels.get('pos') as HTMLCanvasElement, b.px, top);
-    hud.text(b.px + 9, top + 2, 'POS', HUD_COLORS.label, TIGHT);
-    // Wiped out the race is not finished: no place to show (the last rank would read as one).
-    if (run.state === 'wipeout') {
-      this.dnf ??= hud.heavyText('DNF', 12, HUD_COLORS.red, 1);
-      hud.blit(this.dnf, b.px + 6, Math.round(valueY + 4.5 - this.dnf.height / 2));
-    } else {
-      const place = this.small.get(run.rank);
-      BIG.draw(hud, place, b.px + 7, valueY, HUD_COLORS.gold);
-      hud.text(b.px + 7 + BIG.width(place), valueY + 3, this.field, HUD_COLORS.label, TIGHT);
-    }
-    // DIST: how far through the race, as a percentage, with the race clock small under it.
+    // DIST: metres ridden, the original game's counter.
     hud.blit(this.panels.get('dist') as HTMLCanvasElement, b.dx, top);
     hud.text(b.dx + 9, top + 2, 'DIST', HUD_COLORS.label, TIGHT);
-    BIG.draw(hud, this.percent.get(run.raceProgress * 100), b.dx + 6, valueY, HUD_COLORS.white);
-    hud.blit(this.stopwatch, b.dx + 6, top + 22);
-    MINI.draw(hud, this.clockTenths.get(run.raceTime * 10), b.dx + 15, top + 23, '#b8fbff');
+    const dist = this.dist.get(run.distance);
+    const unitW = hud.textWidth('M', 1, true) + 1;
+    BIG.draw(hud, dist, b.dx + b.dw - 9 - unitW, valueY, HUD_COLORS.white, 'right');
+    hud.text(b.dx + b.dw - 8 - unitW, valueY + 3, 'M', HUD_COLORS.label, TIGHT);
     // SCORE: thousands separated.
     hud.blit(this.panels.get('score') as HTMLCanvasElement, b.sx, top);
     hud.text(b.sx + 9, top + 2, 'SCORE', HUD_COLORS.label, TIGHT);
@@ -642,80 +536,6 @@ export class HudView {
     }
   }
 
-  /** The strip's path across: a gentle S from the start to the finish (progress 0..1). */
-  private stripX(progress: number): number {
-    return this.strip.x + 10 + Math.round(Math.sin(progress * Math.PI * 3) * 5 + Math.sin(progress * 11 + 1) * 1.5);
-  }
-
-  /** The course strip's path, baked once: dotted ahead, a solid lit line where the surfer has been (each the strip's full height; drawn cut at the surfer). */
-  private stripPaths(): [HTMLCanvasElement, HTMLCanvasElement] {
-    if (this.paths) return this.paths;
-    const st = this.strip;
-    const ahead = makeCanvas(STRIP_W, st.h);
-    const done = makeCanvas(STRIP_W, st.h);
-    const bottom = st.h - STRIP_BOTTOM;
-    const span = bottom - STRIP_TOP;
-    const ink = HUD_COLORS.ink;
-    for (let py = bottom; py >= STRIP_TOP; py--) {
-      const px = this.stripX((bottom - py) / span) - st.x;
-      done.ctx.fillStyle = ink;
-      done.ctx.fillRect(px - 1, py - 1, 4, 3);
-      if ((bottom - py) % 4 === 0) {
-        ahead.ctx.fillStyle = ink;
-        ahead.ctx.fillRect(px - 1, py - 1, 4, 4);
-      }
-    }
-    for (let py = bottom; py >= STRIP_TOP; py--) {
-      const px = this.stripX((bottom - py) / span) - st.x;
-      done.ctx.fillStyle = '#5fe3ff';
-      done.ctx.fillRect(px, py, 2, 1);
-      if ((bottom - py) % 4 === 0) {
-        ahead.ctx.fillStyle = '#d8dcec';
-        ahead.ctx.fillRect(px, py, 2, 2);
-      }
-    }
-    return (this.paths = [ahead.canvas, done.canvas]);
-  }
-
-  /**
-   * The course strip on the left edge, like the mockup's course map: the
-   * whole race as a winding path from the start at the bottom to the
-   * chequered flag at the top, dotted ahead and lit where the surfer has
-   * been, quarter-way nodes, the rivals as red dots and the surfer as the
-   * yellow arrow at their progress, and the metres to go by the flag.
-   */
-  private drawStrip(): void {
-    const run = this.run;
-    const hud = this.hud;
-    const st = this.strip;
-    const L = run.course.length;
-    const bottom = st.y + st.h - STRIP_BOTTOM;
-    const top = st.y + STRIP_TOP;
-    const span = bottom - top;
-    const at = (z: number) => Math.max(0, Math.min(1, z / L));
-    hud.blit(this.panels.get('strip') as HTMLCanvasElement, st.x, st.y);
-    const done = run.raceProgress;
-    const [ahead, lit] = this.stripPaths();
-    const cut = Math.round(bottom - done * span) - st.y;
-    hud.blitPart(ahead, 0, 0, STRIP_W, cut, st.x, st.y);
-    hud.blitPart(lit, 0, cut, STRIP_W, st.h - cut, st.x, st.y + cut);
-    const m = this.marks;
-    for (let q = 1; q < 4; q++) {
-      const node = q / 4 <= done ? m.nodeDone : m.node;
-      hud.blit(node, this.stripX(q / 4) - 2, Math.round(bottom - (q / 4) * span) - 3);
-    }
-    const flag = m.flags[Math.floor(run.time * 3) % 2];
-    hud.blit(flag, this.stripX(1) - 1, top - 10);
-    if (run.state === 'playing' || run.state === 'paused') hud.text(this.stripX(1) + 13, top - 9, this.toGo.get(Math.max(0, Math.ceil(L - run.surfer.z))), '#ffffff', TIGHT_OUTLINE);
-    for (const r of run.rivals) {
-      if (r.knockedOut) continue;
-      const p = r.finishedAt >= 0 ? 1 : at(r.z);
-      hud.blit(m.rival, this.stripX(p) - 2, Math.round(bottom - p * span) - 3);
-    }
-    const bob = Math.floor(run.time * 4) % 2;
-    hud.blit(m.arrow, this.stripX(done) - 3, Math.round(bottom - done * span) - 4 - bob);
-  }
-
   /**
    * Over the rivals: a small health bar for a while after a blow lands on
    * one (HEALTH.rivalBarSeconds), its lost chunk lit then draining; and a
@@ -757,58 +577,11 @@ export class HudView {
         const age = run.time - this.warnSince[i];
         const icon = this.warnArt[Math.floor(age * 14) % 2];
         const pop = age < 0.1 ? 1.7 - 7 * age : 1 + 0.1 * Math.max(0, Math.sin(age * 30));
-        let ix = Math.max(2, Math.min(this.W - icon.width - 2, x - Math.round(icon.width / 2)));
+        const ix = Math.max(2, Math.min(this.W - icon.width - 2, x - Math.round(icon.width / 2)));
         const iy = Math.max(RAGE_Y + 16, y - (bar ? 9 : 3) - icon.height);
-        // Not on the course strip's path (a rival at the screen-left edge): just right of the strip, so the warning reads on its own.
-        const st = this.strip;
-        if (ix < st.x + STRIP_W + 1 && iy + icon.height > st.y && iy < st.y + st.h) ix = st.x + STRIP_W + 2;
         hud.blit(icon, ix, iy, 1, pop);
       }
     }
-  }
-
-  /** A race callout's banner: the words in the heavy lettering on a brushed stripe; FINISH! bigger, in gold, between chequered strips. */
-  private calloutBanner(text: string): HTMLCanvasElement {
-    let art = this.calloutArt.get(text);
-    if (art) return art;
-    const finish = text === 'FINISH!';
-    const word = this.heavyFit(text, finish ? 32 : 22, 14, this.W - 20, finish ? HUD_COLORS.gold : HUD_COLORS.cyan);
-    const w = Math.min(this.W, word.width + 70);
-    const pad = finish ? 6 : 0;
-    const h = word.height + 8 + pad * 2;
-    const made = makeCanvas(w, h);
-    const edge = finish ? '#ffe14d' : '#5fe3ff';
-    made.ctx.drawImage(brushPanel(w, h - pad * 2, HUD_COLORS.panel, 0.88, { slant: 6, seed: text.length, highlight: edge, shade: edge }), 0, pad);
-    if (finish) {
-      const checks = checkerStrip(w - 8, 1, 4);
-      made.ctx.drawImage(checks, 6, 1);
-      made.ctx.drawImage(checks, 2, h - 5);
-    }
-    made.ctx.drawImage(word, Math.round((w - word.width) / 2), Math.round((h - word.height) / 2));
-    art = made.canvas;
-    this.calloutArt.set(text, art);
-    return art;
-  }
-
-  /** The latest race callout sweeping across the upper screen: in from the right, a pop, out to the left (FINISH! stays, with a white flash, until the results). */
-  private drawCallout(): void {
-    const run = this.run;
-    const c = run.callout;
-    if (!c) return;
-    const finish = c.text === 'FINISH!';
-    const age = run.time - c.at;
-    const life = finish ? RACE.resultsDelay : CALLOUT_SECONDS;
-    if (age < 0 || age >= life) return;
-    const art = this.calloutBanner(c.text);
-    let dx = 0;
-    if (age < CALLOUT_IN) dx = Math.round((1 - age / CALLOUT_IN) ** 2 * this.W);
-    else if (!finish && age > life - CALLOUT_OUT) dx = -Math.round(((age - (life - CALLOUT_OUT)) / CALLOUT_OUT) ** 2 * this.W);
-    const settle = age - CALLOUT_IN;
-    const pop = settle >= 0 && settle < 0.12 ? 1 + 0.15 * (1 - settle / 0.12) : 1;
-    // High in the sky, under the RAGE row: clear of the horizon, where the finish arch rises.
-    const y = RAGE_Y + (IS_PORTRAIT ? 34 : 28);
-    this.hud.blit(art, Math.round((this.W - art.width) / 2) + dx, y, 1, pop);
-    if (finish && age < 0.25) this.hud.rect(0, 0, this.W, this.H, 0xffffff, 0.45 * (1 - age / 0.25));
   }
 
   /** Hit sparks: a comic star where each blow lands, sized by its distance from the camera, playing over SPARK_SECONDS. */
@@ -838,9 +611,8 @@ export class HudView {
   private drawFloats(): void {
     const list = this.run.floats;
     // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
-    const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * (this.run.input.touch ? 0.62 : 0.8));
+    const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * 0.8);
     const at = FLOAT_AT;
-    let box: typeof ARCH_AT | null | undefined;
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
@@ -853,13 +625,7 @@ export class HudView {
         if (!this.run.floatPoint(f, at)) continue;
         const grow = Math.ceil(((pop - 1) * c.width) / 2);
         const x = Math.max(2 + grow, Math.min(this.W - 2 - grow - c.width, Math.round(at.x - c.width / 2)));
-        let top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
-        // Not over the finish arch coming up on the horizon (RAGE! high over the surfer would sit on it): over it if there is room under the RAGE row, else under it.
-        if (box === undefined) box = this.run.finishBox(ARCH_AT) ? ARCH_AT : null;
-        if (box && x < box.x1 && x + c.width > box.x0 && top < box.y1 && top + c.height > box.y0) {
-          const over = Math.round(box.y0) - c.height - 1;
-          top = over >= FLOAT_TOP ? over : Math.min(this.H - c.height, Math.round(box.y1) + 1);
-        }
+        const top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
         this.hud.blit(c, x, top, alpha, pop);
         continue;
       }
@@ -945,14 +711,7 @@ export class HudView {
 
   /** Bake the next word of the fixed vocabulary ahead of play (one per call). */
   private prebakeFloats(): void {
-    if (this.prebaked >= FLOAT_VOCABULARY.length) {
-      if (!this.calloutsBaked) {
-        this.calloutsBaked = true;
-        this.calloutBanner('FINISH!');
-        for (const [, text] of RACE.callouts) this.calloutBanner(text);
-      }
-      return;
-    }
+    if (this.prebaked >= FLOAT_VOCABULARY.length) return;
     const [text, color, scale] = FLOAT_VOCABULARY[this.prebaked++];
     this.cachedFloat(text, color, scale);
   }
@@ -985,7 +744,7 @@ export class HudView {
     return canvas;
   }
 
-  /** The combo reader's held presses, so moves can be learnt by watching. The string is rebuilt only when the presses change. */
+  /** The combo reader's held presses (keyboard), so moves can be learnt by watching. The string is rebuilt only when the presses change. */
   private drawTrail(): void {
     const run = this.run;
     const recent = run.combos.recent(run.time);
@@ -998,37 +757,28 @@ export class HudView {
       for (const k of recent) trail += (trail ? ' ' : '') + KEY_LABELS[k];
       this.trail = trail;
     }
-    // Upright on touch: right-aligned in the clear slot under the float stack and above the BARGE caption, off the surfer's board.
-    if (run.input.touch && IS_PORTRAIT) this.hud.text(this.W - 6, this.H - 126, this.trail, '#b8fbff', TIGHT_RIGHT_OUTLINE);
-    else this.hud.text(this.W / 2, run.input.touch ? this.H - 92 : this.H - 22, this.trail, '#b8fbff', TIGHT_CENTER_OUTLINE);
+    this.hud.text(this.W / 2, this.H - 22, this.trail, '#b8fbff', TIGHT_CENTER_OUTLINE);
   }
 
-  private drawButtons(): void {
+  /**
+   * The phone's gesture hints for the first seconds of a run, stacked at the
+   * bottom of the screen (clear of the surfer): each goes once its gesture
+   * has been used, and all of them after HINT_SECONDS.
+   */
+  private drawHints(): void {
     const run = this.run;
-    const hud = this.hud;
-    if (!this.buttonsLettered && hud.fontLoaded) {
-      this.buttonsLettered = true;
-      for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
-        const b = TOUCH_BUTTONS[i];
-        if (b.captionAt === 'inside') this.buttons[i] = buttonArt(b, hud.styledText(b.caption, { stops: HUD_COLORS.white, outline: 1 }));
-      }
-    }
-    for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
-      const b = TOUCH_BUTTONS[i];
-      const art = this.buttons[i];
-      hud.blit(run.input.holding(b.id) ? art.down : art.up, b.x + art.offset, b.y + art.offset);
-    }
-    for (let i = 0; i < TOUCH_BUTTONS.length; i++) {
-      const b = TOUCH_BUTTONS[i];
-      if (b.captionAt === 'none' || b.captionAt === 'inside') continue;
-      const pill = (this.captions[i] ??= captionPill(hud, b.caption, CAPTION_EDGE[b.id] ?? '#9aa6c4'));
-      if (!pill) continue;
-      // The CARVE caption sits under the LEFT/RIGHT pair.
-      const cx = b.id === 'carveLeft' ? (TOUCH_BUTTONS[0].x + TOUCH_BUTTONS[1].x) / 2 : b.x;
-      // Pills tuck 3px under the disc's rim, like the mockup's labels.
-      const r = drawnRadius(b);
-      const y = b.captionAt === 'below' ? Math.min(this.H - pill.height, b.y + r - 3) : b.y - r - pill.height + 3;
-      hud.blit(pill, Math.round(cx - pill.width / 2), y);
+    const t = run.stateTime;
+    if (t >= HINT_SECONDS) return;
+    const fade = Math.min(1, (HINT_SECONDS - t) / HINT_FADE);
+    let y = this.H - 18;
+    for (let i = HINTS.length - 1; i >= 0; i--) {
+      const [text, gesture] = HINTS[i];
+      if (run.gestures[gesture]) continue;
+      const art = (this.hintArt[i] ??= this.hud.styledText(text, { stops: HUD_COLORS.white, outline: 1 }));
+      if (!art) continue;
+      const blink = i === 0 && Math.floor(t * 2) % 2 === 0 ? 1 : 0;
+      this.hud.blit(art, Math.round(this.W / 2 - art.width / 2), y - blink, fade);
+      y -= art.height + 3;
     }
   }
 
@@ -1055,112 +805,95 @@ export class HudView {
   }
 
   /**
-   * The results, over the surfer riding on (or floating after a wipeout):
-   * over the line, the place as a big title, PLACE, TIME, SCORE with the
-   * place bonus, KNOCKOUTS; wiped out, the distance and how far through
-   * the race that was, SCORE, KNOCKOUTS. Then NEW BEST (or the best so
-   * far), SURF AGAIN and MAIN MENU once input is taken.
+   * The results, over the surfer floating after the wipeout with the pack
+   * riding on: WIPED OUT, DISTANCE, SCORE and KNOCKOUTS, NEW BEST (or the
+   * best so far), the shared TOP 10 with this run's row lit (under the
+   * rows upright, beside them in landscape), then SURF AGAIN and MAIN MENU
+   * once input is taken.
    */
   private drawResults(): void {
     const run = this.run;
     const hud = this.hud;
     const touch = run.input.touch;
-    const finished = run.state === 'finished';
     const W = this.W;
-    const pw = Math.min(W - 16, 220);
-    const ph = 172;
+    const stacked = IS_PORTRAIT;
+    const tableW = TABLE_CHARS * 8;
+    const pw = stacked ? Math.min(W - 16, 224) : Math.min(W - 16, 400);
+    const ph = stacked ? 276 : 162;
     const px = Math.round((W - pw) / 2);
-    const py = Math.round((this.H - ph) / 2) - (IS_PORTRAIT ? 16 : 0);
+    const py = Math.round((this.H - ph) / 2) - (stacked ? 10 : 0);
     hud.blit(this.panel('results', pw, ph, 12, HUD_COLORS.panel, 0.9), px, py);
     const titles = this.bigTitles();
-    const t = run.stateTime - (finished ? RACE.resultsDelay : RESULTS_DELAY); // the panel's own clock: it arrives after the fall or the line
-    if (finished) {
-      this.checker ??= checkerStrip(pw - 24, 2, 3);
-      hud.blit(this.checker, px + 14, py - 3);
-    }
+    const t = run.stateTime - RESULTS_DELAY; // the panel's own clock: it arrives after the fall
     const shake = t < 0.4 ? Math.round(Math.sin(t * 60) * 2) : 0;
     const slam = t < 0.15 ? 1.4 - t * 2.6 : 1;
-    const title = finished ? this.placeTitle(run.place, pw - 12) : titles.wipeout;
-    hud.blit(title, Math.round(W / 2 - title.width / 2) + shake, py + 5, 1, slam);
-    // Under WIPED OUT, between the title and the rows: the race was not finished, so there is no place.
-    if (!finished && t > 0.2) hud.text(W / 2, py + 28, 'DID NOT FINISH', '#ff8a9a', TIGHT_CENTER_OUTLINE);
+    const title = titles.wipeout;
+    // The column of rows: the whole panel upright; the left part in landscape, with the table to its right.
+    const cw = stacked ? pw : pw - tableW - 30;
+    const cx = px + Math.round(cw / 2);
+    hud.blit(title, Math.round(cx - title.width / 2) + shake, py + 5, 1, slam);
     const rx = px + 10;
-    const rw = pw - 20;
-    // The rows slide in one after another; the score counts the place bonus up.
+    const rw = cw - 20;
+    // The rows slide in one after another.
     const slide = (i: number) => {
       const k = Math.max(0, Math.min(1, (t - 0.12 - i * 0.07) / 0.14));
       return Math.round((1 - k) ** 2 * W);
     };
-    const nb = run.newBests;
-    if (finished) {
-      const count = Math.max(0, Math.min(1, (t - 0.45) / 0.5));
-      const shown = run.score - run.placeBonus * (1 - count);
-      this.statRow(0, rx + slide(0), py + 38, rw, 'PLACE', this.small.get(run.place), HUD_COLORS.gold, this.field, nb.place);
-      this.statRow(1, rx + slide(1), py + 55, rw, 'TIME', this.clockTenths.get(run.finishTime * 10), HUD_COLORS.white, '', nb.time);
-      this.statRow(2, rx + slide(2), py + 72, rw, 'SCORE', this.score.get(shown), HUD_COLORS.gold, '', nb.score);
-      if (run.placeBonus > 0 && t > 0.3) {
-        const bump = count > 0 && count < 1 ? Math.floor(t * 20) % 2 : 0;
-        hud.text(rx + slide(2) + 44 + (nb.score ? 10 : 0), py + 76 - bump, this.bonus.get(run.placeBonus), '#ffe14d', TIGHT_OUTLINE);
-      }
-    } else {
-      this.statRow(0, rx + slide(0), py + 38, rw, 'DISTANCE', this.dist.get(run.distance), HUD_COLORS.white, 'M', false);
-      this.statRow(1, rx + slide(1), py + 55, rw, 'REACHED', this.percent.get(run.raceProgress * 100), HUD_COLORS.white, '', false);
-      this.reachedBar(rx + slide(1) + 62, py + 60, rw - 112);
-      this.statRow(2, rx + slide(2), py + 72, rw, 'SCORE', this.score.get(run.score), HUD_COLORS.gold, '', nb.score);
-    }
-    this.statRow(3, rx + slide(3), py + 89, rw, 'KNOCKOUTS', this.kos.get(run.knockouts), HUD_COLORS.white, '', false);
-    const by = py + 108;
-    if (run.newBest) {
-      hud.blit(titles.best, Math.round(W / 2 - titles.best.width / 2), by, 1, 1 + 0.08 * Math.max(0, Math.sin(t * 8)));
-    } else {
-      hud.text(W / 2, by + 3, this.bestRow.get(this.bestKey()), HUD_COLORS.dim, TIGHT_CENTER);
-    }
-    if (run.stateTime > (finished ? RACE.resultsSeconds : SCORING.wipeoutSeconds)) {
-      this.yellowRow('again', rx, py + 128, rw, 'SURF AGAIN', touch ? 'TAP' : 'SPACE');
-      hud.blit(this.panel('resultsMenu', rw, 16, 30), rx, py + 148);
-      hud.text(rx + 19, py + 153, 'MAIN MENU', HUD_COLORS.label, TIGHT);
-      hud.text(rx + rw - 10, py + 153, touch ? 'MENU' : 'ESC', HUD_COLORS.dim, TIGHT_RIGHT);
+    this.statRow(0, rx + slide(0), py + 36, rw, 'DISTANCE', this.dist.get(run.distance), HUD_COLORS.white, 'M', false);
+    this.statRow(1, rx + slide(1), py + 53, rw, 'SCORE', this.score.get(run.score), HUD_COLORS.gold, '', run.newBest);
+    this.statRow(2, rx + slide(2), py + 70, rw, 'KNOCKOUTS', this.kos.get(run.knockouts), HUD_COLORS.white, '', false);
+    const by = py + 89;
+    if (run.newBest) hud.blit(titles.best, Math.round(cx - titles.best.width / 2), by, 1, 1 + 0.08 * Math.max(0, Math.sin(t * 8)));
+    else hud.text(cx, by + 3, this.bestRow.get(this.bestKey()), HUD_COLORS.dim, TIGHT_CENTER);
+    // The shared table.
+    const tx = stacked ? px + Math.round((pw - tableW) / 2) : px + cw + 14;
+    const ty = stacked ? py + 108 : py + 8;
+    if (t > 0.3) this.drawTable(tx, ty, tableW);
+    const taking = run.stateTime > SCORING.wipeoutSeconds && !run.entering;
+    if (taking) {
+      const ay = stacked ? ty + 12 + 10 * TABLE_ROW + 8 : py + 112;
+      this.yellowRow('again', rx, ay, rw, 'SURF AGAIN', touch ? 'TAP' : 'SPACE');
+      hud.blit(this.panel('resultsMenu', rw, 16, 30), rx, ay + 20);
+      hud.text(rx + 19, ay + 25, 'MAIN MENU', HUD_COLORS.label, TIGHT);
+      hud.text(rx + rw - 10, ay + 25, touch ? 'MENU' : 'ESC', HUD_COLORS.dim, TIGHT_RIGHT);
       this.menuCorner();
     }
   }
 
-  /** The wiped-out results' course bar: how far through the race the surfer got, the flag at its end. */
-  private reachedBar(x: number, y: number, w: number): void {
+  /** The shared top 10 at (x, y), `w` wide: the heading (where it came from), ten rows, this run's row in cyan, empty rows as dashes. */
+  private drawTable(x: number, y: number, w: number): void {
+    const run = this.run;
     const hud = this.hud;
-    const fill = Math.round(w * this.run.raceProgress);
-    hud.rect(x - 1, y - 1, w + 2, 6, 0x0d0820, 0.95);
-    hud.rect(x, y, w, 4, 0x2b2346, 1);
-    if (fill > 0) {
-      hud.rect(x, y, fill, 4, 0x5fe3ff, 1);
-      hud.rect(x, y, fill, 1, 0xffffff, 0.5);
+    const sb = run.scoreboard;
+    const heading = run.entering ? 'ENTER YOUR NAME' : sb.source === 'loading' ? 'LOADING' : sb.source === 'online' ? 'TOP 10' : 'TOP 10 OFFLINE';
+    hud.text(x + w / 2, y, heading, '#ffe14d', TIGHT_CENTER);
+    if (sb.list !== this.tableFor || sb.rank !== this.tableRank) {
+      this.tableFor = sb.list;
+      this.tableRank = sb.rank;
+      this.tableRows = [];
+      for (let i = 0; i < 10; i++) {
+        const entry = sb.list[i];
+        const rank = String(i + 1).padStart(2, ' ');
+        this.tableRows.push(entry ? `${rank} ${entry.name.padEnd(8, ' ')}${String(Math.min(999999, entry.score)).padStart(6, '0')}` : `${rank} ${'-'.repeat(8)}------`);
+      }
     }
-    hud.rect(x + fill - 1, y - 2, 2, 8, 0xff2e4d, 1);
-    hud.blit(this.marks.flags[0], x + w - 1, y - 8);
-  }
-
-  /** The finished results' title: "1ST PLACE!" in gold, the rest in white, fitted to `maxW`. */
-  private placeTitle(place: number, maxW: number): HTMLCanvasElement {
-    let art = this.placeTitles.get(place);
-    if (!art) {
-      // Gold, silver and bronze for the podium.
-      const stops = place === 1 ? HUD_COLORS.gold : place === 2 ? HUD_COLORS.silver : place === 3 ? HUD_COLORS.bronze : HUD_COLORS.white;
-      art = this.heavyFit(place === 1 ? '1ST PLACE!' : `${ordinal(place)} PLACE`, 28, 16, maxW, stops);
-      this.placeTitles.set(place, art);
+    for (let i = 0; i < this.tableRows.length; i++) {
+      const color = i === sb.rank ? '#7ff6ff' : sb.list[i] ? '#ffffff' : '#6b6b8a';
+      hud.text(x, y + 12 + i * TABLE_ROW, this.tableRows[i], color);
     }
-    return art;
   }
 
   /** A number that changes whenever the best does (for the memo of the best row). */
   private bestKey(): number {
     const b = this.run.best;
-    return (b.place ?? 0) * 1e9 + Math.round((b.time ?? 0) * 10) * 10 + (b.score > 0 ? 1 : 0);
+    return b.score * 1e6 + b.distance;
   }
 
-  /** "BEST 2ND  2:15.3" (the best place and the fastest time on this course), or a nudge before the first finish. */
-  private bestText(): string {
+  /** "BEST 12,480  1,250 M" (the best score on this course on this device, and the distance it was set at), or a nudge before the first run. */
+  bestText(): string {
     const b = this.run.best;
-    if (b.place === null || b.time === null) return 'BEST  NO FINISH YET';
-    return `BEST  ${ordinal(b.place)}  ${raceClock(b.time)}`;
+    if (b.score <= 0) return 'BEST  NO RUN YET';
+    return b.distance > 0 ? `BEST  ${withCommas(b.score)}  ${withCommas(b.distance)} M` : `BEST  ${withCommas(b.score)}`;
   }
 
   /** A results row: the label, the value in the big digits (and a unit), and a gold star when it is a new best. */
@@ -1229,16 +962,16 @@ export class HudView {
       const on = i === run.characterIndex;
       hud.rect(TITLE.columnX - CHARACTER_ORDER.length * 4 + i * 8 + 2, pipsY - (on ? 1 : 0), 4, on ? 3 : 2, on ? 0xffe14d : 0x8a82b0, 1);
     }
-    // The best race on this course on this device: place and time.
+    // The best run on this course on this device: the score and its distance.
     const bestY = IS_PORTRAIT ? H - 44 : row - 9 + panelH + 12;
     hud.blit(this.panel('best', 168, 13, 8), Math.round(TITLE.columnX - 84), bestY - 3);
     const best = this.bestRow.get(this.bestKey());
     const bw = hud.textWidth(best, 1, true);
     const bx = Math.round(TITLE.columnX - (bw + this.trophy.width + 4) / 2);
     hud.blit(this.trophy, bx, bestY - 1);
-    hud.text(bx + this.trophy.width + 4, bestY, best, this.run.best.place === null ? HUD_COLORS.dim : '#ffe14d', TIGHT);
-    // The moves, then the prompt pill.
-    hud.text(W / 2, H - 29, touch ? '> > UP: ROLL   UP UP: BOOST' : 'RIGHT RIGHT UP: BARREL ROLL   UP UP: BOOST   ARROWS: RIDER', HUD_COLORS.label, TIGHT_CENTER_OUTLINE);
+    hud.text(bx + this.trophy.width + 4, bestY, best, this.run.best.score <= 0 ? HUD_COLORS.dim : '#ffe14d', TIGHT);
+    // The controls, then the prompt pill.
+    hud.text(W / 2, H - 29, touch ? 'SWIPE: CARVE   UP: JUMP   TAP: PUNCH' : 'RIGHT RIGHT UP: BARREL ROLL   UP UP: BOOST   ARROWS: RIDER', HUD_COLORS.label, TIGHT_CENTER_OUTLINE);
     if (!this.promptPill) {
       const text = hud.styledText(touch ? 'TAP TO PLAY' : 'PRESS SPACE', {
         stops: HUD_COLORS.white,
@@ -1260,7 +993,7 @@ export class HudView {
   }
 }
 
-const STAT_ROW_KEYS = ['stat0', 'stat1', 'stat2', 'stat3'];
+const STAT_ROW_KEYS = ['stat0', 'stat1', 'stat2'];
 
 /** A jagged comic burst behind contact words: red-orange, or gold behind red lettering (damage) so it still reads. */
 function withBurst(text: HTMLCanvasElement, gold: boolean): HTMLCanvasElement {

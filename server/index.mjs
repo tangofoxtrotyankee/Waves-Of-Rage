@@ -1,6 +1,6 @@
 /**
  * Production server: serves the built game from dist/ and a small JSON API
- * for the shared top-10 tables (one per difficulty).
+ * for the shared top-10 tables (one per difficulty, and one for the sequel).
  *
  *   npm run build && npm start
  *

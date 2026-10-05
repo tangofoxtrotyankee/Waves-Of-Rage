@@ -319,50 +319,77 @@ export const SCORING = {
   bumpSpeedFactor: 0.85,
   /** Seconds the wipeout plays before the results accept input. */
   wipeoutSeconds: 1.6,
+  /** The run's score and distance are capped on the shared table (server/scores.mjs: MAX_SCORE, MAX_DISTANCE). */
+  maxScore: 999_999,
+  maxDistance: 99_999,
 } as const;
 
 /**
- * The race: CourseSpec.length metres to the finish line (entities/FinishLine.ts).
- * Crossing it ends the race for the surfer in 1st to 6th place (rivals who
- * crossed first are ahead), with a place bonus on the score; a wipeout ends
- * it unfinished. Rivals pace themselves round the surfer (Rival.think): in
- * a pack window they ride their own pace, further back they catch up,
- * further ahead they ease off; from `sprintFrom` of the race the leaders
- * stop waiting and the catch-up fades, so everyone races for the line.
+ * The endless run, the original game's loop: ride until the HEALTH bar is
+ * empty, and the score is the distance plus the tricks and knockouts. The
+ * pace rises with distance (everyone's: the rivals pace themselves round
+ * the surfer in Rival.think), the hazards come thicker, and sharks and
+ * boats join the buoys after their unlock distances. Rivals ride in a pack
+ * round the surfer: in the pack window they ride their own pace, further
+ * back they catch up, further ahead they ease off.
  */
-export const RACE = {
-  /** Points for finishing 1st to 6th. */
-  placeBonus: [2000, 1200, 800, 500, 300, 150] as const,
-  /** Everyone's cruising speed rises with race progress, up to this much more at the finish. */
-  speedRampMax: 0.15,
-  /** No buoys or boost gates this close before the line, nor after it (ramps and swell run on past it). */
-  clearBeforeFinish: 60,
-  /** Buoys come closer with progress, at their tightest from this fraction of the race on. */
-  tightFrom: 2 / 3,
-  /** Callouts as the line nears: metres to go, and the words. */
-  callouts: [
-    [500, '500 M TO GO'],
-    [200, 'FINAL STRETCH'],
-  ] as const,
-  /** After the line: seconds before the results show (the FINISH! callout and the fireworks first), and before they take input. */
-  resultsDelay: 1.5,
-  resultsSeconds: 2.5,
-  /** Over the line, the run plays at [0] of real speed for [1] real seconds: a beat for FINISH! and the first fireworks. */
-  finishSlow: [0.35, 0.45] as const,
+export const ENDLESS = {
+  /** Everyone's cruising speed rises with distance: by `rampMax` more at `rampMetres`, linearly, and holds there. */
+  rampMax: 0.7,
+  rampMetres: 1800,
+  /** Buoys come closer with distance: at their tightest from this many metres on (Course.ts has the gaps). */
+  tightMetres: 1400,
+  /** Metres before the first boat and the first shark. */
+  boatsFrom: 250,
+  sharksFrom: 550,
+  /** The title's attract ride starts over past this far. */
+  attractResetMetres: 1500,
   /** Rival pacing: a rival rides its own pace from `packBehind` metres behind the surfer to `packAhead` ahead... */
   packBehind: 8,
   packAhead: 12,
-  /** ...further back it speeds up by catchUpRate m/s per metre (up to catchUp), further ahead it eases off (easeOffRate, up to easeOff)... */
+  /** ...further back it speeds up by catchUpRate m/s per metre (up to catchUp), further ahead it eases off (easeOffRate, up to easeOff). */
   catchUpRate: 0.25,
   catchUp: 6,
   easeOffRate: 0.2,
   easeOff: 4,
-  /** ...and from this fraction of the race on, the easing off fades out, the catch-up fades to catchUpFinal and the rivals sprint (up to sprintPace m/s more at the line). */
-  sprintFrom: 0.7,
-  catchUpFinal: 2,
-  sprintPace: 2,
-  /** The field's two fastest rivals (by SPEED) sprint harder, up to this much more at the line: close to a pumping surfer's pace. */
-  sprintPaceFast: 5,
+  /**
+   * Phones play with gestures and a thumb over the action, so the run is
+   * eased there: rivals wait this many times longer between attacks, and
+   * the hazards' gaps are this much wider.
+   */
+  touchAttackGap: 1.6,
+  touchHazardGap: 1.25,
+} as const;
+
+/**
+ * Sharks and the lifeguard boat, back from the original game as 3D hazards
+ * (entities/Shark.ts, entities/Boat.ts). Metres and seconds.
+ */
+export const SHARK = {
+  /** It swims up the course at the rider (m/s, against the rider's travel)... */
+  speed: 2.5,
+  /** ...and lunges sideways now and then: seconds between lunges (min, extra), the lunge's reach and its sideways speed. */
+  lungeGap: [1.0, 0.8] as const,
+  lungeDistance: 3.5,
+  lateralSpeed: 4.5,
+  /** The hit box, half-extents across and along, and the height above the water a rider must clear to pass over it. */
+  hitX: 1.1,
+  hitZ: 1.9,
+  clearHeight: 1.0,
+  /** It is retired once this far behind the surfer. */
+  behind: 25,
+} as const;
+
+export const BOAT = {
+  /** It crosses the course sideways (m/s), drifting slowly up it towards the rider. */
+  speed: 5.5,
+  drift: 1.2,
+  /** It starts and ends this far out beyond the rideable water. */
+  margin: 15,
+  /** The hit box, half-extents across and along, and the height a rider must clear (it cannot be jumped). */
+  hitX: 2.6,
+  hitZ: 1.3,
+  clearHeight: 2.2,
 } as const;
 
 /** HIT (punch), BARGE (shoulder), knockouts and rivals' own shoulder checks. Metres, seconds, points. */
@@ -386,7 +413,7 @@ export const COMBAT = {
   bargeSelfSpeed: 0.92,
   bargeSelfStun: 0.2,
   knockoutPoints: 500,
-  /** Barged into a buoy or off the course. */
+  /** Barged into a buoy, a shark, a boat or off the course. */
   environmentPoints: 750,
   /** A rival sliding this fast from a shove is knocked out by whatever it hits. */
   environmentShove: 3,
@@ -434,21 +461,25 @@ export const COMBAT = {
   rivalCheckSeconds: 0.6,
   /** No rival attacks in the first seconds of a run (the field settles first). */
   rivalGraceSeconds: 3,
+  /** The field: how many rivals ride with the surfer. */
+  rivals: 5,
 } as const;
 
 /**
- * The player's health, 0..100 (the HEALTH bar): blows, buoys and crooked
- * landings take it, clean tricks after real air give it back, and at zero
- * the surfer wipes out and the race is over. A rival's blow scales with its
+ * The player's health, 0..100 (the HEALTH bar): blows, buoys, sharks, boats
+ * and crooked landings take it, clean tricks after real air give it back,
+ * and at zero the surfer wipes out and the run is over. A rival's blow scales with its
  * POWER (statMultipliers: 0.7 to 1.3 times); everything is halved while
  * RAGE is on. Run.damage and Run.heal apply it.
  */
 export const HEALTH = {
   max: 100,
-  /** Damage: a rival's punch, its shoulder check, a buoy, a crooked landing (crash), a rider-on-rider bump. */
+  /** Damage: a rival's punch, its shoulder check, a buoy, a shark, the lifeguard boat, a crooked landing (crash), a rider-on-rider bump. */
   punch: 12,
   barge: 18,
   buoy: 25,
+  shark: 40,
+  boat: 30,
   crash: 20,
   bump: 1,
   /** Damage is multiplied by this while RAGE is on. */
@@ -484,7 +515,7 @@ export const HEALTH = {
  */
 export const IMPACT = {
   /** `punched`: a rival's punch landing on the surfer (shorter than the surfer's own). */
-  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14, buoy: 0.06, punched: 0.045 },
+  hitStop: { punch: 0.07, barge: 0.09, knockout: 0.14, buoy: 0.06, shark: 0.08, boat: 0.07, punched: 0.045 },
   shake: {
     punch: [1, 0.22],
     punched: [1.3, 0.26],
@@ -493,6 +524,8 @@ export const IMPACT = {
     shoved: [0.9, 0.25],
     bump: [0.45, 0.15],
     buoy: [2, 0.35],
+    shark: [2.4, 0.4],
+    boat: [2.2, 0.38],
     smash: [1.2, 0.25],
     crash: [1.6, 0.32],
     wipeout: [2.4, 0.5],
@@ -503,6 +536,8 @@ export const IMPACT = {
   landingSplash: 0.55,
   landingSplashMax: 0.6,
   buoySplash: 1.3,
+  sharkSplash: 1.6,
+  boatSplash: 1.4,
   /** Sideways speed (m/s) a buoy throws the surfer off with (decaying), enough to clear it by about 1.8 m. */
   buoyShove: 9,
   smashSplash: 1.6,

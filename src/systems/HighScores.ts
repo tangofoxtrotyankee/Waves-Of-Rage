@@ -1,6 +1,9 @@
 import type { DifficultyMode } from '../game/difficulty';
 import { loadJSON, saveJSON } from './Storage';
 
+/** A table: one of the original game's difficulties, or the sequel's endless run (Waves of Rage 2: Boardmasters). */
+export type ScoreMode = DifficultyMode | 'boardmasters';
+
 export interface HighScore {
   name: string;
   score: number;
@@ -20,16 +23,16 @@ export const HIGH_SCORES = {
 const LAST_NAME_KEY = 'lastname.v1';
 
 /** Storage key for a mode's table; normal keeps the original key so existing tables survive. */
-function keyFor(mode: DifficultyMode): string {
+function keyFor(mode: ScoreMode): string {
   return mode === 'normal' ? 'highscores.v1' : `highscores.${mode}.v1`;
 }
 
-/** Per-device top-N table for one difficulty mode, persisted in local storage. */
+/** Per-device top-N table for one mode, persisted in local storage. */
 export class HighScores {
   private entries: HighScore[];
   private readonly key: string;
 
-  constructor(mode: DifficultyMode = 'normal') {
+  constructor(mode: ScoreMode = 'normal') {
     this.key = keyFor(mode);
     this.entries = HighScores.sanitise(loadJSON<HighScore[]>(this.key, []));
   }

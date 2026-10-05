@@ -59,7 +59,7 @@ export class GameOverScene extends Phaser.Scene {
     this.tweens.add({ targets: prompt, alpha: 0.15, duration: 500, ease: 'Sine.easeInOut', yoyo: true, repeat: -1 });
 
     const scores = new ScoreService();
-    const modeLabel = difficultySpec(scores.mode).label;
+    const modeLabel = difficultySpec(scores.mode === 'boardmasters' ? 'normal' : scores.mode).label;
     const heading = (online: boolean) => (online ? `TOP 10 ${modeLabel}` : `${modeLabel} OFFLINE`);
     const score = Math.floor(data.score ?? 0);
     this.renderTable(scores.list, -1, landscape, 'LOADING');

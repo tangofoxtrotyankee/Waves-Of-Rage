@@ -1,5 +1,6 @@
 /**
- * Top-10 score store persisted to a JSON file (one file, atomic writes).
+ * Top-10 score store persisted to a JSON file (one file, atomic writes):
+ * one table per mode (the original game's difficulties and the sequel).
  *
  * Point DATA_DIR at a persistent disk (a Railway volume, for example) so the
  * table survives redeploys. Writes are serialised through a promise chain.
@@ -8,7 +9,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const TABLE_SIZE = 10;
-export const MODES = ['easy', 'normal', 'insanity'];
+/** The original game's three difficulties, and the sequel's endless run. */
+export const MODES = ['easy', 'normal', 'insanity', 'boardmasters'];
 
 export function cleanMode(raw) {
   return MODES.includes(raw) ? raw : 'normal';

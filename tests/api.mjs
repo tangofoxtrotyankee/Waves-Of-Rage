@@ -74,6 +74,10 @@ try {
   check('modes keep separate tables', ins.rank === 0 && insList.scores.length === 1 && insList.mode === 'insanity' && normalList.scores.length === 10 && !normalList.scores.some((s) => s.name === 'MAD'));
   const bogus = await (await fetch(`${BASE}/api/scores?mode=bogus`)).json();
   check('unknown mode falls back to normal', bogus.mode === 'normal');
+  // The sequel's endless run has its own table.
+  const bm = await (await post({ name: 'SAM', score: 4200, distance: 1800, mode: 'boardmasters' })).json();
+  const bmList = await (await fetch(`${BASE}/api/scores?mode=boardmasters`)).json();
+  check('the sequel (boardmasters) keeps its own table', bm.rank === 0 && bm.mode === 'boardmasters' && bmList.scores.length === 1 && bmList.scores[0].distance === 1800 && !normalList.scores.some((s) => s.name === 'SAM'));
 
   const onDisk = JSON.parse(await readFile(join(dataDir, 'scores.json'), 'utf8'));
   check('persisted to scores.json in DATA_DIR (per-mode)', onDisk.normal.length === 10 && onDisk.normal[0].name === 'HUGE' && onDisk.insanity.length === 1);

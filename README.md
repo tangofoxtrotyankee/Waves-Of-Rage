@@ -9,7 +9,9 @@ game with original assets and gameplay.
 
 > **Status:** feature-complete prototype with a first pixel-art pass, now in
 > the playtesting and balancing phase. The 3D sequel, Waves of Rage 2:
-> Boardmasters, has its first playable prototype (see below). Title screen, surf down the wave, jump rocks, dodge
+> Boardmasters, is playable and now plays like this game: an endless run
+> with swipe and tap controls on phones, sharks and boats, and a shared
+> top 10 (see below). Title screen, surf down the wave, jump rocks, dodge
 > sharks, punch and barge rival surfers off their boards (or into rocks and
 > sharks) for combo-multiplied points, hit wave ramps for big air, spin and
 > grab for trick points, land clean or wipe out, lose health, see your
@@ -30,7 +32,8 @@ game with original assets and gameplay.
 | Sequel (WOR 2)     | [Three.js](https://threejs.org/) on its own page, `boardmasters.html` (see below) |
 
 The only backend is a small Node server (one dependency, `pg`) that serves
-the build and keeps the shared top-10 tables in Postgres or a JSON file.
+the build and keeps the shared top-10 tables (one per difficulty, and one
+for the sequel) in Postgres or a JSON file.
 
 ## Prerequisites
 
@@ -245,35 +248,35 @@ Waves-Of-Rage/
         │   ├── PS1Material.ts # The one shader: vertex snapping, affine textures, Gouraud or faceted light, fog, 5-bit banding
         │   ├── Textures.ts # Textures painted at runtime (water, boards, shorts, skull buoy, crowd, banner, flag)
         │   ├── Hud2D.ts    # HUD canvas helpers: pixel font, heavy italic lettering, gradients, outlines, baked sprites
-        │   ├── Input.ts    # Keyboard + the phone's buttons into one InputState, with every press for the combo reader
-        │   ├── TouchButtons.ts # The phone pad (LEFT, UP, RIGHT) and JUMP, HIT, BRG, drawn by the HUD and hit-tested by Input
+        │   ├── Input.ts    # Keyboard + the phone's gestures (a floating stick, flicks, taps) into one InputState
         │   ├── immersive.ts # Fullscreen + orientation lock for phones
         │   ├── Loop.ts     # Fixed 60 Hz step, render per frame
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
         │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
-        │   ├── Course.ts   # Course data (Sunset Bay, 2,000 m) and the streaming generator of ramps, troughs, buoys and boost gates
+        │   ├── Course.ts   # The endless course generator: ramps, troughs, buoys, boost gates, sharks and boats, tightening with distance
         │   ├── Scenery.ts  # The shore: cliffs with palms and waterfalls, the pier with its crowd, tents, flags and banner
         │   └── Sky.ts      # Sunset dome, sun with rays, drifting clouds
         ├── entities/
         │   ├── Rider.ts    # Physics (carve, launch, jump, spin, grab, land), combat requests, hit reactions, near fade
         │   ├── Surfer.ts   # The player's rider (input -> control)
-        │   ├── Rival.ts    # AI rider: lanes, buoy avoidance, rubber-banding, shoulder checks
+        │   ├── Rival.ts    # AI rider: lanes, hazard avoidance, pack pacing round the surfer, telegraphed attacks
         │   ├── RiderModel.ts # The skinned low-poly humanoid and the surfboard, built in code
         │   ├── RiderAnimator.ts # Procedural animation: stance, carves, tricks, punch/barge clips, flinch, knockout, wipeout
         │   ├── riderTextures.ts # Per-rider face, shorts and top atlas; deck art
         │   ├── RiderFoam.ts # The foam round each board
         │   ├── Wake.ts     # Foam wakes behind every rider, one mesh
         │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
+        │   ├── Shark.ts    # The shark: swims up the course at the rider and lunges sideways, pooled
+        │   ├── Boat.ts     # The lifeguard boat: crosses the course sideways, cannot be jumped, pooled
         │   ├── Chevron.ts  # Boost gate: a >> sign on a float, pooled; ride over it for a BOOST
-        │   ├── FinishLine.ts # The finish arch, stands, chequered strip and fireworks
         │   └── Spray.ts    # Spray clumps and splashes (with foam rings), instanced
         └── game/
-            ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
+            ├── constants.ts # Resolution, camera, fog, physics, scoring, the endless run, sharks, boats, combat, tricks, RAGE, palette
             ├── characters.ts # Rider specs: the seven characters' stats and colours, the rival surfers
-            ├── Combos.ts   # Input combos (RIGHT RIGHT UP = barrel roll, UP UP = boost) and the reader
-            ├── HudView.ts  # The HUD, title, pause and results screens (HudArt.ts: baked pixel art; HudLayout.ts: tap zones)
-            └── Run.ts      # One run: title (character select), play, pause, results; combat, tricks, RAGE, camera
+            ├── Combos.ts   # Keyboard combos (RIGHT RIGHT UP = barrel roll, UP UP = boost) and the reader
+            ├── HudView.ts  # The HUD, title, pause and results (with the top 10) screens (HudArt.ts: baked pixel art; HudLayout.ts: tap zones)
+            └── Run.ts      # One run: title (character select), play, pause, wipeout and results; hazards, combat, tricks, RAGE, the top 10, camera
 ```
 
 ### How the pieces fit together
@@ -405,69 +408,93 @@ to change.
 ## Waves of Rage 2: Boardmasters
 
 The sequel is a separate game sharing this repository, hosting and visual
-identity: a 3D forward-scrolling arcade surf racer/brawler seen from behind
+identity: a 3D forward-scrolling arcade surf runner/brawler seen from behind
 the surfer, styled like 1995-1998 PlayStation 3D with this game's Mega Drive
-presentation around it. It has its first playable prototype, reached from the
-title screen's second menu entry or directly at `boardmasters.html`
-(`/boardmasters` on the production server).
+presentation around it. It is reached from the title screen's second menu
+entry or directly at `boardmasters.html` (`/boardmasters` on the production
+server).
 
-**What is in the prototype.** Sunset Bay, a 2,000 m race against five
-rivals on a swell that is real terrain: you climb faces, drop into troughs
-and launch off crests when you are going fast enough, and steep-backed
-ramps and slowing troughs are generated ahead of you as you ride, with the
-buoys coming thicker and everyone's pace rising towards the finish. Cyan
-`>>` markers are boost gates: ride over them for a free BOOST. "500 M TO
-GO" and "FINAL STRETCH" call the run-in to the finish arch; crossing it
-ends your race with your place out of six, your time and a place bonus
-(2,000 points for a win down to 150 for sixth), and your best place, time
-and score on the course are kept on the device and shown on the title.
+**What is in the game.** Sunset Bay, an endless run the way the original
+game is played: ride as far as you can with a pack of five rivals on a
+swell that is real terrain (you climb faces, drop into troughs and launch
+off crests when you are going fast enough), with steep-backed ramps,
+slowing troughs, skull buoys, boost gates (cyan `>>` markers: ride over one
+for a free BOOST), and from a few hundred metres in the original game's
+sharks and lifeguard boat. The pace rises with distance (everyone's, up to
+70 % faster by 1,800 m) and the hazards come thicker, so a run gets harder
+the longer it lasts. The score is the distance in metres plus the tricks
+and knockouts; at zero health you wipe out and the results show the
+distance, the score, the knockouts and the shared top 10. A run that makes
+the table asks for a name (the same prompt as the original game) and posts
+it; the device also keeps its own best score and the distance it was set
+at, shown on the title.
 
 **Health.** A health bar replaces the hearts. Rivals' punches (12) and
 shoulder checks (18) drain it, scaled by the rival's POWER, and so do skull
-buoys (25) and crooked landings (20); RAGE halves it all. Tricks refill
-it: a clean landing after air you made yourself (a JUMP) gives 4, big air
-8, each half turn of spin 6, a grab 5 and a barrel roll 10. At zero you
-wipe out and the race is over (DNF).
+buoys (25), the lifeguard boat (30), sharks (40) and crooked landings
+(20); RAGE halves it all. Tricks refill it: a clean landing after air you
+made yourself (a JUMP) gives 4, big air 8, each half turn of spin 6, a
+grab 5 and a barrel roll 10. At zero you wipe out and the run is over.
 
-**Fights.** HIT (X) and BARGE (Shift) take half a rival's health each, so
-two blows knock it out of the race for 500 points; knockouts within four
-seconds of each other multiply up to x5, and a rival shoved into a buoy or
-off the course is out for 750. A blow has a wind-up, a strike and a
-recovery; when it lands the game freezes for a few frames, the camera
-shakes, a spark and HIT! or BARGE! burst over the rival, who flinches and
-is shoved away (a small health bar shows over its head), and a knockout
-throws it tumbling through the air into a splash. The fighters among the
-rivals hit back: a red "!" over a rival warns of a punch (a 0.4 s
-wind-up) or a shoulder check (a lean-out tell) before it comes, and you can
-carve out of reach, jump, or strike first to counter it.
+**Sharks and boats.** A shark swims up the course at you and lunges a few
+metres sideways now and then: read the fin and carve round it (a big
+enough jump clears it). The lifeguard boat crosses the course from either
+side, drifting slowly towards you, holds its line and cannot be jumped:
+steer round its bow or stern. A rival shoved into either is out of the run
+(SHARK FOOD, INTO THE BOAT: 750 points), like one shoved into a buoy.
 
-**Tricks.** In the air Left/Right spin and X grabs: land within 50
-degrees of upright and the air, the spin (180 to 720) and the grab score,
-with a clean-landing bonus; land badly and you crash. Spins are forgiving:
-only a press made in the air spins (a carve carried over a crest never
-does), a short tap or a spin let go settles back upright, and a held spin
-is helped round to a clean 360 when there is about a second of air; a half
-turn held into the landing still crashes. Tricks and knockouts fill the
-RAGE meter: full, you ride 30 % faster for eight seconds, one hit knocks
-out, buoys smash for points and the sea turns hot pink. The title screen
-picks the character (seven, with SPEED / TURN / POWER / RAGE bars that
-scale the physics and colour the rig); the choice is remembered.
+**Fights.** HIT (X, or a tap on a phone) and BARGE (Shift, or a flick
+down) take half a rival's health each, so two blows knock it out for 500
+points; knockouts within four seconds of each other multiply up to x5, and
+a rival shoved into a hazard or off the course is out for 750. A blow has
+a wind-up, a strike and a recovery; when it lands the game freezes for a
+few frames, the camera shakes, a spark and HIT! or BARGE! burst over the
+rival, who flinches and is shoved away (a small health bar shows over its
+head), and a knockout throws it tumbling through the air into a splash.
+The fighters among the rivals hit back: a red "!" over a rival warns of a
+punch (a 0.4 s wind-up) or a shoulder check (a lean-out tell) before it
+comes, and you can carve out of reach, jump, or strike first to counter
+it. On phones the rivals wait longer between attacks and the hazards are
+spaced wider.
+
+**Tricks.** In the air Left/Right (a sideways swipe on a phone) spin and
+X (a tap) grabs: land within 50 degrees of upright and the air, the spin
+(180 to 720) and the grab score, with a clean-landing bonus; land badly
+and you crash. Spins are forgiving: only a press made in the air spins (a
+carve carried over a crest never does), a short tap or a spin let go
+settles back upright, and a held spin is helped round to a clean 360 when
+there is about a second of air; a half turn held into the landing still
+crashes. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
+faster for eight seconds, one hit knocks out, buoys smash for points and
+the sea turns hot pink. The title screen picks the character (seven, with
+SPEED / TURN / POWER / RAGE bars that scale the physics and colour the
+rig); the choice is remembered.
 
 **Controls.** Left/Right or A/D carve, Up/W pumps for speed, Down/S brakes
 and tightens the carve, Space jumps (also from a crest, for more height),
 X or J punches (grabs in the air), Shift barges, Esc pauses (M on the pause
-panel for the main menu). On the title, Left/Right change character. On
-phones the left thumb has a pad of LEFT, UP and RIGHT (hold LEFT/RIGHT to
-carve, hold UP to pump) and the right thumb has JUMP, HIT and BRG; the
-pause button is top-centre and MENU is the top-left corner. The first tap
-asks for fullscreen and locks the phone upright where the browser allows it.
+panel for the main menu). On the title, Left/Right change character.
+Keyboard combos: RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch
+and a full roll about the board, 400 points plus the landing bonus; land
+before it is done and you crash), UP UP is a BOOST (a burst of speed, on a
+short cooldown); the HUD shows the presses it is holding.
 
-**Combos.** Presses within about a third of a second of each other form combos,
-from the keyboard or the pad alike (`src/boardmasters/game/Combos.ts`):
-RIGHT RIGHT UP or LEFT LEFT UP is a BARREL ROLL (a launch and a full roll
-about the board, 400 points plus the landing bonus; land before it is done
-and you crash), UP UP is a BOOST (a burst of speed, on a short cooldown).
-The HUD shows the presses it is holding, so moves can be learnt by watching.
+**Phones** play with the original game's gestures and no buttons: the whole
+screen is the control surface, so a thumb never covers the action.
+
+| Gesture                           | In play                                   |
+| --------------------------------- | ----------------------------------------- |
+| Drag sideways and hold            | Carve (a floating stick: drag further to carve harder, drag back to reverse, lift to straighten) |
+| Flick up                          | Jump; in the air, a BARREL ROLL           |
+| Tap                               | HIT the rival alongside; in the air, a grab |
+| Flick down                        | BARGE; in the air, a grab                 |
+| Drag sideways in the air          | Spin                                      |
+| Top-centre button / top-left MENU | Pause / main menu                         |
+
+Hints for the three gestures show at the bottom for the first seconds of a
+run until each has been used. Taps also start a run and restart after a
+wipeout; the first tap asks for fullscreen and locks the phone upright
+where the browser allows it. There are no combos on phones.
 
 **The look.** One shader gives everything the PlayStation's vertex
 snapping, affine textures and 5-bit dithered colour. The world renders at
@@ -481,15 +508,18 @@ blue far, with dithered whitewater, the sun's glitter, wakes and big
 splashes. Towering cliffs with lit villages, palms and waterfalls run down
 the left; the festival pier with its stage, crowd, tents, flags and the
 BOARDMASTERS banner comes round on the right; mountains close the bay under
-a banded sunset sky. The HUD and title follow the mockups: HEALTH (a bar), POS,
-DIST (a percentage, with the race clock) and SCORE panels, RAGE lettering over a segmented bar, a course strip
-on the left, heavy trick lettering, and icon buttons on phones.
+a banded sunset sky. The HUD and title follow the mockups: HEALTH (a bar),
+DIST (metres) and SCORE panels, RAGE lettering over a segmented bar, heavy
+trick lettering, and the gesture hints on phones.
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
-above), imports nothing from Phaser and shares only the platform detection,
-the pixel font sheet and the palette with this game. Tuning is in
-`src/boardmasters/game/constants.ts`; characters, their stats and colours in
-`characters.ts`; course data in `world/Course.ts`. The reference art is in
+above), imports nothing from Phaser and shares the platform detection, the
+pixel font sheet, the palette, the score service and the name prompt with
+this game. Tuning is in `src/boardmasters/game/constants.ts` (the endless
+run's ramp and unlock distances in `ENDLESS`, the hazards in `SHARK` and
+`BOAT`); characters, their stats and colours in `characters.ts`; the course
+generator in `world/Course.ts`. The shared top 10 is the same API as this
+game's, under the mode `boardmasters` (`/api/scores?mode=boardmasters`). The reference art is in
 [`docs/art-direction/boardmasters/`](docs/art-direction/boardmasters/) and
 the architecture, with how the next features plug in, is in
 [`docs/boardmasters/ARCHITECTURE.md`](docs/boardmasters/ARCHITECTURE.md).
