@@ -345,6 +345,8 @@ export const RACE = {
   /** After the line: seconds before the results show (the FINISH! callout and the fireworks first), and before they take input. */
   resultsDelay: 1.5,
   resultsSeconds: 2.5,
+  /** Over the line, the run plays at [0] of real speed for [1] real seconds: a beat for FINISH! and the first fireworks. */
+  finishSlow: [0.35, 0.45] as const,
   /** Rival pacing: a rival rides its own pace from `packBehind` metres behind the surfer to `packAhead` ahead... */
   packBehind: 8,
   packAhead: 12,

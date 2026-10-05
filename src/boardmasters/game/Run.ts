@@ -200,6 +200,8 @@ export class Run {
   private focusUntil = 0;
   /** Hit-stop: seconds the run stays frozen while a blow lands (only the camera shake and the HUD move). */
   hitStop = 0;
+  /** Seconds (real) of the finish's slow motion left. */
+  private slowMo = 0;
   /** The rival the surfer's last blow is aimed at, and the run time until which its reaction must stay in sight (updateNearFade). */
   private strikeTarget: Rival | null = null;
   private strikeUntil = 0;
@@ -350,6 +352,7 @@ export class Run {
     this.focusTarget = null;
     this.focusUntil = 0;
     this.hitStop = 0;
+    this.slowMo = 0;
     this.strikeTarget = null;
     this.strikeUntil = 0;
     this.wake.reset();
@@ -402,6 +405,11 @@ export class Run {
   }
 
   update(dt: number): void {
+    // Over the line: a beat of slow motion (RACE.finishSlow) as FINISH! goes up and the first fireworks burst.
+    if (this.slowMo > 0) {
+      this.slowMo = Math.max(0, this.slowMo - dt);
+      dt *= RACE.finishSlow[0];
+    }
     if (this.hitStop > 0) {
       // Hit-stop: the world holds still for a few frames as a blow lands (the run clock too, so every timer
       // and animation picks up where it stopped); the camera shake and the words on the HUD keep moving.
@@ -473,7 +481,7 @@ export class Run {
     this.updateCamera(dt);
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
-    this.finishLine.update(this.time, this.ocean, this.renderer.camera.position);
+    this.finishLine.update(this.time, this.ocean, this.renderer.camera.position, this.renderer.renderScale);
     this.spray.update(dt, this.renderer.camera);
     this.wake.update(dt, this.ocean);
   }
@@ -1008,6 +1016,7 @@ export class Run {
     this.combos.clear();
     this.callout = { text: 'FINISH!', at: this.time };
     this.finishLine.celebrate(this.time);
+    this.slowMo = RACE.finishSlow[1];
     this.saveBest(true);
   }
 

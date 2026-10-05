@@ -4,7 +4,7 @@ import { colorGeometry, createPS1Material } from '../engine/PS1Material';
 import { ATLAS, festivalAtlasShared, finishBannerTexture } from '../engine/Textures';
 import { mulberry32 } from '../engine/math';
 import { THREE } from '../engine/three';
-import { PALETTE } from '../game/constants';
+import { IS_PORTRAIT, PALETTE } from '../game/constants';
 import type { Ocean } from '../world/Ocean';
 
 /**
@@ -32,8 +32,28 @@ const HIDE = 320;
 const FOG = { near: 140, far: 330 } as const;
 /** Searchlights from the tower tops: how tall, how wide at the top, and how far they sway (radians). */
 const BEAM = { length: 46, base: 0.5, top: 3.4, sway: 0.32 } as const;
-/** Fireworks once the surfer is over: bursts, sparks per burst, how long they go on, a burst's life and the sparks' speed and fall. */
-const FIREWORKS = { bursts: 10, sparks: 30, seconds: 5.5, life: 1.5, speed: 8, gravity: 5, ahead: 60 } as const;
+/**
+ * Fireworks once the surfer is over: bursts, sparks per burst, how long
+ * they go on, a burst's life, the sparks' speed and fall, how far ahead of
+ * the camera they burst (close enough to fill the sky over the way ahead),
+ * how high and how far across (narrower upright), and a spark's size in
+ * HUD pixels.
+ */
+const FIREWORKS = {
+  bursts: 10,
+  sparks: 40,
+  seconds: 5.5,
+  life: 1.6,
+  speed: 13,
+  gravity: 4,
+  ahead: 32,
+  low: IS_PORTRAIT ? 9 : 7,
+  high: 5,
+  across: IS_PORTRAIT ? 7 : 14,
+  size: 7,
+} as const;
+/** The banner and the flags screen-door out as the camera comes up to the line (from `start` metres to gone at `full`): the camera passes right under them. */
+const NEAR_FADE = { start: 18, full: 7 } as const;
 const FIREWORK_COLORS = [0xffd166, 0x7ff6ff, 0xff4fa3, 0xffffff, 0xff8c42, 0x9bff6a];
 
 /**
@@ -88,7 +108,8 @@ function bunting(out: number[], colors: number[], a: THREE.Vector3, b: THREE.Vec
  * off, floating stands either side with a cheering crowd and the festival's
  * blue wave flags, a chequered strip riding the swell across the line, and
  * fireworks once the surfer is over. update() keeps the floating parts on
- * the water and keeps the arch in view from afar (PROXY).
+ * the water and keeps the arch in view from afar (PROXY), and screen-doors
+ * the banner and flags out as the camera passes under them (NEAR_FADE).
  */
 export class FinishLine {
   /** Everything, in the scene; `arch` is the line itself (drawn nearer and smaller from afar), the fireworks fly over the surfer's way ahead. */
@@ -96,6 +117,8 @@ export class FinishLine {
   private readonly arch = new THREE.Group();
   z = 0;
   private readonly materials: THREE.ShaderMaterial[];
+  /** The banner and the flat flags and pennants: these fade as the camera comes up to the line. */
+  private readonly nearMaterials: THREE.ShaderMaterial[];
   /** The stands (bobbing with the water at their middle), and the two halves of the light row (they chase). */
   private readonly stands: THREE.Group[] = [];
   private readonly lightsA: THREE.Mesh;
@@ -114,9 +137,11 @@ export class FinishLine {
   constructor() {
     const solids = createPS1Material();
     const glow = createPS1Material({ unlit: true, side: THREE.DoubleSide });
-    const banner = createPS1Material({ map: finishBannerTexture(), unlit: true, side: THREE.DoubleSide });
+    const banner = createPS1Material({ map: finishBannerTexture(), unlit: true, side: THREE.DoubleSide, fade: true });
     const atlas = createPS1Material({ map: festivalAtlasShared(), unlit: true, side: THREE.DoubleSide });
-    this.materials = [solids, glow, banner, atlas];
+    const flags = createPS1Material({ unlit: true, side: THREE.DoubleSide, fade: true });
+    this.materials = [solids, glow, banner, atlas, flags];
+    this.nearMaterials = [banner, flags];
     for (const m of this.materials) {
       // Its own fog (scaled with the far-away proxy each frame), not the sea's shared one.
       m.uniforms.uFogNear = { value: FOG.near };
@@ -201,7 +226,7 @@ export class FinishLine {
     flatGeometry.setAttribute('color', new THREE.Float32BufferAttribute(flatColors, 3));
     flatGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((flat.length / 3) * 2), 2));
     flatGeometry.computeVertexNormals();
-    this.arch.add(new THREE.Mesh(flatGeometry, glow));
+    this.arch.add(new THREE.Mesh(flatGeometry, flags));
 
     // The row of lights under the beam, in two alternating sets that chase.
     const lamps: THREE.BufferGeometry[][] = [[], []];
@@ -313,11 +338,13 @@ export class FinishLine {
     // Fireworks: one cloud of points, the bursts laid out once; positions are worked out each frame while they fly.
     const frng = mulberry32(5);
     for (let i = 0; i < FIREWORKS.bursts; i++) {
+      // The first goes up the moment the surfer crosses; the rest follow, left and right in turn.
+      const jitter = frng() * 0.2;
       this.bursts.push({
-        at: i * (FIREWORKS.seconds - FIREWORKS.life) / (FIREWORKS.bursts - 1) + frng() * 0.2,
-        x: (frng() - 0.5) * 22,
-        y: 13 + frng() * 10,
-        z: (frng() - 0.5) * 16,
+        at: i === 0 ? 0 : (i * (FIREWORKS.seconds - FIREWORKS.life)) / (FIREWORKS.bursts - 1) + jitter,
+        x: (i % 2 === 0 ? -1 : 1) * (0.25 + 0.75 * frng()) * FIREWORKS.across,
+        y: FIREWORKS.low + frng() * FIREWORKS.high,
+        z: (frng() - 0.5) * 12,
         color: (() => {
           const c = new THREE.Color(FIREWORK_COLORS[i % FIREWORK_COLORS.length]);
           return c.setRGB(linear(c.r), linear(c.g), linear(c.b));
@@ -338,7 +365,7 @@ export class FinishLine {
     fireGeometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 4), 4));
     this.fireworks = new THREE.Points(
       fireGeometry,
-      new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false, fog: false }),
+      new THREE.PointsMaterial({ size: FIREWORKS.size, sizeAttenuation: false, vertexColors: true, transparent: true, depthWrite: false, fog: false }),
     );
     this.fireworks.frustumCulled = false;
     this.fireworks.visible = false;
@@ -369,9 +396,12 @@ export class FinishLine {
    * camera's lines of sight (with its fog scaled to match) so it shows from
    * afar. Fireworks fly over the way ahead while celebrating.
    */
-  update(time: number, ocean: Ocean, camera: THREE.Vector3): void {
+  update(time: number, ocean: Ocean, camera: THREE.Vector3, pixelScale = 1): void {
+    (this.fireworks.material as THREE.PointsMaterial).size = Math.round(FIREWORKS.size * pixelScale);
     this.updateFireworks(time, camera);
     const ahead = this.z - camera.z;
+    const fade = 1 - Math.min(1, Math.max(0, (ahead - NEAR_FADE.full) / (NEAR_FADE.start - NEAR_FADE.full)));
+    for (const m of this.nearMaterials) m.uniforms.uFade.value = fade;
     if (ahead > HIDE || ahead < -60) {
       this.arch.visible = false;
       return;
