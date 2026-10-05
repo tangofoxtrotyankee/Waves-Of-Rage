@@ -104,7 +104,21 @@ const BANNER_GLYPHS: Record<string, readonly string[]> = {
   R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
   S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
   T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+  H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
+  N: ['10001', '11001', '10101', '10101', '10011', '10001', '10001'],
 };
+
+/** The banner lettering's look: glyph cell size, fill gradient (top to bottom) and drop shadow colour. */
+interface LetteringStyle {
+  sx: number;
+  sy: number;
+  gradient: readonly number[];
+  shadow: number;
+}
+const PINK_LETTERING: LetteringStyle = { sx: 6, sy: 7, gradient: [0xffffff, 0xffffff, 0xffe6f4, 0xffc8e6, 0xffa6d6, 0xff86c6, 0xff66b6, 0xff4fa3], shadow: 0x45cbe6 };
+const GOLD_LETTERING: LetteringStyle = { sx: 10, sy: 7, gradient: [0xffffff, 0xfff7b0, 0xffe14d, 0xffd23a, 0xffc21a, 0xffb21f, 0xff9a12, 0xff7a1f], shadow: 0x14142a };
 
 /**
  * Chunky slanted lettering like the title's: the glyphs scaled up (6 by 7
@@ -112,9 +126,8 @@ const BANNER_GLYPHS: Record<string, readonly string[]> = {
  * the dark outline colour with a cyan drop shadow and filled white to pink
  * from top to bottom. Centred on (cx, cy).
  */
-function paintBannerLettering(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number): void {
-  const sx = 6;
-  const sy = 7;
+function paintBannerLettering(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, style: LetteringStyle = PINK_LETTERING): void {
+  const { sx, sy, gradient, shadow } = style;
   const slant = 0.4;
   const width = text.length * 6 * sx - sx;
   const height = 7 * sy;
@@ -143,13 +156,12 @@ function paintBannerLettering(ctx: CanvasRenderingContext2D, text: string, cx: n
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (at(x + dx, y + dy)) return true;
     return false;
   };
-  const gradient = [0xffffff, 0xffffff, 0xffe6f4, 0xffc8e6, 0xffa6d6, 0xff86c6, 0xff66b6, 0xff4fa3];
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       let color = -1;
       if (at(x, y)) color = gradient[Math.min(gradient.length - 1, Math.floor(((y - 4) / height) * gradient.length))];
       else if (near(x, y, 2)) color = PALETTE.outline;
-      else if (at(x - 3, y - 3)) color = 0x45cbe6;
+      else if (at(x - 3, y - 3)) color = shadow;
       else if (near(x - 3, y - 3, 1)) color = PALETTE.outline;
       if (color >= 0) fill(ctx, color, x0 + x - 4, y0 + y - 4, 1, 1);
     }
@@ -213,6 +225,43 @@ export function festivalAtlas(): THREE.CanvasTexture {
     fill(ctx, PALETTE.foam, 4, 178, 24, 2);
     fill(ctx, 0x7ff6ff, 7, 184, 18, 2);
   }, 256);
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.NearestMipmapNearestFilter;
+  return texture;
+}
+
+let sharedAtlas: THREE.CanvasTexture | null = null;
+/** One festival atlas for everything that uses it (the pier and the finish line's flags and crowds). */
+export function festivalAtlasShared(): THREE.CanvasTexture {
+  return (sharedAtlas ??= festivalAtlas());
+}
+
+/**
+ * The finish line's banner, 512 by 128 px: a chequered border round a
+ * festival-red cloth with FINISH in the pier banner's chunky slanted
+ * lettering, gold this time. Mipmapped like the festival atlas: it is meant
+ * to be read from 150 m.
+ */
+export function finishBannerTexture(): THREE.CanvasTexture {
+  const texture = pixelTexture(512, (ctx) => {
+    for (let x = 0; x < 512; x += 16)
+      for (const y of [0, 16, 96, 112]) fill(ctx, (x / 16 + y / 16) % 2 === 0 ? 0xf8f8f8 : 0x14142a, x, y, 16, 16);
+    fill(ctx, 0xb8142f, 0, 32, 512, 64);
+    fill(ctx, 0xd61f3c, 0, 36, 512, 56);
+    fill(ctx, PALETTE.outline, 0, 32, 512, 3);
+    fill(ctx, PALETTE.outline, 0, 93, 512, 3);
+    fill(ctx, 0xffd166, 0, 35, 512, 2);
+    fill(ctx, 0xffd166, 0, 91, 512, 2);
+    // Stars of light along the cloth either side of the word.
+    for (const x of [18, 46, 466, 494]) {
+      fill(ctx, 0xfff7b0, x - 1, 56, 3, 16);
+      fill(ctx, 0xfff7b0, x - 7, 63, 15, 3);
+      fill(ctx, 0xffffff, x - 1, 63, 3, 3);
+    }
+    paintBannerLettering(ctx, 'FINISH', 252, 64, GOLD_LETTERING);
+  }, 128);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.NearestMipmapNearestFilter;
   return texture;
