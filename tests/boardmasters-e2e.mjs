@@ -226,6 +226,8 @@ try {
       log = await ev((o) => new Promise((resolve) => {
         const r = window.bm.run; const s = r.surfer; const v = r.rivals[2];
         r.floating.length = 0; // only this attempt's words
+        // Mid-course and straight (a carve in the last attempt may have left the surfer at the edge).
+        s.x = 0; s.heading = 0; s.headingRate = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0;
         v.reset(s.x - 1.2, s.z + 0.3, r.ocean);
         v.health = 100;
         v.holdChecks(0);
@@ -257,7 +259,7 @@ try {
           if (v.threatening) out.warned = true;
           if (phase === 'strike' && out.strikeAt < 0) out.strikeAt = r.time;
           if (v.barging && out.bargeAt < 0) out.bargeAt = r.time;
-          if (r.health < 100 && out.hitAt < 0) {
+          if (r.health < 98 && out.hitAt < 0) { // a blow, not a bump (1) on the way
             out.hitAt = r.time;
             out.invulnerableFor = +(r.invulnerableTill - r.time).toFixed(3);
           }
@@ -273,8 +275,10 @@ try {
           }
         };
       }), opts);
-      // Done when the attack started and something answered it (a blow landed, the counter, or the dodge).
-      if (log.startAt >= 0 && (log.hitAt >= 0 || log.counteredAt >= 0 || log.words.includes('DODGED!'))) return log;
+      // Done when the attack started and was answered as this check means it: the counter, the dodge (carving away), or the
+      // blow landing. A crest throwing either rider up as the fist arrives is a dodge too, so other checks try again then.
+      const answered = opts.counter ? log.counteredAt >= 0 : opts.carveAt !== undefined ? log.words.includes('DODGED!') : log.hitAt >= 0 && log.words.includes(opts.check ? 'SHOVED!' : 'PUNCHED!');
+      if (log.startAt >= 0 && answered) return log;
       await wait(400);
     }
     return log;
