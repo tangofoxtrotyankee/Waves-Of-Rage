@@ -665,7 +665,7 @@ export class RiderAnimator {
       if (tc < 0.22 && tc + dt >= 0.22) this.splash(s.x + Math.sin(s.heading) * 0.9 * s.build, s.y, s.z + Math.cos(s.heading) * 0.9 * s.build, 0.8);
     }
 
-    // The last heart: pitch forward off the board into the water and float face down.
+    // Health gone: pitch forward off the board into the water and float face down.
     const tw = t - this.wipeAt;
     if (s.wiped && !s.knockedOut && tw >= 0) {
       const fall = smoothstep(0, RIDER_ANIM.wipeoutFall, tw);

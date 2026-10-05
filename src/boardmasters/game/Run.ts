@@ -21,7 +21,7 @@ import { Scenery } from '../world/Scenery';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
 import { type Combo, ComboReader } from './Combos';
-import { CAMERA, COMBAT, FOG, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
+import { CAMERA, COMBAT, FOG, HEALTH, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
 import { PAUSE_ZONE, titleArrowX, titleRow } from './HudLayout';
 import { HudView } from './HudView';
 
@@ -51,9 +51,9 @@ const FLOAT_HEAD = 2.0;
  * (a huge cut-off body at the screen edge) and the field comes back to the
  * player over the first seconds instead of piling onto it.
  */
-const RIVAL_GRID: [number, number][] = [[-4, 7], [4, 10], [-7, 13], [7, 16], [-2.5, 20], [3, 24], [-5.5, 28], [5.5, 32]];
+const RIVAL_GRID: [number, number][] = [[-4, 7], [4, 10], [-7, 14], [7, 18], [0, 23]];
 /** On the title the rivals ride parked in these slots, well ahead and clear of the selected character. */
-const TITLE_GRID: [number, number][] = [[-4.5, 13], [4.5, 17], [-7.5, 22], [7.5, 26], [-3, 31], [3.5, 35], [-6, 40], [6, 44]];
+const TITLE_GRID: [number, number][] = [[-4.5, 13], [4.5, 17], [-7.5, 22], [7.5, 27], [-1.5, 33]];
 /** Seconds a hit spark (the comic star at the point of contact) shows. */
 export const SPARK_SECONDS = 0.24;
 
@@ -68,6 +68,8 @@ const inZone = (x: number | null, y: number | null, zx: number, zy: number, w: n
 
 /** A blow on its way: when it lands, the freeze, the jolt, the word (over `over`, or beside the surfer) and a spark where `from` meets `to`. */
 interface PendingImpact {
+  /** Health the surfer loses as it lands (a rival's blow), else 0. */
+  damage: number;
   at: number;
   hitStop: number;
   shake: readonly [number, number];
@@ -79,6 +81,12 @@ interface PendingImpact {
   to: Rider;
   /** The surfer's speed is multiplied by this as it lands (a rival's shoulder check), else 1. */
   slow: number;
+}
+
+/** A change of the surfer's health (the HUD shows "-12" or "+6" beside the bar for a moment): the amount and the run time it happened. */
+export interface HealthChange {
+  delta: number;
+  at: number;
 }
 
 /** A hit spark, in metres from the surfer (like an anchored float), with its age and size (metres across). */
@@ -100,7 +108,8 @@ export interface HitSpark {
 export class Run {
   state: RunState = 'title';
   score = 0;
-  health: number = SCORING.startHealth;
+  /** The surfer's health, 0..HEALTH.max: blows, buoys and crashes take it, clean tricks give it back; at zero the surfer wipes out. */
+  health: number = HEALTH.max;
   distance = 0;
   /** Seconds on the run clock (never reset; timers compare against it). */
   time = 0;
@@ -131,6 +140,7 @@ export class Run {
   generator: CourseGenerator;
   private featureCount = -1;
   private floating: FloatingText[] = [];
+  private changes: HealthChange[] = [];
   /** The combo reader (the HUD shows its held presses). */
   readonly combos = new ComboReader();
   private invulnerableUntil = 0;
@@ -216,9 +226,14 @@ export class Run {
     return this.sparks;
   }
 
-  /** Run time until which the surfer is invulnerable after a hit (the HUD flashes the lost heart). */
+  /** Run time until which the surfer is invulnerable after a hit (the surfer pulses meanwhile). */
   get invulnerableTill(): number {
     return this.invulnerableUntil;
+  }
+
+  /** The surfer's recent health changes, oldest first (kept HEALTH.changeSeconds): the HUD's "-12" and "+6" beside the bar, and its flash. */
+  get healthChanges(): readonly HealthChange[] {
+    return this.changes;
   }
 
   /** Everyone back to the start line, with a fresh course ahead; `title` parks the rivals in the title's slots instead. */
@@ -230,7 +245,8 @@ export class Run {
     this.extendCourse(0);
     this.ocean.advance(0, 0);
     this.surfer.reset(0, 0, this.ocean);
-    this.surfer.health = SCORING.startHealth;
+    this.surfer.maxHealth = HEALTH.max;
+    this.surfer.health = HEALTH.max;
     const grid = title ? TITLE_GRID : RIVAL_GRID;
     this.rivals.forEach((rival, i) => {
       const [x, z] = grid[i % grid.length];
@@ -239,7 +255,8 @@ export class Run {
     });
     this.newBest = false;
     this.score = 0;
-    this.health = SCORING.startHealth;
+    this.health = HEALTH.max;
+    this.changes = [];
     this.distance = 0;
     this.rank = 1;
     this.knockouts = 0;
@@ -365,6 +382,7 @@ export class Run {
     for (const f of this.floating) f.age += dt;
     this.ageSparks(dt);
     this.floating = this.floating.filter((f) => f.age < FLOAT_SECONDS);
+    if (this.changes.length > 0 && this.time - this.changes[0].at > HEALTH.changeSeconds) this.changes.shift();
     this.updateCamera(dt);
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
@@ -504,6 +522,7 @@ export class Run {
       this.shake(impact.shake[0], impact.shake[1]);
       this.float(impact.label, impact.color, impact.scale, impact.over);
       if (impact.slow !== 1) s.speed *= impact.slow;
+      if (impact.damage > 0) this.damage(impact.damage, '', HEALTH.blowInvulnerable);
       // The spark: most of the way from the striker to the one struck, at chest height.
       const a = impact.from;
       const b = impact.to;
@@ -536,8 +555,8 @@ export class Run {
       s.crashUntil = this.time + TRICKS.crashSeconds;
       s.stunnedUntil = Math.max(s.stunnedUntil, this.time + TRICKS.crashSeconds);
       s.speed *= TRICKS.badLandingSpeed;
-      // Like buoys, a crash costs no heart while the last one's invulnerability lasts (a buoy clipped in the air, then the landing).
-      if (this.time >= this.invulnerableUntil) this.damage('WIPEOUT -1');
+      // Like buoys, a crash costs no health while the last hit's invulnerability lasts (a buoy clipped in the air, then the landing).
+      if (this.time >= this.invulnerableUntil) this.damage(HEALTH.crash, 'CRASH!');
       else this.float('CRASH!', hex(PALETTE.red), 1);
       return;
     }
@@ -561,6 +580,10 @@ export class Run {
     if (tricked) points += TRICKS.landingPoints;
     this.score += points;
     this.lastLanding = { ...l, points };
+    // Clean air gives health back: more for big air, spins, grabs and rolls.
+    this.heal(
+      (big ? HEALTH.healBigAir : HEALTH.healAir) + halfTurns * HEALTH.healPerHalfTurn + (l.grabbed ? HEALTH.healGrab : 0) + (l.rolled ? HEALTH.healRoll : 0),
+    );
     this.float(`${name} +${points}`, hex(PALETTE.gold), tricked ? 2 : 1);
     this.addRage(RAGE.perTrick * (1 + halfTurns * 0.5 + (l.grabbed ? 0.5 : 0) + (l.rolled ? 1 : 0)));
   }
@@ -613,6 +636,7 @@ export class Run {
         this.strikeUntil = this.time + RIDER_ANIM.impactDelay + (out ? CAMERA.fightKoSeconds : RIDER_ANIM.flinchSeconds);
         const kind = out ? 'knockout' : barge ? 'barge' : 'punch';
         this.impacts.push({
+          damage: 0,
           at: this.time + RIDER_ANIM.impactDelay,
           hitStop: IMPACT.hitStop[kind],
           shake: IMPACT.shake[kind],
@@ -637,7 +661,21 @@ export class Run {
       s.shoveAt(push, at);
       s.stunnedUntil = Math.max(s.stunnedUntil, at + 0.2);
       s.flinch(dir, Math.abs(push) / 4, at);
-      this.impacts.push({ at, hitStop: 0, shake: IMPACT.shake.shoved, label: 'SHOVED!', color: hex(PALETTE.cyan), scale: 1, over: null, from: r, to: s, slow: 0.9 });
+      // No second blow while this one is on its way (the health goes when it lands).
+      this.invulnerableUntil = Math.max(this.invulnerableUntil, at + HEALTH.blowInvulnerable);
+      this.impacts.push({
+        damage: HEALTH.barge * r.stats.power,
+        at,
+        hitStop: 0,
+        shake: IMPACT.shake.shoved,
+        label: 'SHOVED!',
+        color: hex(PALETTE.red),
+        scale: 1,
+        over: s,
+        from: r,
+        to: s,
+        slow: 0.9,
+      });
     }
   }
 
@@ -678,7 +716,7 @@ export class Run {
           const [amount, seconds] = IMPACT.shake.buoy;
           this.shake(amount, seconds);
           this.hitStop = Math.max(this.hitStop, IMPACT.hitStop.buoy);
-          this.damage('OUCH!');
+          this.damage(HEALTH.buoy, 'OUCH!');
         }
       }
     }
@@ -717,15 +755,26 @@ export class Run {
       const [amount, seconds] = IMPACT.shake.bump;
       this.shake(amount, seconds);
       this.bumpCooldown = 0.6; // the flinches and the shake say it; no word
+      // A bump costs a little health (not while invulnerable after a hit, and it gives no invulnerability of its own).
+      if (this.time >= this.invulnerableUntil) this.damage(HEALTH.bump, '', 0);
     }
   }
 
-  /** Lose a heart (buoys, bad landings); the third is the wipeout. */
-  private damage(label: string): void {
+  /**
+   * Take `amount` of health (halved while raging) with `label` floated
+   * beside the surfer ('' for none), then `invulnerableFor` seconds without
+   * further damage. At zero the surfer wipes out: the race is over for them.
+   */
+  damage(amount: number, label: string, invulnerableFor: number = HEALTH.hazardInvulnerable): void {
+    if (this.state !== 'playing') return;
     const s = this.surfer;
-    this.health -= 1;
+    const loss = Math.min(this.health, Math.max(1, Math.round(amount * (this.raging ? HEALTH.rageFactor : 1))));
+    this.health -= loss;
+    s.health = this.health;
+    this.logChange(-loss);
     if (this.health <= 0) {
       this.health = 0;
+      s.health = 0;
       this.state = 'wipeout';
       this.stateTime = 0;
       this.invulnerableUntil = 0;
@@ -744,9 +793,24 @@ export class Run {
         saveJSON(BEST_KEY, this.best);
       }
     } else {
-      this.invulnerableUntil = this.time + SCORING.invulnerableSeconds;
-      this.float(label, hex(PALETTE.red), 1);
+      this.invulnerableUntil = Math.max(this.invulnerableUntil, this.time + invulnerableFor);
+      if (label) this.float(label, hex(PALETTE.red), 1);
     }
+  }
+
+  /** Give back `amount` of health (clean tricks), up to HEALTH.max. */
+  heal(amount: number): void {
+    if (this.state !== 'playing' || amount <= 0) return;
+    const gain = Math.min(HEALTH.max - this.health, Math.round(amount));
+    if (gain <= 0) return;
+    this.health += gain;
+    this.surfer.health = this.health;
+    this.logChange(gain);
+  }
+
+  private logChange(delta: number): void {
+    this.changes.push({ delta, at: this.time });
+    if (this.changes.length > 4) this.changes.shift();
   }
 
   /**

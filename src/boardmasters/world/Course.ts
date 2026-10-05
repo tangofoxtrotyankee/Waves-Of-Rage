@@ -21,7 +21,7 @@ export interface Generated {
 
 /** The six stages from the brief start with the first; the others are rows to add here when their hazards exist. */
 export const COURSES = {
-  sunsetBay: { id: 'sunset-bay', name: 'SUNSET BAY', seed: 7, rivals: 7 },
+  sunsetBay: { id: 'sunset-bay', name: 'SUNSET BAY', seed: 7, rivals: 5 },
 } as const satisfies Record<string, CourseSpec>;
 
 /** How the endless course tightens with distance. */

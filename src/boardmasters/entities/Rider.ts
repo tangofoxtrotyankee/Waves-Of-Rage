@@ -104,8 +104,11 @@ export class Rider {
   /** Knocked out by combat; the run respawns it after `respawnAt`. */
   knockedOut = false;
   respawnAt = 0;
+  /** Health, 0..maxHealth (rivals: COMBAT.rivalHealth; the run keeps the player's in step with Run.health). */
   health: number = COMBAT.rivalHealth;
   maxHealth: number = COMBAT.rivalHealth;
+  /** Run time the last blow landed on this rider (the HUD shows a rival's health bar for a while after). */
+  lastHitAt = -Infinity;
   pose: RiderPose = 'idle';
   /** When set (rivals), the speed the rider relaxes towards instead of its base speed. */
   targetSpeed: number | null = null;
@@ -276,6 +279,7 @@ export class Rider {
   respawn(x: number, z: number, ocean: Ocean): void {
     this.reset(x, z, ocean);
     this.health = this.maxHealth;
+    this.lastHitAt = -Infinity;
   }
 
   /**
@@ -291,6 +295,7 @@ export class Rider {
     this.speed *= 0.8;
     this.stunnedUntil = Math.max(this.stunnedUntil, impact + 0.4);
     this.shovedUntil = impact + 0.6;
+    this.lastHitAt = impact;
     this.flashFrom = impact;
     this.flashUntil = impact + RIDER_ANIM.hitFlashSeconds;
     this.flinch(Math.sign(shove) || 1, clamp(Math.abs(shove) / 4, 0.6, 1.5), impact);

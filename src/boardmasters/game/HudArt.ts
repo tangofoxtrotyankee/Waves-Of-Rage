@@ -5,7 +5,7 @@ import type { TouchButton } from '../engine/TouchButtons';
 /**
  * The HUD's pixel art, painted once into small canvases at start-up (or on
  * first use, for anything that needs the font) and then only blitted:
- * brushed panels, hearts, the chunky digits, the RAGE bar's segments, the
+ * brushed panels, the chunky digits, the RAGE bar's segments, the
  * buttons with their icons, and the course strip's markers. Colours are
  * the mockup's, kept here rather than in PALETTE (the world's).
  */
@@ -169,31 +169,6 @@ export function statBar(n: number, filled: number, color: string): HTMLCanvasEle
   const { canvas, ctx } = makeCanvas(n * (cellW + 1) + 3, h);
   segments(ctx, 0, 0, n * (cellW + 1) + 2, h, n, 2, (i, row) => (i < filled ? (row === 0 ? mixHex(color, '#ffffff', 0.5) : color) : row === 0 ? '#3a3158' : '#1e1836'));
   return canvas;
-}
-
-const HEART = ['.###...###.', '#####.#####', '###########', '###########', '###########', '.#########.', '..#######..', '...#####...', '....###....', '.....#.....'];
-
-/** The HEALTH hearts: full (red, lit) and empty (dark), both outlined. */
-export function hearts(): {
-  full: HTMLCanvasElement;
-  empty: HTMLCanvasElement;
-  flash: HTMLCanvasElement;
-} {
-  const shaded = (body: string, light: string, dark: string) =>
-    paint(
-      HEART.map((row, y) =>
-        row
-          .split('')
-          .map((c, x) => (c !== '#' ? '.' : (y === 1 && (x === 1 || x === 2)) || (y === 2 && x === 1) ? 'L' : y >= 6 || (y >= 4 && (x <= 1 || x >= 9)) ? 'D' : 'B'))
-          .join(''),
-      ),
-      { B: body, L: light, D: dark },
-    );
-  return {
-    full: outlined(shaded('#ff2e4d', '#ffc4cf', '#b3122f'), HUD_COLORS.ink, 1, 0),
-    empty: outlined(shaded('#2b2346', '#433a66', '#1d1733'), HUD_COLORS.ink, 1, 0),
-    flash: outlined(shaded('#ffffff', '#ffffff', '#ffd0d8'), HUD_COLORS.ink, 1, 0),
-  };
 }
 
 /**

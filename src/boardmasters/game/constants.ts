@@ -316,9 +316,6 @@ export const SCORING = {
   speedRampMax: 0.3,
   /** ...reached after this many metres. */
   speedRampOver: 4000,
-  startHealth: 3,
-  buoyDamage: 1,
-  invulnerableSeconds: 1.2,
   /** Speed kept after hitting a buoy, and after bumping a rival. */
   hitSpeedFactor: 0.4,
   bumpSpeedFactor: 0.85,
@@ -328,14 +325,15 @@ export const SCORING = {
 
 /** HIT (punch), BARGE (shoulder), knockouts and rivals' own shoulder checks. Metres, seconds, points. */
 export const COMBAT = {
-  rivalHealth: 2,
-  punchDamage: 1,
+  /** Rivals' health, 0..100 like the player's: two of the player's punches or barges knock one out, a RAGE blow one. */
+  rivalHealth: 100,
+  punchDamage: 50,
   punchShove: 3.5,
   punchCooldown: 0.45,
   punchSeconds: 0.25,
   punchRangeX: 1.7,
   punchRangeZ: 2.2,
-  bargeDamage: 1,
+  bargeDamage: 50,
   /** The barge's sideways shove (m/s, times POWER); a shoved rider slides on it slowly (PHYSICS.shovedDecay) so it reads. */
   bargeShove: 5.5,
   bargeCooldown: 1.0,
@@ -361,6 +359,41 @@ export const COMBAT = {
   rivalCheckSeconds: 0.7,
   /** No shoulder checks in the first seconds of a run (the field settles first). */
   rivalGraceSeconds: 3,
+} as const;
+
+/**
+ * The player's health, 0..100 (the HEALTH bar): blows, buoys and crooked
+ * landings take it, clean tricks after real air give it back, and at zero
+ * the surfer wipes out and the race is over. A rival's blow scales with its
+ * POWER (statMultipliers: 0.7 to 1.3 times); everything is halved while
+ * RAGE is on. Run.damage and Run.heal apply it.
+ */
+export const HEALTH = {
+  max: 100,
+  /** Damage: a rival's punch, its shoulder check, a buoy, a crooked landing (crash), a rider-on-rider bump. */
+  punch: 12,
+  barge: 18,
+  buoy: 25,
+  crash: 20,
+  bump: 3,
+  /** Damage is multiplied by this while RAGE is on. */
+  rageFactor: 0.5,
+  /** Healing on a clean landing after real air (SCORING.airSeconds), on top of the points: air or big air, per half turn of spin, a grab, a barrel roll. */
+  healAir: 4,
+  healBigAir: 8,
+  healPerHalfTurn: 6,
+  healGrab: 5,
+  healRoll: 10,
+  /** Invulnerable this long after a rival's blow (no double hits)... */
+  blowInvulnerable: 0.35,
+  /** ...and after a buoy hit or a crash (the surfer pulses white meanwhile). */
+  hazardInvulnerable: 1.0,
+  /** The bar reads healthy above `warn` (a fraction of max), gold below it, red and pulsing below `low`. */
+  warn: 0.5,
+  low: 0.25,
+  /** How long a health change shows beside the bar ("-12", "+6"), and a rival's bar over its head after a hit, seconds. */
+  changeSeconds: 1.2,
+  rivalBarSeconds: 2.5,
 } as const;
 
 /**
@@ -455,7 +488,7 @@ export const TRICKS = {
   grabPoints: 250,
   landingPoints: 250,
   landingToleranceDeg: 50,
-  /** A bad landing keeps this much speed and costs a heart. */
+  /** A bad landing keeps this much speed and costs health (HEALTH.crash). */
   badLandingSpeed: 0.5,
   crashSeconds: 0.7,
   /** The barrel roll (RIGHT RIGHT UP / LEFT LEFT UP): a full roll about the board over this long, with a pop if the air is short. */
@@ -503,7 +536,7 @@ export const RIDER_ANIM = {
   hitFlashSeconds: 0.05,
   /** Floating after the splash, the body sinks this far over the respawn wait. */
   koSink: 0.55,
-  /** The last heart: pitch forward over the board into the water over this long. */
+  /** The wipeout (health gone): pitch forward over the board into the water over this long. */
   wipeoutFall: 0.45,
 } as const;
 
@@ -524,7 +557,8 @@ export const RAGE = {
   perGate: 0.06,
   decayPerSecond: 0.015,
   speedMul: 1.3,
-  attackDamage: 2,
+  /** The player's blows in RAGE: a one-hit knockout (COMBAT.rivalHealth). */
+  attackDamage: 100,
   smashPoints: 100,
   /** The fog and horizon while raging (only the distance tints: a deep hot pink), and the surfer's white pulse at its strongest. */
   fog: 0xd8306f,

@@ -3,12 +3,12 @@ import { TOUCH_BUTTONS } from '../engine/TouchButtons';
 import { KEY_LABELS } from './Combos';
 import { CHARACTER_ORDER } from './characters';
 import { hex } from '../engine/math';
-import { COMBAT, IS_PORTRAIT, PALETTE, RIDER_ANIM, SCORING, VIEW } from './constants';
-import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hearts, hitSparkFrame, pauseArt, segmentBar, SPARK_FRAMES, statBar, stripMarkers } from './HudArt';
+import { COMBAT, HEALTH, IS_PORTRAIT, PALETTE, RIDER_ANIM, SCORING, VIEW } from './constants';
+import { BigDigits, brushPanel, type ButtonArt, buttonArt, captionPill, drawnRadius, HUD_COLORS, hitSparkFrame, pauseArt, segmentBar, SPARK_FRAMES, statBar, stripMarkers } from './HudArt';
 import { PAUSE_ZONE, TITLE, titleArrowX } from './HudLayout';
 import { type FloatingText, type Run, SPARK_SECONDS } from './Run';
 
-/** Seconds after the last heart before the results panel slams in: the wipeout fall plays first. */
+/** Seconds after the wipeout before the results panel slams in: the fall plays first. */
 const RESULTS_DELAY = RIDER_ANIM.wipeoutFall + 0.3;
 
 /** How long a floating text lives (Run drops it after 1.3 s); it fades over the last part. */
@@ -38,7 +38,8 @@ const FLOAT_VOCABULARY: [string, string, number][] = [
   ['BARGE!', '#ffffff', 1],
   ['SHOVED!', hex(PALETTE.cyan), 1],
   ['OUCH!', hex(PALETTE.red), 1],
-  ['WIPEOUT -1', hex(PALETTE.red), 1],
+  ['CRASH!', hex(PALETTE.red), 1],
+  ['SHOVED!', hex(PALETTE.red), 1],
   ['BOOST!', hex(PALETTE.cyan), 1],
   ['BOOST!', hex(PALETTE.gold), 1],
   ['BARREL ROLL!', hex(PALETTE.cyan), 1],
@@ -142,7 +143,6 @@ export class HudView {
   private readonly W: number;
   /** The HUD's height: upright it follows the screen (VIEW.height), and layout() places what hangs off it again. */
   private H = 0;
-  private readonly heartArt = hearts();
   private readonly marks = stripMarkers();
   private readonly pauseButton = pauseArt();
   /** Button sprites; a button lettered inside its disc is baked again once the font has loaded. */
@@ -177,6 +177,7 @@ export class HudView {
   private readonly milestone = new Memo((v) => `${v}M`);
   private readonly small = new Memo((v) => String(v));
   private readonly kos = new Memo((v) => String(v));
+  private readonly change = new Memo((v) => (v > 0 ? `+${v}` : String(v)));
   private readonly pauseLine = new Memo(() => `DIST ${this.dist.get(this.run.distance)}M   SCORE ${this.score.get(this.run.score)}`);
   private readonly field: string;
   private trail = '';
@@ -349,16 +350,11 @@ export class HudView {
     const b = this.bar;
     const top = 2;
     const valueY = top + 11;
-    // HEALTH: big hearts, the lost ones dark; the one just lost flashes while invulnerable.
-    // On touch screens the MENU corner takes its place outside play.
+    // HEALTH: the bar. On touch screens the MENU corner takes its place outside play.
     if (!run.input.touch || run.state === 'playing' || (run.state === 'wipeout' && run.stateTime <= SCORING.wipeoutSeconds)) {
       hud.blit(this.panels.get('health') as HTMLCanvasElement, b.hx, top);
       hud.text(b.hx + 6, top + 2, 'HEALTH', HUD_COLORS.label, TIGHT);
-      const flashing = run.time < run.invulnerableTill && Math.floor(run.time * 10) % 2 === 0;
-      for (let i = 0; i < SCORING.startHealth; i++) {
-        const sprite = i < run.health ? this.heartArt.full : i === run.health && flashing ? this.heartArt.flash : this.heartArt.empty;
-        hud.blit(sprite, b.hx + 4 + i * 14, valueY - 1);
-      }
+      this.drawHealthBar(b.hx + 5, valueY + 1, b.hw - 12, 7);
     }
     // POS: the place big, the field size small.
     hud.blit(this.panels.get('pos') as HTMLCanvasElement, b.px, top);
@@ -383,6 +379,36 @@ export class HudView {
     else hud.text(b.sx + 5, valueY + 3, score, '#ffe14d', TIGHT);
     // The pause button on touch screens, at the top centre (PAUSE_ZONE).
     if (run.input.touch && run.state === 'playing') hud.blit(this.pauseButton, Math.round(this.W / 2 - 9), top + Math.round((PAUSE_ZONE.h - 18) / 2) + 2);
+  }
+
+  /**
+   * The health bar: cyan-green while healthy, gold when low, red and
+   * pulsing when nearly gone; it flashes red as health goes and bright as
+   * it comes back, and the change shows beside the panel for a moment.
+   */
+  private drawHealthBar(x: number, y: number, w: number, h: number): void {
+    const run = this.run;
+    const hud = this.hud;
+    const frac = Math.max(0, Math.min(1, run.health / HEALTH.max));
+    hud.rect(x - 1, y - 1, w + 2, h + 2, 0x0d0820, 1);
+    hud.rect(x, y, w, h, 0x2b2346, 1);
+    const fill = frac > 0 ? Math.max(1, Math.round(w * frac)) : 0;
+    const low = frac < HEALTH.low;
+    const color = low ? 0xff2e4d : frac < HEALTH.warn ? 0xffc21a : 0x3fe0b0;
+    const pulse = low ? 0.65 + 0.35 * Math.sin(run.time * 12) : 1;
+    if (fill > 0) {
+      hud.rect(x, y, fill, h, color, pulse);
+      hud.rect(x, y, fill, 2, 0xffffff, 0.35 * pulse);
+    }
+    const last = run.healthChanges.length > 0 ? run.healthChanges[run.healthChanges.length - 1] : null;
+    if (!last) return;
+    const age = run.time - last.at;
+    if (age < 0.3 && Math.floor(age * 20) % 2 === 0) hud.rect(x, y, w, h, last.delta < 0 ? 0xff2e4d : 0xffffff, last.delta < 0 ? 0.8 : 0.6);
+    if (age < HEALTH.changeSeconds) {
+      const text = this.change.get(last.delta);
+      // Under the panel's left end, clear of POS and the RAGE lettering.
+      hud.text(x - 2, y + h + 5 + Math.min(3, Math.round(age * 8)), text, last.delta < 0 ? '#ff6a7f' : '#b8ffde', TIGHT_OUTLINE);
+    }
   }
 
   /** RAGE: the slanted lettering beside a segmented bar that pulses when nearly full and flashes while raging. */
