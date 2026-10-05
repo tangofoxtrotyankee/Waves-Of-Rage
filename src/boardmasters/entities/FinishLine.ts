@@ -28,6 +28,19 @@ const STRIP = { half: 1.0, cells: 24 } as const;
  * is not drawn at all; FOG is its own, much later than the sea's.
  */
 const PROXY = 112;
+/**
+ * Farther than BOOST.from metres the whole line is also drawn bigger, up to
+ * BOOST.max times its size from BOOST.full metres on, so the arch stands out
+ * from the fog on a wide screen too; the boost grows slower than the distance,
+ * so the arch still only ever grows as the riders close in. Nearer, true size.
+ */
+const BOOST = { from: 90, full: 150, max: 1.45 } as const;
+/** How much bigger than true size the line is drawn `ahead` metres from the camera (BOOST). */
+export function archBoost(ahead: number): number {
+  return 1 + (BOOST.max - 1) * Math.min(1, Math.max(0, (ahead - BOOST.from) / (BOOST.full - BOOST.from)));
+}
+/** The arch's box at true size, in metres about its foot at the water: half its width (to the towers' outer faces) and its height (to the beam's flag poles' feet). */
+export const ARCH_BOX = { halfWidth: TOWER_X + TOWER_W / 2, height: BEAM_Y + 2 } as const;
 const HIDE = 320;
 const FOG = { near: 140, far: 330 } as const;
 /** Searchlights from the tower tops: how tall, how wide at the top, and how far they sway (radians). */
@@ -108,8 +121,9 @@ function bunting(out: number[], colors: number[], a: THREE.Vector3, b: THREE.Vec
  * off, floating stands either side with a cheering crowd and the festival's
  * blue wave flags, a chequered strip riding the swell across the line, and
  * fireworks once the surfer is over. update() keeps the floating parts on
- * the water and keeps the arch in view from afar (PROXY), and screen-doors
- * the banner and flags out as the camera passes under them (NEAR_FADE).
+ * the water and keeps the arch in view from afar (PROXY), drawn bigger the
+ * farther it is (BOOST), and screen-doors the banner and flags out as the
+ * camera passes under them (NEAR_FADE).
  */
 export class FinishLine {
   /** Everything, in the scene; `arch` is the line itself (drawn nearer and smaller from afar), the fireworks fly over the surfer's way ahead. */
@@ -409,7 +423,8 @@ export class FinishLine {
     this.arch.visible = true;
     const k = ahead > PROXY ? PROXY / ahead : 1;
     this.arch.position.set(camera.x * (1 - k), camera.y * (1 - k), camera.z + ahead * k);
-    this.arch.scale.setScalar(k);
+    // About the arch's foot on the water, so it grows up and out from where it stands.
+    this.arch.scale.setScalar(k * archBoost(ahead));
     for (const m of this.materials) {
       m.uniforms.uFogNear.value = FOG.near * k;
       m.uniforms.uFogFar.value = FOG.far * k;

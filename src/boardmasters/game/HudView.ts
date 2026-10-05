@@ -75,6 +75,8 @@ const STRIP_W = 22;
 const BIG = new BigDigits();
 /** Scratch for a float's projected point (no allocation per frame). */
 const FLOAT_AT = { x: 0, y: 0 };
+/** The finish arch's box on the HUD this frame (Run.finishBox), for keeping words off it. */
+const ARCH_AT = { x0: 0, y0: 0, x1: 0, y1: 0 };
 /** Scratch for a rival's head and the surfer's on the HUD. */
 const HEAD_AT = { x: 0, y: 0 };
 const SURFER_AT = { x: 0, y: 0 };
@@ -838,6 +840,7 @@ export class HudView {
     // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
     const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * (this.run.input.touch ? 0.62 : 0.8));
     const at = FLOAT_AT;
+    let box: typeof ARCH_AT | null | undefined;
     let stack = 0;
     for (let i = list.length - 1; i >= 0; i--) {
       const f = list[i];
@@ -850,7 +853,13 @@ export class HudView {
         if (!this.run.floatPoint(f, at)) continue;
         const grow = Math.ceil(((pop - 1) * c.width) / 2);
         const x = Math.max(2 + grow, Math.min(this.W - 2 - grow - c.width, Math.round(at.x - c.width / 2)));
-        const top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
+        let top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
+        // Not over the finish arch coming up on the horizon (RAGE! high over the surfer would sit on it): over it if there is room under the RAGE row, else under it.
+        if (box === undefined) box = this.run.finishBox(ARCH_AT) ? ARCH_AT : null;
+        if (box && x < box.x1 && x + c.width > box.x0 && top < box.y1 && top + c.height > box.y0) {
+          const over = Math.round(box.y0) - c.height - 1;
+          top = over >= FLOAT_TOP ? over : Math.min(this.H - c.height, Math.round(box.y1) + 1);
+        }
         this.hud.blit(c, x, top, alpha, pop);
         continue;
       }

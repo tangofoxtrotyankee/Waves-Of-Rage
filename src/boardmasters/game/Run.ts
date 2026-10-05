@@ -10,7 +10,7 @@ import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { Buoy } from '../entities/Buoy';
 import { Chevron, chevronMaterial } from '../entities/Chevron';
-import { FinishLine } from '../entities/FinishLine';
+import { ARCH_BOX, archBoost, FinishLine } from '../entities/FinishLine';
 import type { Landing, Rider } from '../entities/Rider';
 import { Rival, type RivalContext } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
@@ -211,6 +211,7 @@ export class Run {
   private readonly lookOffset = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
   private readonly tmp2 = new THREE.Vector3();
+  private readonly boxPoint = { x: 0, y: 0 };
 
   constructor(
     private readonly renderer: Renderer,
@@ -1135,6 +1136,31 @@ export class Run {
   headPoint(r: Rider, lift: number, out: { x: number; y: number }): boolean {
     const head = r.headTop(this.tmp2);
     return this.renderer.worldToHud(head.x, head.y + lift, head.z, out);
+  }
+
+  /**
+   * Where the finish arch shows on the HUD (VIEW pixels: its box into `out`)
+   * while it stands well ahead (from 25 m up to FinishLine's HIDE); false
+   * otherwise. Its corners are taken along the camera's lines of sight,
+   * nearer, so they stay inside the far plane however far the arch is.
+   */
+  finishBox(out: { x0: number; y0: number; x1: number; y1: number }): boolean {
+    const cam = this.renderer.camera.position;
+    const ahead = this.course.length - cam.z;
+    if (ahead < 25 || ahead > 320) return false;
+    const k = Math.min(1, 100 / ahead);
+    const boost = archBoost(ahead);
+    const hw = ARCH_BOX.halfWidth * boost;
+    const corner = (x: number, y: number) => this.renderer.worldToHud(cam.x + (x - cam.x) * k, cam.y + (y - cam.y) * k, cam.z + ahead * k, this.boxPoint);
+    if (!corner(hw, ARCH_BOX.height * boost)) return false;
+    const ax = this.boxPoint.x;
+    const ay = this.boxPoint.y;
+    if (!corner(-hw, 0)) return false;
+    out.x0 = Math.min(ax, this.boxPoint.x);
+    out.x1 = Math.max(ax, this.boxPoint.x);
+    out.y0 = Math.min(ay, this.boxPoint.y);
+    out.y1 = Math.max(ay, this.boxPoint.y);
+    return true;
   }
 
   /** Where a point given in metres from the surfer (a hit spark) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */
