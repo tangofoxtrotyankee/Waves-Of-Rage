@@ -1,5 +1,5 @@
-import { getDifficulty, type DifficultyMode } from '../game/difficulty';
-import { HIGH_SCORES, HighScores, type HighScore } from './HighScores';
+import { getDifficulty } from '../game/difficulty';
+import { HIGH_SCORES, HighScores, type HighScore, type ScoreMode } from './HighScores';
 
 export type ScoreSource = 'online' | 'local';
 
@@ -13,8 +13,9 @@ export interface SubmitResult {
 const FETCH_TIMEOUT_MS = 2500;
 
 /**
- * The shared, cross-device top 10 (served by server/index.mjs) with the
- * device's local table as cache and offline fallback.
+ * The shared, cross-device top 10 (served by server/index.mjs; one table per
+ * mode: the original game's difficulties and the sequel's endless run) with
+ * the device's local table as cache and offline fallback.
  *
  * - `load()` fetches the shared table; if the API is unreachable (static
  *   hosting, offline) it resolves with the local table and `source` is
@@ -23,11 +24,11 @@ const FETCH_TIMEOUT_MS = 2500;
  *   own best even when the shared post fails.
  */
 export class ScoreService {
-  readonly mode: DifficultyMode;
+  readonly mode: ScoreMode;
   private readonly local: HighScores;
   private remote: HighScore[] | null = null;
 
-  constructor(mode: DifficultyMode = getDifficulty()) {
+  constructor(mode: ScoreMode = getDifficulty()) {
     this.mode = mode;
     this.local = new HighScores(mode);
   }

@@ -1,12 +1,11 @@
 import { gradientFill, hardenAlpha, type Hud2D, makeCanvas, outlined, type Stops } from '../engine/Hud2D';
 import { mulberry32 } from '../engine/math';
-import type { TouchButton } from '../engine/TouchButtons';
 
 /**
  * The HUD's pixel art, painted once into small canvases at start-up (or on
  * first use, for anything that needs the font) and then only blitted:
- * brushed panels, the chunky digits, the RAGE bar's segments, the
- * buttons with their icons, and the course strip's markers. Colours are
+ * brushed panels, the chunky digits, the RAGE bar's segments, the icons
+ * and the hit sparks. Colours are
  * the mockup's, kept here rather than in PALETTE (the world's).
  */
 export const HUD_COLORS = {
@@ -64,14 +63,6 @@ export function paint(map: readonly string[], colors: Record<string, string>): H
       ctx.fillStyle = c;
       ctx.fillRect(x, y, 1, 1);
     }
-  return canvas;
-}
-
-function mirrored(src: HTMLCanvasElement): HTMLCanvasElement {
-  const { canvas, ctx } = makeCanvas(src.width, src.height);
-  ctx.translate(src.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(src, 0, 0);
   return canvas;
 }
 
@@ -359,11 +350,6 @@ export class MiniDigits {
   }
 }
 
-/** A stopwatch, 7x9 with its outline (beside the race clock): the crown, the case and a red hand. */
-export function stopwatchIcon(): HTMLCanvasElement {
-  return outlined(paint(['.WWW.', '..W..', '.WWW.', 'W.R.W', 'W.R.W', 'W...W', '.WWW.'], { W: '#e9ecff', R: '#ff4d6d' }), HUD_COLORS.ink, 1, 0);
-}
-
 /** A small gold cup (the title's BEST row). */
 export function trophyIcon(): HTMLCanvasElement {
   return outlined(
@@ -392,103 +378,6 @@ export function warnIcon(bright: boolean): HTMLCanvasElement {
   return outlined(canvas, HUD_COLORS.ink, 1, 0);
 }
 
-/** A strip of checks, `w` by `rows` cells of `cell` pixels (the finished results' header, the FINISH! banner). */
-export function checkerStrip(w: number, rows: number, cell: number): HTMLCanvasElement {
-  const { canvas, ctx } = makeCanvas(w, rows * cell);
-  for (let y = 0; y < rows; y++)
-    for (let x = 0; x * cell < w; x++) {
-      ctx.fillStyle = (x + y) % 2 === 0 ? '#f4f4fa' : '#14142a';
-      ctx.fillRect(x * cell, y * cell, cell, cell);
-    }
-  return canvas;
-}
-
-/** The course strip's player arrow, the finish flag (two frames: it flies), a rival, and the milestone nodes (ahead and passed). */
-export function stripMarkers(): {
-  arrow: HTMLCanvasElement;
-  flags: [HTMLCanvasElement, HTMLCanvasElement];
-  rival: HTMLCanvasElement;
-  node: HTMLCanvasElement;
-  nodeDone: HTMLCanvasElement;
-} {
-  const arrow = outlined(paint(['...Y...', '..YYY..', '..YYY..', '.YYYYY.', '.YYYYY.', 'YYYOYYY', 'YO...OY'], { Y: '#ffe14d', O: '#ff9a12' }), HUD_COLORS.ink, 1, 0);
-  const flag = (map: string[]) => outlined(paint(map, { P: '#d8d8e8', W: '#ffffff', K: '#1a1a2e' }), HUD_COLORS.ink, 1, 0);
-  const flags: [HTMLCanvasElement, HTMLCanvasElement] = [
-    flag(['PWWKKWWKK..', 'PWWKKWWKKK.', 'PKKWWKKWWWW', 'PKKWWKKWWWW', 'PWWKKWWKKKK', 'PWWKKWW..KK', 'P..........', 'P..........', 'P..........']),
-    flag(['P..........', 'PWWKKWWKK..', 'PWWKKWWKKWW', 'PKKWWKKWWWW', 'PKKWWKKWWKK', 'PWWKKWWKKKK', 'PWW.....KK.', 'P..........', 'P..........']),
-  ];
-  const rival = outlined(paint(['.RR.', 'RLRR', 'RRRR', '.RR.'], { R: '#ff3a55', L: '#ffb3c0' }), HUD_COLORS.ink, 1, 0);
-  const node = outlined(paint(['.GGG.', 'GLGGG', 'GGGGG', 'GGGGG', '.GGG.'], { G: '#8a92aa', L: '#c9cfe0' }), HUD_COLORS.ink, 1, 0);
-  const nodeDone = outlined(paint(['.CCC.', 'CWWWC', 'CWWWC', 'CWWWC', '.CCC.'], { C: '#5fe3ff', W: '#ffffff' }), HUD_COLORS.ink, 1, 0);
-  return { arrow, flags, rival, node, nodeDone };
-}
-
-// --- button icons -----------------------------------------------------------
-
-const ICON_LIGHT = '#eef2ff';
-const ICON_SHADE = '#9aa6c4';
-
-/** A fat chevron pointing left, 6px thick, lit on its upper arm (sized to fill most of the disc, like the mockup's). */
-function chevronLeft(): HTMLCanvasElement {
-  const h = 21;
-  const w = 18;
-  const { canvas, ctx } = makeCanvas(w, h);
-  const mid = (h - 1) / 2;
-  for (let y = 0; y < h; y++) {
-    const x = Math.round(Math.abs(y - mid) * 0.95) + 1;
-    ctx.fillStyle = y > mid ? ICON_SHADE : ICON_LIGHT;
-    ctx.fillRect(x, y, 6, 1);
-  }
-  return outlined(canvas, HUD_COLORS.ink, 1, 0);
-}
-
-/** Two stacked chevrons pointing up (pump). */
-function chevronsUp(): HTMLCanvasElement {
-  const { canvas, ctx } = makeCanvas(19, 17);
-  for (const top of [0, 7]) {
-    for (let x = 0; x < 19; x++) {
-      const y = top + Math.round(Math.abs(x - 9) * 0.65);
-      ctx.fillStyle = top === 0 ? ICON_LIGHT : ICON_SHADE;
-      ctx.fillRect(x, y, 1, 4);
-    }
-  }
-  gradientFill(canvas, ['#fff7b0', '#ffe14d', '#ffc21a']);
-  return outlined(canvas, HUD_COLORS.ink, 1, 0);
-}
-
-/** An up arrow over a board (jump). */
-function jumpIcon(): HTMLCanvasElement {
-  return outlined(
-    paint(
-      [
-        '........WW........',
-        '.......WWWW.......',
-        '......WWWWWW......',
-        '.....WWWWWWWW.....',
-        '....WWWWWWWWWW....',
-        '...WWWWWWWWWWWW...',
-        '.......WWWW.......',
-        '.......WWWW.......',
-        '.......SSSS.......',
-        '..................',
-        '.YYYYYYYYYYYYYYYY.',
-        'YYRRYYYYYYYYYYRRYY',
-        '.OOOOOOOOOOOOOOOO.',
-      ],
-      {
-        W: ICON_LIGHT,
-        S: ICON_SHADE,
-        Y: '#ffd23a',
-        R: '#ff3a55',
-        O: '#c77a12',
-      },
-    ),
-    HUD_COLORS.ink,
-    1,
-    0,
-  );
-}
-
 /** A jagged starburst, hard-edged. */
 function burst(size: number, spikes: number, outer: number, inner: number, color: string): HTMLCanvasElement {
   const { canvas, ctx } = makeCanvas(size, size);
@@ -505,154 +394,6 @@ function burst(size: number, spikes: number, outer: number, inner: number, color
   ctx.fill();
   hardenAlpha(canvas, 140);
   return canvas;
-}
-
-/** A fist on a jagged burst (attack), after the mockup's ATTACK button. */
-function fistIcon(): HTMLCanvasElement {
-  const canvas = burst(26, 10, 12.6, 7.6, '#ff6a55');
-  const ctx = canvas.getContext('2d') as Ctx;
-  ctx.drawImage(burst(26, 10, 9.6, 5.6, '#ffb08a'), 0, 0);
-  const fist = paint(
-    [
-      '..KKKKKKKKK...',
-      '.KPPKPPKPPKK..',
-      'KPPLKPLKPLKPK.',
-      'KPPPKPPKPPKPPK',
-      'KPPPKPPKPPKPPK',
-      'KDDDDDDDDDKPPK',
-      'KPPPPPPPPPPPPK',
-      'KPPPPPPPPPPPK.',
-      '.KPPPPPPPPPPK.',
-      '..KPPPPPPPPK..',
-      '...KCCCCCCK...',
-      '...KCCCCCCK...',
-    ],
-    { K: '#4a0612', P: '#ffe2d6', L: '#ffffff', D: '#e0a090', C: '#ff2e4d' },
-  );
-  ctx.drawImage(fist, 6, 7);
-  return outlined(canvas, HUD_COLORS.ink, 1, 0);
-}
-
-/** A breaking wave curling over to the right (barge): a tapering spiral of water with foam on its crest. */
-function waveIcon(): HTMLCanvasElement {
-  const w = 24;
-  const h = 22;
-  const { canvas, ctx } = makeCanvas(w, h);
-  const cx = 13;
-  const cy = 10;
-  const dot = (x: number, y: number, r: number, color: string) => {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(x, y, Math.max(0.6, r), 0, Math.PI * 2);
-    ctx.fill();
-  };
-  const turn = Math.PI * 1.75;
-  const at = (t: number, dr = 0): [number, number] => {
-    const r = 9.6 - t * 1.15 + dr;
-    const a = Math.PI * 0.8 + t;
-    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
-  };
-  // The sea under the wave, then the curl, thick at its foot and thin at its tip.
-  ctx.fillStyle = '#1d6fe0';
-  ctx.fillRect(0, h - 5, w - 4, 5);
-  for (let t = 0; t <= turn; t += 0.03) {
-    const [x, y] = at(t);
-    dot(x, y, 3.4 - t * 0.42, '#2a8cff');
-  }
-  for (let t = 0.2; t <= turn - 0.4; t += 0.03) {
-    const [x, y] = at(t, -1.6);
-    dot(x, y, 1.1, '#6fc8ff');
-  }
-  hardenAlpha(canvas, 120);
-  // Foam along the crest.
-  ctx.fillStyle = '#ffffff';
-  for (let t = 0.35; t <= Math.PI * 1.2; t += 0.04) {
-    const [x, y] = at(t, 2.2 - t * 0.35);
-    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
-  }
-  const [tx, ty] = at(turn);
-  ctx.fillRect(Math.round(tx), Math.round(ty), 2, 2);
-  return outlined(canvas, HUD_COLORS.ink, 1, 0);
-}
-
-/**
- * The drawn radius of a touch button. The discs are drawn a little bigger
- * than their hit radius (TOUCH_BUTTONS' r, which the tests and Input use,
- * plus Input's 5px slack) so they read at the mockup's size; neighbouring
- * discs still keep a gap of a few pixels.
- */
-export function drawnRadius(b: TouchButton): number {
-  return b.r + (b.r >= 22 ? 1 : 3);
-}
-
-export interface ButtonArt {
-  up: HTMLCanvasElement;
-  down: HTMLCanvasElement;
-  /** Offset from the button centre to the sprites' top-left. */
-  offset: number;
-}
-
-/** A round button: a dark glassy disc in a coloured ring with its icon; the pressed sprite is lit and sunk 1px. */
-export function buttonArt(b: TouchButton, inside: HTMLCanvasElement | null = null): ButtonArt {
-  const color = `#${b.color.toString(16).padStart(6, '0')}`;
-  const icon =
-    b.id === 'carveLeft'
-      ? chevronLeft()
-      : b.id === 'carveRight'
-        ? mirrored(chevronLeft())
-        : b.id === 'forward'
-          ? chevronsUp()
-          : b.id === 'jump'
-            ? jumpIcon()
-            : b.id === 'attack'
-              ? fistIcon()
-              : waveIcon();
-  const glow = b.id === 'attack' || b.id === 'barge';
-  const pad = 3;
-  const r = drawnRadius(b);
-  const size = (r + pad) * 2;
-  const c = r + pad;
-  const make = (pressed: boolean) => {
-    const { canvas, ctx } = makeCanvas(size, size);
-    if (glow || pressed) ring(ctx, c, c, r + 3, 3, pressed ? '#ffffff' : color, pressed ? 0.45 : 0.3);
-    disc(ctx, c, c, r, HUD_COLORS.ink, 0.5);
-    const body = pressed ? mixHex(color, '#120c2a', 0.4) : glow ? mixHex(color, '#120c2a', 0.62) : '#141a33';
-    disc(ctx, c, c, r - 2, body, pressed ? 0.95 : glow ? 0.78 : 0.55);
-    // Glass: a lighter cap on the upper half.
-    ctx.globalAlpha = pressed ? 0.25 : 0.1;
-    ctx.fillStyle = '#ffffff';
-    for (let dy = -(r - 3); dy < -2; dy++) {
-      const half = Math.round(Math.sqrt((r - 3) * (r - 3) - (dy + 0.5) * (dy + 0.5)));
-      ctx.fillRect(c - half, c + dy, half * 2, 1);
-    }
-    ctx.globalAlpha = 1;
-    ring(ctx, c, c, r, 2, pressed ? '#ffffff' : color, pressed ? 1 : 0.85);
-    ring(ctx, c, c, r - 2, 1, HUD_COLORS.ink, 0.5);
-    const ix = Math.round(c - icon.width / 2 + (b.id === 'carveLeft' ? -1 : b.id === 'carveRight' ? 1 : 0));
-    // With a caption lettered on the lower rim, the icon moves up to make room.
-    const iy = Math.round(c - icon.height / 2) + (pressed ? 1 : 0) - (inside ? 5 : 0);
-    ctx.drawImage(icon, ix, iy);
-    if (inside) ctx.drawImage(inside, Math.round(c - inside.width / 2), Math.round(c + r - inside.height - 4) + (pressed ? 1 : 0));
-    return canvas;
-  };
-  return { up: make(false), down: make(true), offset: -c };
-}
-
-/** A caption pill: dark brush stroke with outlined white lettering, tinted edge per button. */
-export function captionPill(hud: Hud2D, text: string, edge: string): HTMLCanvasElement | null {
-  const label = hud.styledText(text, { stops: HUD_COLORS.white, outline: 1 });
-  if (!label) return null;
-  const w = label.width + 10;
-  const h = label.height + 3;
-  const pill = brushPanel(w, h, HUD_COLORS.panel, 0.85, {
-    slant: 2,
-    ragged: 2,
-    seed: text.length,
-    shade: edge,
-  });
-  const ctx = pill.getContext('2d') as Ctx;
-  ctx.drawImage(label, 5, 1);
-  return pill;
 }
 
 /** The pause button for touch screens: a small dark disc with two bars. */

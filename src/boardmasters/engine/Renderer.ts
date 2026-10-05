@@ -1,6 +1,5 @@
 import { CAMERA, FOG, IS_PORTRAIT, portraitViewHeight, RENDER_BLEED_MAX, RENDER_PIXEL_BUDGET, RENDER_SCALE, RENDER_SCALE_FORCED, RENDER_SCALES, VIEW } from '../game/constants';
 import { THREE } from './three';
-import { layoutTouchButtons } from './TouchButtons';
 
 /**
  * The 3D canvas and the 2D HUD canvas.
@@ -8,8 +7,8 @@ import { layoutTouchButtons } from './TouchButtons';
  * The HUD is drawn at the internal resolution (VIEW: 426x240, or 240 wide
  * and 426 to 540 tall upright, following the screen's aspect) and scaled up
  * with nearest-neighbour sampling to the largest fit in the safe area,
- * centred like the original game's FIT scaling: the HUD rectangle. Pointers,
- * touch buttons and the HUD layout all live in it; upright it spans the
+ * centred like the original game's FIT scaling: the HUD rectangle. Pointers
+ * and the HUD layout live in it; upright it spans the
  * screen top to bottom, so the top bar sits under the safe area's top edge
  * and the controls at the bottom.
  *
@@ -29,7 +28,7 @@ export class Renderer {
   readonly camera: THREE.PerspectiveCamera;
   readonly canvas: HTMLCanvasElement;
   readonly hudCanvas: HTMLCanvasElement;
-  /** The HUD's (internal) resolution, VIEW; pointers, touch buttons and the HUD layout use it. Upright, fit() may change the height. */
+  /** The HUD's (internal) resolution, VIEW; pointers and the HUD layout use it. Upright, fit() may change the height. */
   get width(): number {
     return VIEW.width;
   }
@@ -158,16 +157,14 @@ export class Renderer {
   }
 
   /**
-   * Upright: make the HUD `height` VIEW pixels tall, keep the camera's frame
-   * centred in it, and lay the touch buttons out again (HudView follows on
-   * its next draw).
+   * Upright: make the HUD `height` VIEW pixels tall and keep the camera's
+   * frame centred in it (HudView follows on its next draw).
    */
   private setViewHeight(height: number): void {
     if (height === VIEW.height && this.hudCanvas.height === height) return;
     VIEW.height = height;
     VIEW.frame.top = Math.round((height - VIEW.frame.height) / 2);
     this.hudCanvas.height = height;
-    layoutTouchButtons();
   }
 
   /** The world canvas's bleed past the camera's frame, in world pixels per side (layoutWorld fills it). */

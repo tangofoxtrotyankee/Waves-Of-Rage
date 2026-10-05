@@ -1,6 +1,8 @@
 # Waves of Rage 2: Boardmasters, technical architecture
 
-**Status: built as proposed; first playable prototype in the repository.**
+**Status: built as proposed and since reshaped into the original game's
+loop: an endless run with swipe and tap controls on phones, sharks and
+boats, and the shared top 10 (see the end of section 7).**
 The go-ahead was given on the recommendations below (Three.js, a second
 Vite page in this repository, 426x240, keyboard first with basic touch,
 code-built placeholder meshes). Sections 2 to 9 describe what now exists in
@@ -85,8 +87,9 @@ mechanical change for when a third consumer appears.
   sequel's title screen and results link back to `./`.
 - `server/index.mjs` serves any file in `dist/`; one line maps
   `/boardmasters` to `boardmasters.html` for a clean URL.
-- Shared high scores later: `/api/scores?mode=bm-sunset-bay`; add the modes
-  to `cleanMode()` in `server/scores.mjs`, one table per course.
+- Shared high scores: `/api/scores?mode=boardmasters` (the mode is in
+  `MODES` in `server/scores.mjs`), through the original game's
+  `ScoreService` and name prompt; one table for the sequel.
 
 Why not a second Phaser scene that hosts a Three canvas: two renderers in
 one page fight over the canvas, input and the frame loop, and the original
@@ -177,31 +180,42 @@ surfer (catching up from behind, easing off ahead, sprinting at the end);
 contact shoves both sideways. Collision is circles in track space, which is cheap and is all
 an arcade game needs.
 
-**Obstacle.** A skull bell buoy (tapered bell, cage top, skull decal) at fixed course positions;
-hitting it costs a heart and speed. Rocks, pilings, boats and sharks are
-the same interface with different meshes and behaviours. Boost gates
+**Hazards.** A skull bell buoy (tapered bell, cage top, skull decal) at
+fixed course positions; the shark (`entities/Shark.ts`: swims up the course
+at the rider at `SHARK.speed`, lunges sideways on a timer, lies low so a
+big jump clears it) and the lifeguard boat (`entities/Boat.ts`: crosses the
+course from either edge at `BOAT.speed`, drifting towards the rider, too
+tall to jump), both pooled and spawned when their generated spots come
+within a window ahead of the surfer. Hitting one costs health and speed
+(`HEALTH.buoy`, `shark`, `boat`); `Run.collectHazards` gathers them into
+one list each step for the rivals' steering and the contact rules, and a
+rival shoved into any of them is knocked out. Boost gates
 (`entities/Chevron.ts`, a small `>>` sign on a float) are the first
 pickup: the generator lays one every 110 to 190 m in a lane, and riding
 over it on the water gives a BOOST (ignoring the combo's cooldown), a
 little RAGE and `BOOST!`.
 
-**Course and race.** A race of `CourseSpec.length` metres (Sunset Bay
-2,000 m) against five rivals. `CourseGenerator` lays out ramps, troughs,
-buoy and gate spots deterministically from the seed a few hundred metres
-ahead of the surfer and drops what is behind; buoys and gates are pools of
-meshes placed at the spots and stop 60 m before the line. Buoys come
-thicker over the final third and everyone's pace rises with progress (up
-to +15 % at the line). `entities/FinishLine.ts` is the arch at the line
-(drawn nearer and smaller past 112 m so it shows from afar). `Run`
-records every crossing in order (`finishOrder`); the surfer's crossing is
-the `finished` state with `finishTime`, `place` and a place bonus
-(`RACE.placeBonus`). The best time, place and score per course persist on
-the device (`bm.race.<course id>`). Rivals hold near the surfer for most of
-the race and the fastest two sprint over the last 30 %. All in `RACE`.
+**Course and the endless run.** Sunset Bay goes on until the surfer wipes
+out, the original game's loop. `CourseGenerator` lays out ramps, troughs,
+buoy and gate spots, and from their unlock distances (`ENDLESS.boatsFrom`,
+`sharksFrom`) boat crossings and shark spots, deterministically from the
+seed a few hundred metres ahead of the surfer, dropping what is behind;
+buoys and gates are pools of meshes placed at the spots, sharks and boats
+wait in queues until their spawn window. Buoys and sharks come thicker
+with distance (tightest from `ENDLESS.tightMetres`) and everyone's pace
+rises with it (`Run.pace`: up to `ENDLESS.rampMax` more at `rampMetres`,
+the surfer's `targetSpeed` and the rivals' cruise alike). The score is the
+metres plus tricks and knockouts (`SCORING`); the device keeps the best
+score and its distance per course (`bm.best.<course id>`, the race
+prototype's `bm.race.<id>` score carried over), and the run posts to the
+shared table (`Run.offerScore`, after `scoreboard` has loaded). Rivals ride
+in a pack round the surfer (catching up from behind, easing off ahead,
+`ENDLESS.pack*`). On phones the hazards' gaps and the rivals' attack
+cooldowns are scaled up (`ENDLESS.touchHazardGap`, `touchAttackGap`).
 
 **Health.** `Run.health` is 0..100 (`HEALTH`): rivals' punches (12) and
-shoulder checks (18, both scaled by the rival's POWER), buoys (25), crashes
-(20) and bumps (1) drain it, halved in RAGE; landing air the surfer made,
+shoulder checks (18, both scaled by the rival's POWER), buoys (25), the
+boat (30), sharks (40), crashes (20) and bumps (1) drain it, halved in RAGE; landing air the surfer made,
 spins, grabs and rolls heal it. Short invulnerability after each hit. Zero
 is the wipeout and the race ends unfinished. Rivals have 100 too; the
 player's punch and barge take 50, a RAGE blow 100.
@@ -228,17 +242,18 @@ src/boardmasters/
     Renderer.ts                   Three renderer at 426x240, CSS FIT scaling, resize, WebGL 2 check
     PS1Material.ts                vertex snap, affine uv, Gouraud, fog
     Hud2D.ts                      pixel-font overlay canvas (shares public/assets/sprites/font.png)
-    Input.ts                      arrows/WASD, Space, X, Shift plus touch -> one action state
+    Input.ts                      arrows/WASD, Space, X, Shift plus the phone's gestures -> one action state
     Loop.ts                       fixed 60 Hz update, render each frame, pause on blur
   world/
     Ocean.ts                      heightfield mesh, oceanHeight(x, z, t), feature list
-    Course.ts                     course data and the Sunset Bay prototype course
+    Course.ts                     the endless Sunset Bay course generator
     Sky.ts                        dome, sun and rays, clouds
     Scenery.ts                    cliffs, palms, waterfalls, the pier
   entities/
     Surfer.ts                     track-space physics and a code-built low-poly surfer and board
     Rival.ts                      racing-line AI and contact
     Buoy.ts                       static obstacle
+    Shark.ts, Boat.ts             the moving hazards from the original game
     Chevron.ts                    boost gate
   game/
     Run.ts                        assembles a run: entities, collisions, DIST / SCORE / HEALTH
@@ -251,8 +266,8 @@ As built: about 1,700 lines of TypeScript and 90 lines of GLSL. New
 dependencies: `three` (runtime) and `@types/three` (dev), nothing else. The
 sequel's bundle is about 145 kB gzipped; the original game's is unchanged.
 Additions to the plan: `engine/Textures.ts` (runtime-painted 16/32 px
-textures), `engine/TouchButtons.ts` and `engine/immersive.ts`,
-`entities/FinishLine.ts` and `entities/Spray.ts` (one instanced mesh),
+textures), `engine/immersive.ts`, `entities/Spray.ts` (one instanced
+mesh),
 `game/characters.ts` (the seven characters' stats and colours plus the
 rival surfers), an attract mode on the title (the surfer rides on its own
 behind the logo), and a `?character=` switch.
@@ -280,7 +295,18 @@ riders with per-character looks and a procedural animator, the forgiving
 air spin, hit-stop, shake, flinches, knockout tumbles and splashes, the
 turquoise sea with whitewater, wakes and glitter, the cliffs and festival
 pier, the higher world resolution with full-bleed framing, and the
-mockup HUD and title spanning the phone screen.
+mockup HUD and title spanning the phone screen. Then, after the race
+prototype proved too hard on phones ("gameplay too difficult for mobile
+and button combo; make like the Waves of Rage 1"), the loop was brought
+back to the original game's: the race, its finish line, places, race
+clock, POS panel, course strip and the phone's button pad were removed;
+the run is endless with the pace rising by distance, sharks and the
+lifeguard boat came back as 3D hazards, the score is distance plus tricks
+and knockouts, the device's best and a shared top 10 (the original game's
+API, mode `boardmasters`, with its name prompt) replaced the best race,
+and phones play with gestures: a floating stick to carve, flicks to jump
+and barge, taps to punch (`engine/Input.ts`, `Run.gestureInput`).
+Combos stay on the keyboard only.
 
 ## 8. Mobile
 
@@ -296,21 +322,28 @@ mockup HUD and title spanning the phone screen.
   the camera keeps its 240x426 framing in the middle and the world bleeds
   past it. The gameplay mockup is portrait, so phones are a primary
   target, not an afterthought.
-- Touch: a pad of LEFT, UP and RIGHT under the left thumb (hold to carve
-  or pump) and JUMP, HIT and BRG under the right (`engine/TouchButtons.ts`).
-  A drag stick was tried first and was too hard to control; digital
-  buttons also give discrete presses, which feed the combo reader
-  (`game/Combos.ts`: RIGHT RIGHT UP is a barrel roll, UP UP a boost; the
-  table is where character signature moves go later).
+- Touch: the original game's scheme, no buttons. The first finger down is
+  a floating stick (the steer is its offset from an anchor that trails it,
+  so holding carves, dragging back reverses and lifting straightens), a
+  flick up jumps (a barrel roll in the air), a flick down barges (a grab
+  in the air), and a tap punches (a grab in the air); any finger may tap
+  or flick, so one thumb steers while the other fights. Swipes are
+  measured by travel since the last pause or reversal, not by speed, so a
+  slow device still reads a flick, and the stroke back after a flick is
+  not another flick. The pad with its combos (the first attempt, a drag
+  stick, and then digital buttons) was dropped after the phone playtest;
+  combos (`game/Combos.ts`) remain for the keyboard.
 
 ## 9. Testing
 
-`tests/boardmasters-e2e.mjs`, same harness as the original: start Vite,
-open `boardmasters.html` in headless Chromium with SwiftShader, read
-`window.bm` (dev only) and check: no console errors; the ocean mesh exists;
-the surfer's `z` increases; Left and Right change `x`; Space sets
-`airborne` then clears it; the rival and the buoy exist; the HUD text
-updates. `npm test` runs the API test and both browser tests.
+`tests/boardmasters-e2e.mjs`, same harness as the original: start the score
+API and Vite, open `boardmasters.html` in headless Chromium with
+SwiftShader, read `window.bm` (dev only) and check the run end to end (see
+docs/TESTING.md): movement, air and tricks, the hazards (buoys, sharks,
+the boat), the endless course and its pace, combat, health, RAGE, pause,
+the wipeout with the shared top 10 and the name prompt, the best on the
+title, and the phone page with its gestures. `npm test` runs the API test
+and both browser tests.
 
 ## 10. Roadmap: what comes next, and where it plugs in
 
@@ -327,7 +360,7 @@ before multiplying content. Sizes are rough line counts.
 | 4. Hazard interface and rival personality | `entities/Hazard.ts` (`x`, `z`, extents, `lethalToShoved`, `update`, `onPlayer`); `Buoy` implements it and `Run.hazards` replaces `buoys`; `RIVALS` rows gain an `ai` block (lane amplitude and frequency, catch-up, aggression) replacing the constants in `Rival.think`; `Run.standings()` for the results | `entities/`, `characters.ts`, `Run.ts` | ~150 |
 | 5. Characters | A `BOARDS` table (the eight boards from the sheet) referenced by `RiderSpec.board`; unlockables gated by `bm.unlocks` in storage (finish, knockouts, score); title and results drawing pulled out of `drawHud` into `game/Screens.ts`; TURN also scales `maxHeading` so it is felt | `characters.ts`, `Rider.setSpec`, `Run.ts` | ~150 |
 | 6. Pickups | `entities/Pickup.ts` implementing `Hazard` (`coin`, `health`, `speed`); the generator places them, in arcs over ramp apexes; the boost gate (`Chevron`) becomes the first row of the table | `Course.ts`, `Run.ts` | ~80 |
-| 7. Courses and hazards | `CourseSpec` gains swell, palette, storm and a hazard mix; `Ocean.setSwell`, `Sky.setPalette`; new hazards `Piling`, `Reef`, `Shark` (lunge ported from the original's `Shark.ts`), `Boat`, `JetSki extends Rival`; `?course=`; `bm-*` score modes in `server/scores.mjs` | `world/`, `entities/`, `main.ts`, server | ~350 |
+| 7. Courses and hazards | `CourseSpec` gains swell, palette, storm and a hazard mix; `Ocean.setSwell`, `Sky.setPalette`; new hazards `Piling`, `Reef`, `JetSki extends Rival` (the shark and the boat are in); `?course=`; a score mode per course in `server/scores.mjs` | `world/`, `entities/`, `main.ts`, server | ~300 |
 
 Deliberately deferred: an entity/component split (a third contact rule
 would justify it; today `Rider` and the `Hazard` interface cover the

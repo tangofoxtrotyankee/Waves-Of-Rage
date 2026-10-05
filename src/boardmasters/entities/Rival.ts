@@ -1,28 +1,29 @@
-import { clamp, smoothstep } from '../engine/math';
+import { clamp } from '../engine/math';
 import type { RiderSpec } from '../game/characters';
-import { COMBAT, PHYSICS, RACE } from '../game/constants';
+import { COMBAT, ENDLESS, PHYSICS } from '../game/constants';
 import { Rider, type RiderControl } from './Rider';
 
 const IDLE: RiderControl = { steer: 0, pump: false, brake: false, jump: false, attack: false, barge: false };
 
 /** What the run tells the rivals each step (one object, reused). */
 export interface RivalContext {
-  /** A race is on (the rules apply): rivals may attack the surfer. */
+  /** A run is on (the rules apply): rivals may attack the surfer. */
   fight: boolean;
   /** No other rival has just started an attack (the run staggers them, COMBAT.rivalStagger): this one may. */
   attackOpen: boolean;
-  /** The race's length in metres (the pace rises with progress, and the field races for the line at the end). */
-  length: number;
+  /** Everyone's pace: the multiplier on cruising speed for the distance ridden (Run.pace). */
+  pace: number;
+  /** How much longer than COMBAT.rivalCooldown a rival waits between attacks (phones: ENDLESS.touchAttackGap). */
+  attackGap: number;
 }
 
 /**
- * An AI rider. It follows a wavy racing line in its own lane, steers round
- * buoys, and rides ramps like anyone else (the physics launches it). It
- * races at its own pace (SPEED, rising with race progress like everyone's)
- * while near the surfer, catches up (pumping) when far behind and eases off
- * when far ahead so the pack stays in the race; over the last part of the
- * race the leaders stop waiting and the catch-up fades (RACE), so places
- * are earned. Rivals with enough POWER fight back: with an attack ready
+ * An AI rider. It follows a wavy line in its own lane, steers round the
+ * hazards (buoys, sharks, boats), and rides ramps like anyone else (the
+ * physics launches it). It rides at its own pace (SPEED, rising with the
+ * distance like everyone's) while near the surfer, catches up (pumping)
+ * when far behind and eases off when far ahead, so the pack stays with the
+ * surfer for the whole endless run (ENDLESS). Rivals with enough POWER fight back: with an attack ready
  * they close in alongside the surfer and throw a telegraphed punch (a long
  * wind-up the surfer can read, Rider.telegraphPunch) or a shoulder check,
  * on a cooldown of their own and staggered by the run so two rarely attack
@@ -43,11 +44,6 @@ export class Rival extends Rider {
   startedAttack = false;
   /** Closing in or keeping station beside the surfer for an attack (a bump meanwhile costs the surfer nothing). */
   stationing = false;
-  /** One of the field's fastest (the run picks them): it sprints for the line harder over the last part of the race (RACE.sprintPaceFast). */
-  sprinter = false;
-  /** Run time this rival crossed the finish line, or -1 (the run records it; a respawn keeps it). */
-  finishedAt = -1;
-
   constructor(spec: RiderSpec, readonly index: number) {
     super(spec);
     this.phase = index * 2.1;
@@ -98,19 +94,19 @@ export class Rival extends Rider {
   /**
    * This step's control. With a `slot` ([x, metres ahead of the player]),
    * the rival rides parked there instead (the title screen: no racing line,
-   * no attacks), still steering round buoys.
+   * no attacks), still steering round the hazards.
    */
-  think(player: Rider, buoys: { x: number; z: number }[], time: number, slot: readonly [number, number] | null, ctx: RivalContext): RiderControl {
+  think(player: Rider, hazards: readonly { x: number; z: number }[], time: number, slot: readonly [number, number] | null, ctx: RivalContext): RiderControl {
     this.now = time;
     this.startedAttack = false;
     this.stationing = false;
-    // The race over (or not begun): any attack under way is called off.
+    // The run over (or not begun): any attack under way is called off.
     if (!ctx.fight) this.cancelAttack();
     if (this.wiped) return IDLE;
     // Punched or barged: ride the shove out in a straight line rather than steering straight back (the reaction stays readable).
     if (time < this.shovedUntil + 0.3) return IDLE;
     let lane = slot ? slot[0] : 4.5 * Math.sin(this.z / 30 + this.phase) + this.laneOffset;
-    for (const b of buoys) {
+    for (const b of hazards) {
       const dz = b.z - this.z;
       if (dz > 0 && dz < 14 && Math.abs(b.x - this.x) < 2.4) lane = this.x + (this.x >= b.x ? 3 : -3);
     }
@@ -124,7 +120,7 @@ export class Rival extends Rider {
     const punching = this.attackPhase !== 'none';
     if (!punching) this.punchLane = Number.NaN;
     else if (Number.isNaN(this.punchLane)) this.punchLane = this.x; // a wind-up started from outside think holds where it is
-    // Ready to attack: a fighter, the race on, the surfer up and about, this rival on the water and in control, its cooldown over.
+    // Ready to attack: a fighter, the run on, the surfer up and about, this rival on the water and in control, its cooldown over.
     const ready =
       ctx.fight && ctx.attackOpen && this.fighter && !player.wiped && !player.knockedOut && !this.airborne && time >= this.stunnedUntil && time >= this.nextAttackAt && !punching && !this.checking;
     if (ready && Math.abs(dx) < COMBAT.rivalReachX && Math.abs(dz) < COMBAT.rivalReachZ) {
@@ -136,7 +132,7 @@ export class Rival extends Rider {
         this.checkTellUntil = time + COMBAT.rivalCheckTell;
         this.checkingUntil = this.checkTellUntil + COMBAT.rivalCheckSeconds;
       }
-      this.nextAttackAt = time + COMBAT.rivalCooldown[0] + Math.random() * COMBAT.rivalCooldown[1];
+      this.nextAttackAt = time + (COMBAT.rivalCooldown[0] + Math.random() * COMBAT.rivalCooldown[1]) * ctx.attackGap;
       this.startedAttack = true;
     }
     const station = this.attackPhase !== 'none';
@@ -151,27 +147,24 @@ export class Rival extends Rider {
     else if (checking) lane = player.x;
     else if (station || seeking) lane = player.x - side * COMBAT.rivalStation;
     else if (Math.abs(dz) < 3 && Math.abs(lane - player.x) < 2.2) lane = player.x - side * 2.2; // otherwise give the surfer room (a bump costs both)
-    // Racing, it keeps off the whitewater at the edges; attacking, it follows the surfer nearly to the edge (no safe haven there).
+    // Riding, it keeps off the whitewater at the edges; attacking, it follows the surfer nearly to the edge (no safe haven there).
     const edge = PHYSICS.trackHalfWidth - (this.stationing ? 0.5 : 1.5);
     lane = clamp(lane, -edge, edge);
     // An attack steers harder, so the check's swing out and lunge in read as moves.
     const steer = clamp((lane - this.x) * (checking ? 0.7 : 0.3) - this.heading * 1.2, -1, 1);
-    const progress = clamp(this.z / ctx.length, 0, 1);
-    const sprint = smoothstep(RACE.sprintFrom, 1, progress);
     if (this.stationing) {
       this.targetSpeed = player.speed + clamp(dz * 1.2, -3, 3);
     } else {
-      // Its own pace near the surfer; catching up from far back, easing off far ahead (less and less as the line nears).
-      const cruise = PHYSICS.baseSpeed * this.stats.speed * (1 + RACE.speedRampMax * progress) * (1 + 0.05 * Math.sin(time * 0.6 + this.phase));
-      const catchUp = RACE.catchUp + (RACE.catchUpFinal - RACE.catchUp) * sprint;
-      const back = clamp((dz - RACE.packBehind) * RACE.catchUpRate, 0, catchUp);
-      const ease = clamp((-dz - RACE.packAhead) * RACE.easeOffRate, 0, RACE.easeOff) * (1 - sprint);
-      this.targetSpeed = cruise + back - ease + (this.sprinter ? RACE.sprintPaceFast : RACE.sprintPace) * sprint;
+      // Its own pace near the surfer; catching up from far back, easing off far ahead.
+      const cruise = PHYSICS.baseSpeed * this.stats.speed * ctx.pace * (1 + 0.05 * Math.sin(time * 0.6 + this.phase));
+      const back = clamp((dz - ENDLESS.packBehind) * ENDLESS.catchUpRate, 0, ENDLESS.catchUp);
+      const ease = clamp((-dz - ENDLESS.packAhead) * ENDLESS.easeOffRate, 0, ENDLESS.easeOff);
+      this.targetSpeed = cruise + back - ease;
     }
     // The lunge: the barge goes in once alongside (and the check is over: no steering on into the surfer after it).
     const barge = checking && !telling && Math.abs(dx) < 1.4 && Math.abs(dz) < 2.2;
     if (barge) this.checkingUntil = 0;
-    // Far behind, it pumps to get back in the race (only from further back as the line nears).
-    return { steer, pump: dz > RACE.packBehind + 20 * sprint, brake: false, jump: false, attack: false, barge };
+    // Far behind, it pumps to get back to the pack.
+    return { steer, pump: dz > ENDLESS.packBehind, brake: false, jump: false, attack: false, barge };
   }
 }

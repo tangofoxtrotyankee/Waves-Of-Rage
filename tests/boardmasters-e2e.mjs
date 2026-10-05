@@ -1,16 +1,21 @@
 /**
  * End-to-end smoke test for Waves of Rage 2: Boardmasters.
  *
- * Starts a Vite dev server, opens boardmasters.html in headless Chromium
- * (SwiftShader provides WebGL 2) and drives the prototype through its
- * states, reading the dev-only `window.bm` handle. Run with `npm test`. Set
- * CHROMIUM_PATH to use an existing browser binary instead of Playwright's.
+ * Starts the score API and a Vite dev server (proxying /api to it), opens
+ * boardmasters.html in headless Chromium (SwiftShader provides WebGL 2) and
+ * drives the prototype through its states, reading the dev-only `window.bm`
+ * handle. Run with `npm test`. Set CHROMIUM_PATH to use an existing browser
+ * binary instead of Playwright's.
  */
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const PORT = Number(process.env.BM_PORT ?? 5201);
+const API_PORT = Number(process.env.BM_API_PORT ?? 8793);
 const URL = `http://127.0.0.1:${PORT}/boardmasters.html`;
 // Spawn Vite's own script (not the npx wrapper) so killing it really stops the server.
 const VITE = fileURLToPath(new globalThis.URL('../node_modules/vite/bin/vite.js', import.meta.url));
@@ -33,9 +38,13 @@ async function waitForServer(url, ms) {
   return false;
 }
 
-const server = spawn(process.execPath, [VITE, '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+// The score API on a spare port with a throwaway data dir (the sequel's shared top 10); Vite proxies /api to it.
+const dataDir = await mkdtemp(join(tmpdir(), 'wor-bm-e2e-'));
+const api = spawn(process.execPath, ['server/index.mjs'], { env: { ...process.env, PORT: String(API_PORT), DATA_DIR: dataDir, HOST: '127.0.0.1' }, stdio: 'ignore' });
+const server = spawn(process.execPath, [VITE, '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], { env: { ...process.env, API_PORT: String(API_PORT) }, stdio: 'ignore' });
 let browser;
 try {
+  if (!(await waitForServer(`http://127.0.0.1:${API_PORT}/api/health`, 20000))) throw new Error('score API did not start');
   if (!(await waitForServer(URL, 30000))) throw new Error('dev server did not start');
 
   browser = await chromium.launch({
@@ -76,23 +85,29 @@ try {
     }
     return out;
   };
-  const hold = async (key, ms) => {
-    await page.keyboard.down(key);
-    await wait(ms);
-    await page.keyboard.up(key);
-  };
   // Wait for this much GAME time (the run clock).
   const gameWait = (seconds) => ev(() => window.bm.run.time).then((t0) => page.waitForFunction((end) => window.bm.run.time >= end, t0 + seconds, { timeout: 30000, polling: 20 }).catch(() => {}));
-  // Rivals fight back: for the checks that are not about that, hold their attacks (a restart lets them fight again) and keep them clear of the surfer.
-  const calm = () => ev(() => {
-    const r = window.bm.run;
-    r.rivals.forEach((v, k) => {
-      v.holdChecks(1e9);
-      if (!v.knockedOut && Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 4.5, r.surfer.z - 60 - k * 5, r.ocean);
-    });
+  // No hazard in the way of a check that is not about hazards: a buoy, shark or boat clipped meanwhile would cost health the check is not about.
+  const clearHazards = () => ev(() => {
+    const r = window.bm.run; const z = r.surfer.z;
+    for (const b of r.buoys) if (b.active && b.z > z - 5 && b.z < z + 120) b.retire();
+    for (const s of r.sharks) if (s.active) s.retire();
+    for (const b of r.boats) if (b.active) b.retire();
+    r.pendingSharks = r.pendingSharks.filter((s) => s.z > z + 400);
+    r.pendingBoats = r.pendingBoats.filter((s) => s.z > z + 400);
   });
-  // No course buoy in the way of a trick check: a buoy clipped in the air would cost health that the check is not about.
-  const clearAhead = () => ev(() => { const r = window.bm.run; for (const b of r.buoys) if (b.active && b.z > r.surfer.z - 5 && b.z < r.surfer.z + 80) b.retire(); });
+  // Rivals fight back: for the checks that are not about that, hold their attacks (a restart lets them fight again) and keep them clear of the surfer.
+  const calm = async () => {
+    await ev(() => {
+      const r = window.bm.run;
+      r.rivals.forEach((v, k) => {
+        v.holdChecks(1e9);
+        if (!v.knockedOut && Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 4.5, r.surfer.z - 60 - k * 5, r.ocean);
+      });
+    });
+    await clearHazards();
+  };
+  const clearAhead = clearHazards;
 
   // --- boot and title ---
   check('page boots with the dev handle and the HUD font', booted);
@@ -156,7 +171,7 @@ try {
     ahead: window.bm.run.generator.generatedTo - window.bm.run.surfer.z,
     oceanMesh: !!window.bm.run.ocean.mesh.geometry,
   }));
-  check('five rivals ride the course (a field of six)', world.rivals === 5 && world.rivalZ > 10 && Math.abs(world.rivalZ - (await surfer()).z) < 150, `rival z=${world.rivalZ.toFixed(1)}`);
+  check('five rivals ride along (a pack of six)', world.rivals === 5 && world.rivalZ > 10 && Math.abs(world.rivalZ - (await surfer()).z) < 150, `rival z=${world.rivalZ.toFixed(1)}`);
   // The brief's other items: a follow camera, water that varies as terrain, a non-lethal hazard.
   const cam = await ev(() => { const c = window.bm.renderer.camera.position; const s = window.bm.run.surfer; return { behind: s.z - c.z, above: c.y - s.y, beside: Math.abs(c.x - s.x) }; });
   check('the camera follows from behind and above', cam.behind > 3 && cam.behind < 7 && cam.above > 0.8 && cam.beside < 3, JSON.stringify(cam));
@@ -172,9 +187,84 @@ try {
     await buoyAhead(0);
     buoyHit = await until(() => window.bm.run.health === 75, 2000);
   }
-  check('a buoy hit costs 25 health and the race goes on', buoyHit && (await state()) === 'playing', `health ${await ev(() => window.bm.run.health)}`);
+  check('a buoy hit costs 25 health and the run goes on', buoyHit && (await state()) === 'playing', `health ${await ev(() => window.bm.run.health)}`);
   await wait(1500);
-  check('position is somewhere in the field of six', await ev(() => window.bm.run.rank >= 1 && window.bm.run.rank <= 6));
+
+  // --- sharks and the lifeguard boat (back from the original game) ---
+  // A shark placed ahead swims up the course at the surfer and costs 40 when it gets them.
+  let sharkHit = null;
+  for (let tries = 0; tries < 4 && !sharkHit; tries++) {
+    await grounded();
+    await calm();
+    const before = await ev(() => { const r = window.bm.run; const s = r.surfer; s.heading = 0; s.shoveVx = 0; r.health = 100; r.invulnerableUntil = 0; const sh = r.sharks[0]; sh.place(s.x, s.z + 14, r.time); sh.nextLungeAt = 1e9; return { z: sh.z, t: r.time }; });
+    const got = await until(() => window.bm.run.health === 60, 2500);
+    const after = await ev(() => ({ z: window.bm.run.sharks[0].z, t: window.bm.run.time, words: window.bm.run.floats.map((f) => f.text) }));
+    if (got) sharkHit = { swam: before.z - after.z, seconds: after.t - before.t, words: after.words };
+  }
+  check('a shark swims at the surfer and a shark hit costs 40 (SHARK!)', !!sharkHit && sharkHit.swam > 0.5 && sharkHit.words.includes('SHARK!'), JSON.stringify(sharkHit));
+  await wait(1200);
+  // The boat crosses the course sideways and costs 30; it cannot be jumped (a jump's height is under its clearance).
+  let boatHit = null;
+  for (let tries = 0; tries < 4 && !boatHit; tries++) {
+    await grounded();
+    await calm();
+    const before = await ev(() => { const r = window.bm.run; const s = r.surfer; s.heading = 0; s.shoveVx = 0; r.health = 100; r.invulnerableUntil = 0; const bt = r.boats[0]; bt.place(s.z + 9, 1); bt.x = s.x - 6; return { x: bt.x }; });
+    await page.keyboard.press('Space'); // a jump does not clear it
+    const got = await until(() => window.bm.run.health === 70, 2500);
+    const after = await ev(() => ({ x: window.bm.run.boats[0].x, words: window.bm.run.floats.map((f) => f.text) }));
+    if (got) boatHit = { crossed: after.x - before.x, words: after.words };
+  }
+  check('the lifeguard boat crosses the course and a boat hit costs 30 even over a jump (BOAT!)', !!boatHit && boatHit.crossed > 1 && boatHit.words.includes('BOAT!'), JSON.stringify(boatHit));
+  await calm();
+  await ev(() => { window.bm.run.health = 100; });
+  await wait(600);
+  // A rival shoved into a shark is out of the run (SHARK FOOD +750).
+  let sharkFood = null;
+  for (let tries = 0; tries < 4 && !sharkFood; tries++) {
+    await grounded();
+    await calm();
+    const before = await ev(() => {
+      const r = window.bm.run; const s = r.surfer; const v = r.rivals[1];
+      s.heading = 0; s.shoveVx = 0; r.health = 100;
+      v.reset(s.x - 1.0, s.z + 0.3, r.ocean); v.health = 100;
+      // The shark a little ahead, so the rival (sliding to -x from the barge) meets it as the two close.
+      const sh = r.sharks[0]; sh.place(s.x - 2.6, s.z + 5.5, r.time); sh.nextLungeAt = 1e9;
+      return { score: r.score, kos: r.knockouts };
+    });
+    await page.keyboard.press('Shift'); // the barge shoves the rival away from the surfer: to -x, into the shark
+    const got = await until(() => window.bm.run.rivals[1].knockedOut, 1500);
+    const after = await ev(() => ({ score: window.bm.run.score, kos: window.bm.run.knockouts, words: window.bm.run.floats.map((f) => f.text) }));
+    if (got && after.words.some((w) => w.startsWith('SHARK FOOD'))) sharkFood = { gained: after.score - before.score, kos: after.kos - before.kos, words: after.words };
+  }
+  check('a rival barged into a shark is knocked out for 750 (SHARK FOOD)', !!sharkFood && sharkFood.gained >= 750 && sharkFood.kos >= 1, JSON.stringify(sharkFood));
+  await wait(800);
+
+  // --- the course: sharks and boats come from their unlock distances, and everyone's pace rises with distance ---
+  await calm();
+  const far = await ev(() => {
+    const r = window.bm.run; const s = r.surfer;
+    const pace0 = r.pace;
+    s.z = 1900; s.x = 0; s.heading = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0;
+    return { pace0 };
+  });
+  await gameWait(1.5);
+  const farWorld = await ev(() => {
+    const r = window.bm.run;
+    return {
+      pace: +r.pace.toFixed(2),
+      target: +r.surfer.targetSpeed.toFixed(1),
+      distance: Math.round(r.distance),
+      sharksAhead: r.sharks.filter((s) => s.active).length + r.pendingSharks.length,
+      boatsAhead: r.boats.filter((b) => b.active).length + r.pendingBoats.length,
+      generatedTo: Math.round(r.generator.generatedTo),
+      rivalPace: r.rivals.map((v) => +(v.targetSpeed ?? 0).toFixed(1)),
+    };
+  });
+  check('the course goes on past 2,000 m with sharks and boats ahead, and the pace is up 70% by 1,800 m', far.pace0 < 1.1 && farWorld.pace === 1.7 && farWorld.target > 20 && farWorld.generatedTo > 2100 && farWorld.sharksAhead > 0 && farWorld.boatsAhead > 0, JSON.stringify({ far, farWorld }));
+  // Back to the start's pace for the rest (at 1.7x everyone launches off every crest, which is not what the next checks are about).
+  await ev(() => window.bm.run.start());
+  await gameWait(0.5);
+  await calm();
 
   // --- combat: a rival beside the surfer, one punch (50) from a knockout ---
   // reset() puts the rival on the water with no velocity; setting x/z/y directly leaves a huge surface velocity that launches it.
@@ -376,8 +466,9 @@ try {
   const halfSpin = async () => {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
-      // No course buoy in the way: a buoy clipped on the jump would be a second hit, not this crash.
-      await ev(() => { const r = window.bm.run; r.lastLanding = null; r.invulnerableUntil = 0; for (const b of r.buoys) if (b.active && b.z > r.surfer.z - 5 && b.z < r.surfer.z + 80) b.retire(); });
+      // No hazard in the way: one clipped on the jump would be a second hit, not this crash.
+      await clearAhead();
+      await ev(() => { const r = window.bm.run; r.lastLanding = null; r.invulnerableUntil = 0; });
       await page.keyboard.press('Space'); await wait(60);
       if (!(await surfer()).airborne) { await wait(300); continue; }
       await page.keyboard.down('ArrowLeft');
@@ -400,7 +491,7 @@ try {
   check('a 180 held into the landing is a bad landing: no points, 20 health lost', !!crashed && !crashed.clean && crashed.points === 0 && hpAfter === hp - 20, `${JSON.stringify(crashed)} health ${hp}->${hpAfter}`);
   await ev(() => { window.bm.run.health = 100; });
   await wait(900);
-  // A short tap of the steer in mid-air (a phone's digital button) builds only a little spin, which settles back upright.
+  // A short tap of the steer in mid-air builds only a little spin, which settles back upright.
   const tapInAir = async () => {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
@@ -494,8 +585,8 @@ try {
     else await wait(300);
   }
   check('a spin held through big air lands as a clean 360', !!held360 && held360.landing.clean && Math.round(held360.landing.spinDeg / 180) === 2 && held360.landing.points >= 850 && held360.health > 80, JSON.stringify(held360));
-  // Weaving with quick carve taps (a phone's CARVE buttons): crests throw the rider into the air on their own, and a tap
-  // made in one of those hops must never spin it into a crooked landing (no JUMP pressed at all).
+  // Weaving with quick carve taps: crests throw the rider into the air on their own, and a tap made in one of those
+  // hops must never spin it into a crooked landing (no JUMP pressed at all).
   await grounded();
   await ev(() => {
     const run = window.bm.run;
@@ -505,7 +596,8 @@ try {
   });
   let hops = 0;
   for (let i = 0; i < 24; i++) {
-    await ev(() => { const r = window.bm.run; r.health = 100; for (const b of r.buoys) if (b.active && Math.abs(b.z - r.surfer.z) < 80) b.retire(); r.rivals.forEach((v, k) => { if (Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 2.5, r.surfer.z - 60 - k * 5, r.ocean); }); });
+    await ev(() => { const r = window.bm.run; r.health = 100; r.rivals.forEach((v, k) => { if (Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 2.5, r.surfer.z - 60 - k * 5, r.ocean); }); });
+    await clearHazards();
     const key = i % 2 === 0 ? 'ArrowLeft' : 'ArrowRight';
     await page.keyboard.down(key); await wait(350);
     if ((await surfer()).airborne) hops++;
@@ -513,22 +605,24 @@ try {
   }
   const crooked = await ev(() => { window.bm.run.resolveLanding = window.__resolveLanding; return window.__crooked; });
   check('weaving with carve taps never lands crooked (no spin crashes off crest hops)', crooked.length === 0, `${JSON.stringify(crooked)}, airborne at ${hops} of 24 taps`);
-  // The course's own buoys are still out there; and these landings feed the RAGE meter, which the RAGE check wants empty and idle.
+  // The course's own hazards are still out there; and these landings feed the RAGE meter, which the RAGE check wants empty and idle.
   await ev(() => { const r = window.bm.run; r.health = 100; r.rage = 0; r.rageUntil = 0; });
   await wait(1500);
 
   // --- RAGE: a knockout on a nearly full meter starts it ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(500); }
+  await calm();
   await ev(() => { window.bm.run.rage = 0.95; window.bm.run.health = 100; });
   const rageStrike = await strike(3, 1.0, 50, 'x');
   check('a knockout on a full meter starts RAGE', await ev(() => window.bm.run.raging === true && window.bm.run.rage > 0.9), `strike=${JSON.stringify(rageStrike)} ${await ev(() => { const r = window.bm.run; const s = r.surfer; return JSON.stringify({ state: r.state, kos: r.knockouts, health: r.health, texts: r.floating.map((f) => f.text), stun: +(s.stunnedUntil - r.time).toFixed(2), air: s.airborne, z: +s.z.toFixed(0), speed: +s.speed.toFixed(1) }); })}`);
 
-  // --- combos: RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
+  // --- combos (keyboard): RIGHT RIGHT UP barrel-rolls, UP UP boosts ---
   if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await wait(200); }
   // Retried: a roll cut short by a rising face (under half a second) is not scored, and the next flight would be read instead.
   let rolled = null;
   for (let tries = 0; tries < 5 && !(rolled && rolled.rolled); tries++) {
     await grounded();
+    await clearAhead();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.surfer.rollProgress = 0; });
     await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
     await wait(80);
@@ -551,46 +645,22 @@ try {
   await page.keyboard.press('Escape'); await wait(150);
   check('Escape pauses', (await state()) === 'paused');
   const frozen = () => ev(() => { const r = window.bm.run; return { z: r.surfer.z, wake: r.wake.mesh.geometry.drawRange.count, spray: r.spray.mesh.count, floats: r.floats.map((f) => f.age).join() }; });
-  const clocks = () => ev(() => ({ time: window.bm.run.time, race: window.bm.run.raceTime }));
   const atPause = await frozen();
-  const clockAtPause = await clocks();
+  const clockAtPause = await ev(() => window.bm.run.time);
   // 40 frames of the game loop (counted, not timed: the run clock itself holds while paused).
   await ev(() => new Promise((resolve) => {
     const r = window.bm.run; const step = Object.getPrototypeOf(r).update; let n = 0;
     r.update = function (dt) { step.call(this, dt); if (++n >= 40) { delete r.update; resolve(); } };
   }));
   const afterPause = await frozen();
-  const clockAfterPause = await clocks();
+  const clockAfterPause = await ev(() => window.bm.run.time);
   // The wakes, the spray and the words hold too (they used to age away behind the PAUSED panel).
   check('nothing moves while paused', JSON.stringify(atPause) === JSON.stringify(afterPause), `${JSON.stringify(atPause)} -> ${JSON.stringify(afterPause)}`);
-  check('the run clock and the race time hold while paused', clockAfterPause.time === clockAtPause.time && clockAfterPause.race === clockAtPause.race, JSON.stringify({ clockAtPause, clockAfterPause }));
+  check('the run clock holds while paused', clockAfterPause === clockAtPause, JSON.stringify({ clockAtPause, clockAfterPause }));
   await page.keyboard.press('Space'); await wait(150);
   check('Space resumes', (await state()) === 'playing');
   check('the course is generated ahead with buoys and ramps', world.buoys > 3 && world.ramps > 3 && world.ahead > 250, `${world.buoys} buoys, ${world.ramps} ramps, ${world.ahead.toFixed(0)} m ahead`);
   check('the ocean mesh exists', world.oceanMesh);
-
-  // --- wipeout: put a buoy in the surfer's path with 20 health left (RAGE would smash it, so end it first) ---
-  await ev(() => { window.bm.run.rageUntil = 0; });
-  await wait(100);
-  await calm();
-  await ev(() => { window.bm.run.health = 20; });
-  let wipedOut = false;
-  for (let tries = 0; tries < 4 && !wipedOut; tries++) {
-    await grounded();
-    await ev(() => { window.bm.run.invulnerableUntil = 0; window.bm.run.rageUntil = 0; });
-    await buoyAhead(1);
-    wipedOut = await until(() => window.bm.run.state === 'wipeout', 2000);
-  }
-  check('zero health wipes out: a buoy hit with 20 health left', wipedOut && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
-  // An earlier wipeout in this page may already hold a better score; either way the saved best covers this one. No finish yet: no time or place.
-  const best = await ev(() => ({ newBest: window.bm.run.newBest, score: Math.floor(window.bm.run.score), saved: JSON.parse(localStorage.getItem('waves-of-rage.bm.race.sunset-bay') || 'null') }));
-  check('a wipeout keeps the best score for the course (no time or place without a finish)', !!best.saved && best.saved.score > 0 && best.saved.time === null && best.saved.place === null && (best.newBest || best.saved.score >= best.score), JSON.stringify(best));
-  await page.keyboard.press('Space');
-  await wait(200);
-  check('results ignore input at first', (await state()) === 'wipeout');
-  await until(() => window.bm.run.stateTime > 1.7);
-  await page.keyboard.press('Space');
-  check('Space restarts from the results', await until(() => window.bm.run.state === 'playing') && (await ev(() => window.bm.run.health)) === 100 && (await surfer()).z < 20);
 
   // --- boost gates: ride over the chevrons for a BOOST ---
   await calm();
@@ -613,89 +683,71 @@ try {
   const gateAfter = await ev((z) => ({ taken: !window.bm.run.chevrons.some((c) => c.active && c.z === z), texts: window.bm.run.floating.map((f) => f.text) }), gate ? gate.z : -1);
   check('riding over a boost gate gives a BOOST and takes the gate', gateBoost && gateAfter.taken && gateAfter.texts.includes('BOOST!'), JSON.stringify({ gate, gateAfter }));
 
-  // --- the finish line: the course near it ---
+  // --- wipeout: put a buoy in the surfer's path with 20 health left (RAGE would smash it, so end it first) ---
+  await ev(() => { window.bm.run.rageUntil = 0; });
+  await wait(100);
   await calm();
-  await ev(() => { const r = window.bm.run; const s = r.surfer; s.z = r.course.length - 200; s.x = 0; s.heading = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0; r.health = 100; });
-  await gameWait(0.3);
-  const nearEnd = await ev(() => {
-    const r = window.bm.run;
-    const L = r.course.length;
-    return {
-      L,
-      line: r.finishLine.z,
-      generatedTo: Math.round(r.generator.generatedTo),
-      lateBuoys: r.generator.buoys.filter((b) => b.z > L - 60).length + r.buoys.filter((b) => b.active && b.z > L - 60).length,
-      lateGates: r.chevrons.filter((c) => c.active && c.z > L - 60).length,
-      buoysBefore: r.buoys.filter((b) => b.active && b.z > r.surfer.z && b.z <= L - 60).length,
-      rampsAfter: r.generator.features.filter((f) => f.kind === 'ramp' && f.z > L).length,
-      callout: r.callout && r.callout.text,
-    };
-  });
-  check('the callout sweeps in as the line nears (the latest passed: FINAL STRETCH at 200 m to go)', nearEnd.callout === 'FINAL STRETCH', JSON.stringify(nearEnd));
-  check('the finish line stands at 2,000 m; buoys and gates stop 60 m short of it, ramps run on past it', nearEnd.L === 2000 && nearEnd.line === nearEnd.L && nearEnd.generatedTo > nearEnd.L && nearEnd.lateBuoys === 0 && nearEnd.lateGates === 0 && nearEnd.buoysBefore > 0 && nearEnd.rampsAfter > 0, JSON.stringify(nearEnd));
-
-  // --- crossing it: two rivals just ahead cross first and the rest are far behind, so the surfer finishes 3rd ---
-  let crossed = null;
-  for (let tries = 0; tries < 3 && !(crossed && crossed.state === 'finished'); tries++) {
-    if ((await state()) !== 'playing') { await ev(() => window.bm.run.start()); await gameWait(0.3); await calm(); }
+  await ev(() => { window.bm.run.health = 20; });
+  let wipedOut = false;
+  for (let tries = 0; tries < 4 && !wipedOut; tries++) {
     await grounded();
-    const before = await ev(() => {
-      const r = window.bm.run; const s = r.surfer; const L = r.course.length;
-      s.z = L - 40; s.x = 0; s.heading = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0; s.speed = 14;
-      r.health = 100; r.invulnerableUntil = 0;
-      r.rivals.forEach((v, k) => { v.holdChecks(1e9); if (k < 2) v.reset(k === 0 ? -6 : 6, L - 8, r.ocean); else v.reset(-9 + k * 4, L - 150, r.ocean); });
-      return { score: r.score };
-    });
-    await until(() => window.bm.run.state !== 'playing', 20000);
-    crossed = await ev(() => { const r = window.bm.run; return { state: r.state, place: r.place, time: r.finishTime, raceTime: r.raceTime, bonus: r.placeBonus, score: r.score, order: r.finishOrder.map((f) => (f.player ? '*' : '') + f.name), newBest: r.newBest, callout: r.callout && r.callout.text }; });
-    crossed.before = before.score;
+    await ev(() => { window.bm.run.invulnerableUntil = 0; window.bm.run.rageUntil = 0; });
+    await buoyAhead(1);
+    wipedOut = await until(() => window.bm.run.state === 'wipeout', 2000);
   }
-  check('the surfer crosses the line: finished, 3rd behind the two rivals over first, with the race time', !!crossed && crossed.state === 'finished' && crossed.place === 3 && crossed.order[2] === '*SAM' && crossed.time > 1 && crossed.raceTime === crossed.time, JSON.stringify(crossed));
-  await gameWait(0.3);
-  const fireworks = await ev(() => window.bm.run.finishLine.fireworks.visible);
-  check('FINISH! is called over the line and the fireworks go up', !!crossed && crossed.callout === 'FINISH!' && fireworks, JSON.stringify({ callout: crossed && crossed.callout, fireworks }));
-  check('the place bonus (800 for 3rd) is added to the score', !!crossed && crossed.bonus === 800 && crossed.score >= crossed.before + 800, JSON.stringify(crossed));
-  await gameWait(0.5);
-  check('the race clock stops at the line', !!crossed && (await ev(() => window.bm.run.raceTime)) === crossed.time);
-  // Over the line the rules are off: a buoy in the surfer's path costs nothing and the score holds.
-  const afterLine = await ev(() => { const r = window.bm.run; const s = r.surfer; r.buoys[0].place(s.x, s.z + 4); return { health: r.health, score: r.score }; });
-  await gameWait(1);
-  const laterLine = await ev(() => ({ health: window.bm.run.health, score: window.bm.run.score, state: window.bm.run.state }));
-  check('after the finish nothing costs health or scores', laterLine.state === 'finished' && laterLine.health === afterLine.health && laterLine.score === afterLine.score, JSON.stringify({ afterLine, laterLine }));
-  const savedRace = await ev(() => JSON.parse(localStorage.getItem('waves-of-rage.bm.race.sunset-bay') || 'null'));
-  check('the best place and time are kept for the course', !!crossed && crossed.newBest && !!savedRace && savedRace.place === 3 && Math.abs(savedRace.time - crossed.time) < 1e-6 && savedRace.score >= Math.floor(crossed.score), JSON.stringify(savedRace));
+  check('zero health wipes out: a buoy hit with 20 health left', wipedOut && (await ev(() => window.bm.run.health)) === 0, `state=${await state()}`);
+  const best = await ev(() => ({ newBest: window.bm.run.newBest, score: Math.floor(window.bm.run.score), distance: Math.floor(window.bm.run.distance), saved: JSON.parse(localStorage.getItem('waves-of-rage.bm.best.sunset-bay') || 'null') }));
+  check('a wipeout keeps the best score and its distance for the course on the device', !!best.saved && best.newBest && best.saved.score === best.score && best.saved.distance === best.distance, JSON.stringify(best));
   await page.keyboard.press('Space');
   await wait(200);
-  check('the finish results ignore input at first', (await state()) === 'finished');
-  // The rivals race on after the surfer finishes: the three far behind cross later, in order.
-  let allOver = false;
-  for (let i = 0; i < 40 && !allOver; i++) {
-    allOver = await ev(() => window.bm.run.finishOrder.length === 6);
-    if (!allOver) await gameWait(1.5);
-  }
-  const order = await ev(() => window.bm.run.finishOrder.map((f) => ({ name: f.name, time: +f.time.toFixed(2) })));
-  check('the rivals race on and cross after the surfer, recorded in order', allOver && order.every((f, i) => i === 0 || f.time >= order[i - 1].time) && order[2].name === 'SAM', JSON.stringify(order));
-  await until(() => window.bm.run.stateTime > 2.6); // RACE.resultsSeconds: the results take input
-  // --- a restart after a long run brings the shore back to the start line ---
-  const spansFar = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
+  check('results ignore input at first', (await state()) === 'wipeout');
+  // The shared table (the API is up, with an empty table): the run qualifies, so the name prompt opens; the name goes on the table.
+  const prompt = await page.waitForSelector('#name-entry', { timeout: 8000 }).then(() => true, () => false);
+  const loaded = await ev(() => window.bm.run.scoreboard.source);
+  check('a run that makes the shared top 10 asks for a name once the results take input', prompt && loaded === 'online' && (await ev(() => window.bm.run.entering)), `prompt ${prompt} source ${loaded}`);
+  await page.keyboard.press('Space'); // typing in the prompt must not restart
+  await wait(200);
+  check('Space while typing a name does not restart', (await state()) === 'wipeout');
+  await page.fill('#ne-input', 'kai 1');
+  await page.click('#name-entry button[type=submit]');
+  const posted = await until(() => window.bm.run.scoreboard.rank === 0 && !window.bm.run.entering, 8000);
+  const table = await ev(() => window.bm.run.scoreboard);
+  const served = await (await fetch(`http://127.0.0.1:${API_PORT}/api/scores?mode=boardmasters`)).json();
+  check('the name (cleaned) and score are on the shared table, first, and the API has them', posted && table.source === 'online' && table.list[0].name === 'KAI 1' && table.list[0].score === best.score && served.scores.length === 1 && served.scores[0].name === 'KAI 1' && served.scores[0].distance === best.distance, JSON.stringify({ table, served }));
+  await until(() => window.bm.run.stateTime > 1.7);
   await page.keyboard.press('Space');
-  check('Space restarts from the finish results', await until(() => window.bm.run.state === 'playing') && (await ev(() => window.bm.run.health === 100 && window.bm.run.place === 0 && window.bm.run.finishOrder.length === 0)) && (await surfer()).z < 20);
+  check('Space restarts from the results', await until(() => window.bm.run.state === 'playing') && (await ev(() => window.bm.run.health)) === 100 && (await surfer()).z < 20);
+  // A second run that scores less than the one on the table... still makes a table of one; a run of 0 cannot (score 0 never qualifies).
+  await calm();
+  await ev(() => { const r = window.bm.run; r.score = 0; r.health = 1; r.invulnerableUntil = 0; r.damage(50, 'X'); });
+  await until(() => window.bm.run.stateTime > 1.9 && window.bm.run.state === 'wipeout', 8000);
+  const noPrompt = await page.$('#name-entry');
+  check('a run with no score shows the table without a name prompt', (await state()) === 'wipeout' && !noPrompt && (await ev(() => window.bm.run.scoreboard.list.length === 1 && !window.bm.run.entering)), `prompt ${!!noPrompt}`);
+  await page.keyboard.press('Space');
+  await until(() => window.bm.run.state === 'playing', 5000);
+
+  // --- a restart after a long run brings the shore back to the start line ---
+  await calm();
+  await ev(() => { const r = window.bm.run; const s = r.surfer; s.z = 1500; s.x = 0; s.heading = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0; });
+  await gameWait(0.5);
+  const spansFar = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
+  await ev(() => window.bm.run.start());
   await wait(200);
   const spansStart = await ev(() => window.bm.run.scenery.group.children.map((c) => c.position.z).sort((a, b) => a - b));
-  // Each span is 1,200 m long: after the restart one must cover the start line and the other the stretch after it.
+  // Each span is 1,200 m long: after the restart one must cover the start and the other the stretch after it.
   check('a restart after a long run puts the cliffs and pier back at the start', spansFar[0] > 0 && spansStart.some((z) => z <= 0 && z + 1200 > 0) && spansStart[1] === spansStart[0] + 1200, JSON.stringify({ spansFar, spansStart }));
 
-  // --- the title shows the best race: a fresh page ---
+  // --- the title shows the best run: a fresh page ---
   await page.reload();
   await page.waitForFunction(() => window.bm && window.bm.run && window.bm.hud.fontLoaded && window.bm.run.hudView, null, { timeout: 30000 });
   const titleBest = await ev(() => ({ state: window.bm.run.state, best: window.bm.run.best, row: window.bm.run.hudView.bestText() }));
-  const clockText = (t) => { const d = Math.floor(t * 10 + 1e-6); const sec = Math.floor(d / 10) % 60; return `${Math.floor(d / 600)}:${sec < 10 ? '0' : ''}${sec}.${d % 10}`; };
-  check('the title shows the best place and time for the course', titleBest.state === 'title' && titleBest.best.place === 3 && !!crossed && titleBest.row.includes('3RD') && titleBest.row.includes(clockText(crossed.time)), JSON.stringify(titleBest));
+  const commas = (v) => String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  check('the title shows the best score and its distance for the course', titleBest.state === 'title' && titleBest.best.score === best.score && titleBest.row.includes(commas(best.score)) && titleBest.row.includes(`${commas(best.distance)} M`), JSON.stringify(titleBest));
   await page.keyboard.press('Space');
   await until(() => window.bm.run.state === 'playing', 8000);
 
   // --- back to the main menu, from the pause panel (each key waits for the game to take the last) ---
-  const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
+  const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API too
   await page.keyboard.press('Escape');
   await until(() => window.bm.run.state === 'paused', 5000);
   await page.keyboard.press('m');
@@ -709,7 +761,7 @@ try {
 
   check('no console or page errors on the sequel page', errorsOnSequelPage.length === 0, errorsOnSequelPage.join(' | '));
 
-  // --- a phone: upright view, touch input, tap to start, tap to jump, HIT button ---
+  // --- a phone: upright view, the original game's gestures (swipe to carve, swipe up to jump, tap to punch) ---
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const tp = await phone.newPage();
   const phoneErrors = [];
@@ -720,34 +772,91 @@ try {
   const hudRect = await tp.evaluate(() => { const r = window.bm.renderer.hudCanvas.getBoundingClientRect(); return { top: r.top, height: r.height, viewport: window.innerHeight }; });
   check('phone: the HUD spans the screen top to bottom (at least 95% of the viewport height)', hudRect.height >= 0.95 * hudRect.viewport, JSON.stringify(hudRect));
   const css = await tp.evaluate(() => ({ scale: window.bm.renderer.cssScale, ox: window.bm.renderer.offsetX, oy: window.bm.renderer.offsetY }));
-  const tapAt = async (gx, gy) => tp.touchscreen.tap(css.ox + gx * css.scale, css.oy + gy * css.scale);
-  // HUD points from its real size: W x H. The touch buttons sit as in src/boardmasters/engine/TouchButtons.ts:
-  // RIGHT at (76, H - 32), UP at (52, H - 74), HIT at (W - 84, H - 32), JUMP at (W - 34, H - 32); the pause button at the top centre.
   const W = view.w;
   const H = view.h;
-  const BUTTON = { right: [76, H - 32], up: [52, H - 74], hit: [W - 84, H - 32], jump: [W - 34, H - 32] };
-  const open = [W / 2, Math.round(H * 0.7)]; // open water over the sea, clear of the buttons
+  const open = [W / 2, Math.round(H * 0.7)]; // open water over the sea
+  const tapAt = async (gx, gy) => tp.touchscreen.tap(css.ox + gx * css.scale, css.oy + gy * css.scale);
+  // A finger's stroke, as a mouse drag (pointer events either way): from the open water, `dx`/`dy` CSS pixels in `steps`.
+  const strokeFrom = async (dx, dy, steps = 6, hold = 0) => {
+    const x0 = css.ox + open[0] * css.scale;
+    const y0 = css.oy + open[1] * css.scale;
+    await tp.mouse.move(x0, y0);
+    await tp.mouse.down();
+    for (let i = 1; i <= steps; i++) { await tp.mouse.move(x0 + (dx * i) / steps, y0 + (dy * i) / steps); await tp.waitForTimeout(16); }
+    if (hold) await tp.waitForTimeout(hold);
+    await tp.mouse.up();
+  };
+  const tpUntil = (fn, timeout = 2000) => tp.waitForFunction(fn, null, { timeout, polling: 20 }).then(() => true, () => false);
+  const tpGrounded = async () => { for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50); };
+  const tpCalm = () => tp.evaluate(() => {
+    const r = window.bm.run;
+    for (const v of r.rivals) { v.holdChecks(1e9); if (!v.knockedOut && Math.abs(v.z - r.surfer.z) < 30) v.reset(-9, r.surfer.z - 60, r.ocean); }
+    for (const b of r.buoys) if (b.active && Math.abs(b.z - r.surfer.z) < 120) b.retire();
+    for (const s of r.sharks) if (s.active) s.retire();
+    for (const b of r.boats) if (b.active) b.retire();
+    r.pendingSharks = r.pendingSharks.filter((s) => s.z > r.surfer.z + 400);
+    r.pendingBoats = r.pendingBoats.filter((s) => s.z > r.surfer.z + 400);
+  });
+  // The title's character select answers sideways swipes.
+  await strokeFrom(60, 0, 4);
+  check('phone: a swipe right on the title picks the next character', await tpUntil(() => window.bm.run.spec.id === 'kai', 2000), `id=${await tp.evaluate(() => window.bm.run.spec.id)}`);
+  await strokeFrom(-60, 0, 4);
+  await tpUntil(() => window.bm.run.spec.id === 'sam', 2000);
   await tapAt(...open); await tp.waitForTimeout(400);
   check('phone: a tap starts the run', (await tp.evaluate(() => window.bm.run.state)) === 'playing');
-  await tp.evaluate(() => { for (const v of window.bm.run.rivals) v.holdChecks(1e9); }); // no rival attacks in the way of the pad checks
+  await tpCalm();
   await tp.waitForTimeout(800);
-  // Waits on the game, not the clock: a frame of the big phone canvas can take a while under SwiftShader.
-  const tpUntil = (fn, timeout = 2000) => tp.waitForFunction(fn, null, { timeout, polling: 20 }).then(() => true, () => false);
+  check('phone: the pad is gone (no on-screen buttons, the eased hazards and rivals of the touch run)', await tp.evaluate(() => window.bm.input.buttonsActive === undefined && window.bm.run.generator.hazardGap > 1), JSON.stringify(await tp.evaluate(() => window.bm.run.generator.hazardGap)));
+  // Dragging sideways and holding carves (the floating stick): screen-right is world -x.
+  await tpGrounded();
+  await tp.evaluate(() => { const s = window.bm.run.surfer; s.heading = 0; s.shoveVx = 0; s.stunnedUntil = 0; });
+  const x0 = css.ox + open[0] * css.scale;
+  const y0 = css.oy + open[1] * css.scale;
+  await tp.mouse.move(x0, y0);
+  await tp.mouse.down();
+  for (let i = 1; i <= 6; i++) { await tp.mouse.move(x0 + i * 10, y0); await tp.waitForTimeout(16); }
+  let headingMin = 0;
+  for (let i = 0; i < 8; i++) { await tp.waitForTimeout(100); headingMin = Math.min(headingMin, await tp.evaluate(() => window.bm.run.surfer.heading)); }
+  const heldSteer = await tp.evaluate(() => window.bm.input.stick);
+  // Back across the thumb's throw: the carve reverses without lifting the finger.
+  for (let i = 1; i <= 8; i++) { await tp.mouse.move(x0 + 60 - i * 12, y0); await tp.waitForTimeout(16); }
+  let headingMax = -1;
+  for (let i = 0; i < 8; i++) { await tp.waitForTimeout(100); headingMax = Math.max(headingMax, await tp.evaluate(() => window.bm.run.surfer.heading)); }
+  await tp.mouse.up();
+  await tp.waitForTimeout(100);
+  const lifted = await tp.evaluate(() => window.bm.input.stick);
+  check('phone: a swipe right held carves to screen-right (full stick), back across reverses, lifting straightens', headingMin < -0.3 && heldSteer === 1 && headingMax > 0.2 && lifted === 0, JSON.stringify({ headingMin: +headingMin.toFixed(2), heldSteer, headingMax: +headingMax.toFixed(2), lifted }));
+  // A flick up jumps.
   let phoneJumped = false;
   for (let tries = 0; tries < 3 && !phoneJumped; tries++) {
-    for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tapAt(...open);
-    phoneJumped = await tpUntil(() => window.bm.run.surfer.airborne, 1500);
+    await tpGrounded();
+    await tp.evaluate(() => { window.bm.run.surfer.stunnedUntil = 0; });
+    await strokeFrom(0, -70);
+    phoneJumped = await tpUntil(() => window.bm.run.surfer.airborne && window.bm.run.surfer.vy > 1, 1500);
   }
-  check('phone: a tap jumps', phoneJumped);
+  check('phone: a swipe up jumps', phoneJumped);
+  // A flick up in the air is a barrel roll.
+  let phoneRolled = false;
+  for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
+    await tpGrounded();
+    await tpCalm();
+    await tp.evaluate(() => { window.bm.run.surfer.stunnedUntil = 0; });
+    await strokeFrom(0, -70);
+    if (!(await tpUntil(() => window.bm.run.surfer.airborne && window.bm.run.surfer.airTime > 0.3, 1500))) continue;
+    await strokeFrom(0, -70);
+    phoneRolled = await tpUntil(() => window.bm.run.surfer.rolling, 1000);
+  }
+  check('phone: a swipe up in the air barrel-rolls', phoneRolled);
+  // A tap punches the rival alongside.
   let phoneKo = 0;
   for (let tries = 0; tries < 4 && !phoneKo; tries++) {
-    for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tp.evaluate(() => { const r = window.bm.run; const v = r.rivals[1]; v.reset(r.surfer.x + 1.0, r.surfer.z + 0.3, r.ocean); v.health = 50; });
-    await tapAt(...BUTTON.hit); await tp.waitForTimeout(300);
+    await tpGrounded();
+    await tpCalm();
+    await tp.evaluate(() => { const r = window.bm.run; const v = r.rivals[1]; v.reset(r.surfer.x + 1.0, r.surfer.z + 0.3, r.ocean); v.health = 50; r.surfer.stunnedUntil = 0; });
+    await tapAt(...open); await tp.waitForTimeout(300);
     phoneKo = await tp.evaluate(() => window.bm.run.knockouts);
   }
-  check('phone: the HIT button punches', phoneKo >= 1);
+  check('phone: a tap punches (a knockout on a rival with 50 health)', phoneKo >= 1);
   // The knocked-out rider's flight and splash play out in the narrow upright frame (they used to leave it at once).
   const koFrames = [];
   for (let i = 0; i < 12; i++) {
@@ -759,23 +868,17 @@ try {
     await tp.waitForTimeout(80);
   }
   check('phone: a knockout stays in frame through its flight', phoneKo >= 1 && koFrames.filter(Boolean).length >= 10, JSON.stringify(koFrames));
-  // Holding RIGHT on the pad carves to screen-right (world -x); a mouse press stands in for a held thumb.
-  for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-  await tp.evaluate(() => { window.bm.run.surfer.heading = 0; window.bm.run.surfer.shoveVx = 0; window.bm.run.surfer.stunnedUntil = 0; });
-  await tp.mouse.move(css.ox + BUTTON.right[0] * css.scale, css.oy + BUTTON.right[1] * css.scale);
-  await tp.mouse.down();
-  let headingMin = 0;
-  for (let i = 0; i < 8; i++) { await tp.waitForTimeout(100); headingMin = Math.min(headingMin, await tp.evaluate(() => window.bm.run.surfer.heading)); }
-  await tp.mouse.up();
-  check('phone: holding RIGHT carves to screen-right (heading swings to -x)', headingMin < -0.3, `min heading ${headingMin.toFixed(2)}`);
-  let phoneRolled = false;
-  for (let tries = 0; tries < 4 && !phoneRolled; tries++) {
-    for (let i = 0; i < 40 && (await tp.evaluate(() => window.bm.run.surfer.airborne)); i++) await tp.waitForTimeout(50);
-    await tapAt(...BUTTON.right); await tapAt(...BUTTON.right); await tapAt(...BUTTON.up);
-    phoneRolled = await tpUntil(() => window.bm.run.surfer.rolling, 1500);
-    if (!phoneRolled) await tp.waitForTimeout(500);
+  // A flick down barges.
+  let phoneBarged = null;
+  for (let tries = 0; tries < 4 && !phoneBarged; tries++) {
+    await tpGrounded();
+    await tpCalm();
+    await tp.evaluate(() => { const r = window.bm.run; const v = r.rivals[3]; v.reset(r.surfer.x - 1.0, r.surfer.z + 0.3, r.ocean); v.health = 100; r.surfer.stunnedUntil = 0; r.surfer.bargeCooldownUntil = 0; });
+    await strokeFrom(0, 70);
+    if (await tpUntil(() => window.bm.run.rivals[3].health === 50, 800)) phoneBarged = await tp.evaluate(() => window.bm.run.floats.map((f) => f.text));
   }
-  check('phone: RIGHT RIGHT UP on the pad barrel-rolls', phoneRolled);
+  check('phone: a swipe down barges (50 off the rival)', !!phoneBarged && phoneBarged.includes('BARGE!'), JSON.stringify(phoneBarged));
+  check('phone: the gestures used are noted (the hints go)', await tp.evaluate(() => { const g = window.bm.run.gestures; return g.steer && g.jump && g.hit; }));
   await tapAt(W / 2, 9); await tp.waitForTimeout(150);
   check('phone: the pause button pauses', (await tp.evaluate(() => window.bm.run.state)) === 'paused');
   check('phone: no page errors', phoneErrors.length === 0, phoneErrors.join(' | '));
@@ -795,6 +898,8 @@ try {
 } finally {
   await browser?.close();
   server.kill();
+  api.kill();
+  await rm(dataDir, { recursive: true, force: true });
 }
 
 const passed = results.filter(Boolean).length;
