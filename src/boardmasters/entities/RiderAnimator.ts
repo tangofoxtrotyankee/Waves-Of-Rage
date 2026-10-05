@@ -83,6 +83,14 @@ const easeOut = (t: number) => 1 - (1 - t) * (1 - t) * (1 - t);
 const easeIn = (t: number) => t * t;
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+/** A combat clip's phases in seconds (RIDER_ANIM.punch, .barge, .rivalPunch). */
+interface Phases {
+  windup: number;
+  strike: number;
+  hold: number;
+  recover: number;
+}
+
 function setArm(p: Pose, arm: Arm, pitch: number, roll: number, swing: number, elbow: number): void {
   p[arm.pitch] = pitch;
   p[arm.roll] = roll;
@@ -168,6 +176,9 @@ export class RiderAnimator {
   private landAt = -10;
   private landHard = 0;
   private punchAt = -10;
+  /** This punch's phases (a rival's has the long, telegraphed wind-up) and whether it is telegraphed. */
+  private readonly punchPhases: Phases = { ...RIDER_ANIM.punch };
+  private punchTelegraph = false;
   private bargeAt = -10;
   private flinchAt = -10;
   private flinchDir = 1;
@@ -240,8 +251,19 @@ export class RiderAnimator {
 
   // --- events from the rider ---
 
-  punch(time: number): void {
+  /** A punch starting now; `telegraph` (rivals) holds a big, readable wind-up over `phases.windup` before the strike. */
+  punch(time: number, phases: Phases = RIDER_ANIM.punch, telegraph = false): void {
     this.punchAt = time;
+    this.punchPhases.windup = phases.windup;
+    this.punchPhases.strike = phases.strike;
+    this.punchPhases.hold = phases.hold;
+    this.punchPhases.recover = phases.recover;
+    this.punchTelegraph = telegraph;
+  }
+
+  /** The punch is called off (hit in the wind-up): the clip stops and the flinch takes over. */
+  cancelPunch(): void {
+    this.punchAt = -10;
   }
 
   barge(time: number): void {
@@ -507,28 +529,40 @@ export class RiderAnimator {
   private clips(p: Pose, s: AnimInput): void {
     // No target known: swing at the screen-right side (world -x), the rider's front.
     const side = s.strikeDir > 0 ? 1 : -1;
-    const P = RIDER_ANIM.punch;
+    const P = this.punchPhases;
     const tp = s.time - this.punchAt;
-    if (tp >= 0 && tp < P.windup + P.strike + P.hold + P.recover) this.keyed(p, tp, P, false, side);
+    if (tp >= 0 && tp < P.windup + P.strike + P.hold + P.recover) this.keyed(p, tp, P, false, side, this.punchTelegraph);
     const B = RIDER_ANIM.barge;
     const tb = s.time - this.bargeAt;
-    if (tb >= 0 && tb < B.windup + B.strike + B.hold + B.recover) this.keyed(p, tb, B, true, side);
+    if (tb >= 0 && tb < B.windup + B.strike + B.hold + B.recover) this.keyed(p, tb, B, true, side, false);
   }
 
-  /** Blend p through anticipation (A) and strike (B) keys and back: ease out of the stance, snap into the strike, hold, recover. */
-  private keyed(p: Pose, t: number, phases: { windup: number; strike: number; hold: number; recover: number }, barge: boolean, side: number): void {
+  /**
+   * Blend p through anticipation (A) and strike (B) keys and back: ease out
+   * of the stance, snap into the strike, hold, recover. A telegraphed clip
+   * reaches its bigger anticipation quickly and holds it, trembling, for
+   * the rest of the long wind-up.
+   */
+  private keyed(p: Pose, t: number, phases: Phases, barge: boolean, side: number, telegraph: boolean): void {
     const a = this.keyA;
     const b = this.keyB;
     a.set(p);
     b.set(p);
     if (barge) this.bargeKeys(p, a, b, side);
-    else this.punchKeys(p, a, b, side);
+    else this.punchKeys(p, a, b, side, telegraph);
     const t1 = phases.windup;
     const t2 = t1 + phases.strike;
     const t3 = t2 + phases.hold;
     if (t < t1) {
-      const k = easeOut(t / t1);
+      const k = easeOut(Math.min(1, t / (telegraph ? Math.min(t1, 0.12) : t1)));
       for (let i = 0; i < N; i++) p[i] = lerp(p[i], a[i], k);
+      if (telegraph) {
+        // Coiled and straining: a quick tremble through the chest and the cocked arm.
+        const tremble = k * Math.sin(t * 70);
+        p[C.chestRoll] += 0.035 * tremble;
+        p[C.lRoll] += 0.06 * tremble;
+        p[C.rRoll] -= 0.06 * tremble;
+      }
     } else if (t < t2) {
       const k = easeOut((t - t1) / phases.strike);
       for (let i = 0; i < N; i++) p[i] = lerp(a[i], b[i], k);
@@ -549,7 +583,7 @@ export class RiderAnimator {
    * away; then the torso snaps round, the weight shifts and the arm whips
    * out straight to the side, the fist well out from the body.
    */
-  private punchKeys(base: Pose, a: Pose, b: Pose, side: number): void {
+  private punchKeys(base: Pose, a: Pose, b: Pose, side: number, telegraph: boolean): void {
     const hit = side > 0 ? ARM.l : ARM.r;
     const guard = side > 0 ? ARM.r : ARM.l;
     // Anticipation.
@@ -562,6 +596,20 @@ export class RiderAnimator {
     const yawA = a[C.hipYaw] + a[C.spineYaw] + a[C.chestYaw];
     setArm(a, hit, -0.25, 1.0, -0.95 + side * yawA, 2.1);
     setArm(a, guard, 0.5, 0.55, 0.5 + -side * yawA * 0.5, 1.7);
+    if (telegraph) {
+      // A rival's wind-up, readable from behind on a phone: the shoulder hauled right back, the fist cocked high by the
+      // ear, the weight back on the far rail so the board tips away, the other arm thrown out for balance.
+      a[C.chestYaw] += side * 0.25;
+      a[C.spineYaw] += side * 0.12;
+      a[C.chestRoll] += side * 0.1;
+      a[C.hipX] -= side * 0.06;
+      a[C.crouch] += 0.06;
+      a[C.bank] -= side * 0.1;
+      a[C.headYaw] -= side * 0.15;
+      const yawT = a[C.hipYaw] + a[C.spineYaw] + a[C.chestYaw];
+      setArm(a, hit, -0.45, 1.55, -1.1 + side * yawT, 2.4);
+      setArm(a, guard, 0.2, 1.2, 0.9 - side * yawT * 0.5, 0.6);
+    }
     // Strike.
     b[C.chestYaw] = base[C.chestYaw] - side * 0.42;
     b[C.spineYaw] = base[C.spineYaw] - side * 0.2;
@@ -665,7 +713,7 @@ export class RiderAnimator {
       if (tc < 0.22 && tc + dt >= 0.22) this.splash(s.x + Math.sin(s.heading) * 0.9 * s.build, s.y, s.z + Math.cos(s.heading) * 0.9 * s.build, 0.8);
     }
 
-    // The last heart: pitch forward off the board into the water and float face down.
+    // Health gone: pitch forward off the board into the water and float face down.
     const tw = t - this.wipeAt;
     if (s.wiped && !s.knockedOut && tw >= 0) {
       const fall = smoothstep(0, RIDER_ANIM.wipeoutFall, tw);

@@ -2,7 +2,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import { createPS1Material } from '../engine/PS1Material';
 import { clamp, mixRgb, mulberry32, rgb, smoothstep } from '../engine/math';
-import { ATLAS, festivalAtlas, waterfallTexture } from '../engine/Textures';
+import { ATLAS, festivalAtlasShared, waterfallTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { CAMERA, IS_PORTRAIT, PALETTE } from '../game/constants';
 
@@ -421,7 +421,7 @@ function waterfall(b: Builder, u: number, top: number, z: number, rng: () => num
  * banner, then a beach with palms and lower hills behind. Built once,
  * merged per material (lit, glowing, the festival atlas, the scrolling
  * falls) and per 100 m chunk, and shared by two spans that leapfrog ahead
- * of the camera, so the endless course always has a shore.
+ * of the camera, so the course (and its run-out past the finish) always has a shore.
  */
 export class Scenery {
   readonly group = new THREE.Group();
@@ -441,7 +441,7 @@ export class Scenery {
       solid: createPS1Material(),
       glow: createPS1Material({ unlit: true, side: THREE.DoubleSide }),
       lamp: createPS1Material({ unlit: true, side: THREE.DoubleSide }),
-      atlas: createPS1Material({ map: festivalAtlas(), unlit: true, side: THREE.DoubleSide }),
+      atlas: createPS1Material({ map: festivalAtlasShared(), unlit: true, side: THREE.DoubleSide }),
       falls: this.falls,
     };
     materials.solid.uniforms.uUnlit.value = SHORE_UNLIT;

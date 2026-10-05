@@ -77,7 +77,7 @@ function buoyGeometry(): THREE.BufferGeometry {
   return shared;
 }
 
-/** The skull bell buoy from the hazards sheet: one mesh, bobbing on the water. Hitting it costs a heart. */
+/** The skull bell buoy from the hazards sheet: one mesh, bobbing on the water. Hitting it costs health (HEALTH.buoy). */
 export class Buoy {
   readonly group = new THREE.Group();
   x = 0;

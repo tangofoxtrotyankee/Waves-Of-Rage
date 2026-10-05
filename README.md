@@ -252,7 +252,7 @@ Waves-Of-Rage/
         │   └── math.ts     # clamp, lerp, smoothstep, damp, seeded random, colour helpers
         ├── world/
         │   ├── Ocean.ts    # Heightfield mesh resampled each frame from height(x, z); the riders sample the same function
-        │   ├── Course.ts   # Course data (Sunset Bay) and the endless generator of ramps, troughs, buoys and boost gates
+        │   ├── Course.ts   # Course data (Sunset Bay, 2,000 m) and the streaming generator of ramps, troughs, buoys and boost gates
         │   ├── Scenery.ts  # The shore: cliffs with palms and waterfalls, the pier with its crowd, tents, flags and banner
         │   └── Sky.ts      # Sunset dome, sun with rays, drifting clouds
         ├── entities/
@@ -265,7 +265,8 @@ Waves-Of-Rage/
         │   ├── RiderFoam.ts # The foam round each board
         │   ├── Wake.ts     # Foam wakes behind every rider, one mesh
         │   ├── Buoy.ts     # Skull buoy hazard, pooled along the endless course (smashable in RAGE)
-        │   ├── Chevron.ts  # Boost gate: chevrons on the water, pooled; ride over them for a BOOST
+        │   ├── Chevron.ts  # Boost gate: a >> sign on a float, pooled; ride over it for a BOOST
+        │   ├── FinishLine.ts # The finish arch, stands, chequered strip and fireworks
         │   └── Spray.ts    # Spray clumps and splashes (with foam rings), instanced
         └── game/
             ├── constants.ts # Resolution, camera, fog, physics, scoring, combat, tricks, RAGE, palette, LOOK toggles
@@ -410,34 +411,47 @@ presentation around it. It has its first playable prototype, reached from the
 title screen's second menu entry or directly at `boardmasters.html`
 (`/boardmasters` on the production server).
 
-**What is in the prototype.** Sunset Bay, an endless course on a swell that
-is real terrain: you climb faces, drop into troughs and launch off crests
-when you are going fast enough, and steep-backed ramps and slowing troughs
-are generated ahead of you as you ride, with the buoys coming thicker and
-the cruising speed rising the further you get. Cyan chevrons on the water
-are boost gates: ride over them for a free BOOST. There is no finish line: a
-run ends with the last heart, and your best score and distance are kept on
-the device (and shown on the title). Seven rivals ride their own lanes, steer round
-the skull buoys, keep pace with you, and the strong ones shoulder-check you
-when alongside; your position out of eight is on the HUD. HIT (X) and BARGE
-(Shift) knock rivals about and, after two hits, out of the race for 500
-points. A blow has a wind-up, a strike and a recovery; when it lands the
-game freezes for a few frames, the camera shakes, a spark and HIT! or
-BARGE! burst over the rival, who flinches and is shoved away, and a
-knockout throws the rival tumbling through the air into a splash; knockouts within four seconds of each other multiply up to x5, and a
-rival shoved into a buoy or off the course is out for 750. In the air,
-Left/Right spin and X grabs: land within 50 degrees of upright and the air,
-the spin (180 to 720) and the grab score, with a clean-landing bonus; land
-badly and you crash for a heart. Spins are forgiving: only a press made in
-the air spins (a carve carried over a crest never does), a short tap or a
-spin let go settles back upright, and a held spin is helped round to a
-clean 360 when there is about a second of air; a half turn held into the
-landing still crashes. A skull buoy costs a heart too; three and
-you wipe out. Tricks and knockouts fill the RAGE meter: full, you ride 30 %
-faster for eight seconds, one hit knocks out, buoys smash for points and
-the sea turns hot pink. The title
-screen picks the character (seven, with SPEED / TURN / POWER / RAGE bars
-that scale the physics and colour the rig); the choice is remembered.
+**What is in the prototype.** Sunset Bay, a 2,000 m race against five
+rivals on a swell that is real terrain: you climb faces, drop into troughs
+and launch off crests when you are going fast enough, and steep-backed
+ramps and slowing troughs are generated ahead of you as you ride, with the
+buoys coming thicker and everyone's pace rising towards the finish. Cyan
+`>>` markers are boost gates: ride over them for a free BOOST. "500 M TO
+GO" and "FINAL STRETCH" call the run-in to the finish arch; crossing it
+ends your race with your place out of six, your time and a place bonus
+(2,000 points for a win down to 150 for sixth), and your best place, time
+and score on the course are kept on the device and shown on the title.
+
+**Health.** A health bar replaces the hearts. Rivals' punches (12) and
+shoulder checks (18) drain it, scaled by the rival's POWER, and so do skull
+buoys (25) and crooked landings (20); RAGE halves it all. Tricks refill
+it: a clean landing after air you made yourself (a JUMP) gives 4, big air
+8, each half turn of spin 6, a grab 5 and a barrel roll 10. At zero you
+wipe out and the race is over (DNF).
+
+**Fights.** HIT (X) and BARGE (Shift) take half a rival's health each, so
+two blows knock it out of the race for 500 points; knockouts within four
+seconds of each other multiply up to x5, and a rival shoved into a buoy or
+off the course is out for 750. A blow has a wind-up, a strike and a
+recovery; when it lands the game freezes for a few frames, the camera
+shakes, a spark and HIT! or BARGE! burst over the rival, who flinches and
+is shoved away (a small health bar shows over its head), and a knockout
+throws it tumbling through the air into a splash. The fighters among the
+rivals hit back: a red "!" over a rival warns of a punch (a 0.4 s
+wind-up) or a shoulder check (a lean-out tell) before it comes, and you can
+carve out of reach, jump, or strike first to counter it.
+
+**Tricks.** In the air Left/Right spin and X grabs: land within 50
+degrees of upright and the air, the spin (180 to 720) and the grab score,
+with a clean-landing bonus; land badly and you crash. Spins are forgiving:
+only a press made in the air spins (a carve carried over a crest never
+does), a short tap or a spin let go settles back upright, and a held spin
+is helped round to a clean 360 when there is about a second of air; a half
+turn held into the landing still crashes. Tricks and knockouts fill the
+RAGE meter: full, you ride 30 % faster for eight seconds, one hit knocks
+out, buoys smash for points and the sea turns hot pink. The title screen
+picks the character (seven, with SPEED / TURN / POWER / RAGE bars that
+scale the physics and colour the rig); the choice is remembered.
 
 **Controls.** Left/Right or A/D carve, Up/W pumps for speed, Down/S brakes
 and tightens the carve, Space jumps (also from a crest, for more height),
@@ -467,8 +481,8 @@ blue far, with dithered whitewater, the sun's glitter, wakes and big
 splashes. Towering cliffs with lit villages, palms and waterfalls run down
 the left; the festival pier with its stage, crowd, tents, flags and the
 BOARDMASTERS banner comes round on the right; mountains close the bay under
-a banded sunset sky. The HUD and title follow the mockups: HEALTH, POS,
-DIST and SCORE panels, RAGE lettering over a segmented bar, a course strip
+a banded sunset sky. The HUD and title follow the mockups: HEALTH (a bar), POS,
+DIST (a percentage, with the race clock) and SCORE panels, RAGE lettering over a segmented bar, a course strip
 on the left, heavy trick lettering, and icon buttons on phones.
 
 **Where things are.** The code lives in `src/boardmasters/` (see the tree
