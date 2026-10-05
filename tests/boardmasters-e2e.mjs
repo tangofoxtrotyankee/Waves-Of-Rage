@@ -189,13 +189,18 @@ try {
       if ((await state()) !== 'playing') return null;
       await grounded();
       await placeRival(index, dx, health);
+      const t0 = await ev(() => window.bm.run.time);
       await page.keyboard.press(key);
+      // Sample on the game clock: the shove lands with the blow (RIDER_ANIM.impactDelay after the press, then a hit-stop),
+      // which a slow frame can push past any fixed wall-clock window; it decays fast, so keep the peak.
       let peak = 0; let r = null;
-      for (let t = 0; t < 8; t++) { // the shove decays fast, so keep the peak
-        await wait(25);
-        r = await ev((i) => ({ health: window.bm.run.rivals[i].health, shove: window.bm.run.rivals[i].shoveVx }), index);
+      for (let t = 0; t < 80; t++) {
+        await wait(20);
+        r = await ev((i) => ({ health: window.bm.run.rivals[i].health, shove: window.bm.run.rivals[i].shoveVx, time: window.bm.run.time }), index);
         peak = Math.max(peak, Math.abs(r.shove));
+        if (r.time >= t0 + 1.2 || (r.time >= t0 + 0.5 && peak > 0)) break;
       }
+      delete r.time;
       if (r.health < health) return { ...r, peak };
       await wait(500);
     }
@@ -232,6 +237,8 @@ try {
         v.health = 100;
         v.holdChecks(0);
         r.rivalAttackGate = 0; r.invulnerableUntil = 0; r.health = 100; r.rage = 0;
+        // No course buoy near: carving away from a punch must not run the surfer into one (that is a different blow).
+        for (const b of r.buoys) if (b.active && b.z > s.z - 10 && b.z < s.z + 120) b.retire();
         if (o.rage) r.startRage(); else r.rageUntil = 0;
         const random = Math.random;
         Math.random = () => (o.check ? 0.99 : 0);
@@ -692,6 +699,22 @@ try {
   const clockText = (t) => { const d = Math.floor(t * 10 + 1e-6); const sec = Math.floor(d / 10) % 60; return `${Math.floor(d / 600)}:${sec < 10 ? '0' : ''}${sec}.${d % 10}`; };
   check('the title shows the best place and time for the course', titleBest.state === 'title' && titleBest.best.place === 3 && !!crossed && titleBest.row.includes('3RD') && titleBest.row.includes(clockText(crossed.time)), JSON.stringify(titleBest));
   await page.keyboard.press('Space');
+  await until(() => window.bm.run.state === 'playing', 8000);
+
+  // --- a rival knocked out a metre short of the line: its body flies over it, which does not count, and it respawns
+  // beyond the line (the surfer has ridden on past it), which does: it crosses when it is back in the race ---
+  const koAtLine = await ev(() => {
+    const r = window.bm.run; const L = r.course.length; const s = r.surfer;
+    s.z = L + 45; s.x = 0; s.y = r.ocean.height(0, s.z); s.vy = 0;
+    const v = r.rivals[4]; v.holdChecks(1e9); v.reset(3, L - 1, r.ocean); v.knockOut(r.time);
+    return { name: v.spec.name, at: r.time };
+  });
+  const bodyOver = await page.waitForFunction(() => { const v = window.bm.run.rivals[4]; return v.knockedOut && v.z > window.bm.run.course.length + 2; }, null, { timeout: 8000, polling: 20 }).then(() => true, () => false);
+  const notWhileOut = await ev((nm) => !window.bm.run.finishOrder.some((f) => f.name === nm), koAtLine.name);
+  const koCounted = await page.waitForFunction((nm) => window.bm.run.finishOrder.some((f) => f.name === nm), koAtLine.name, { timeout: 20000, polling: 50 }).then(() => true, () => false);
+  const koFinish = await ev(() => { const v = window.bm.run.rivals[4]; return { finishedAt: v.finishedAt, knockedOut: v.knockedOut, z: Math.round(v.z) }; });
+  check('a rival knocked out at the line crosses when it is back in the race, even beyond the line', bodyOver && notWhileOut && koCounted && !koFinish.knockedOut && koFinish.finishedAt > koAtLine.at, JSON.stringify({ bodyOver, notWhileOut, koCounted, koFinish, at: koAtLine.at }));
+  await ev(() => window.bm.run.start());
   await until(() => window.bm.run.state === 'playing', 8000);
 
   // --- back to the main menu, from the pause panel (each key waits for the game to take the last) ---

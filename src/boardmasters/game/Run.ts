@@ -974,9 +974,12 @@ export class Run {
     const crossAt = (prev: number, z: number) => stepStart + dt * clamp((L - prev) / Math.max(1e-6, z - prev), 0, 1);
     for (let i = 0; i < this.rivals.length; i++) {
       const r = this.rivals[i];
+      // A knocked-out rival keeps its last position in the race: its body flying over the line is not a crossing, and
+      // a respawn beyond the line (the surfer rode on past it) then counts as crossing on its return.
+      if (r.knockedOut) continue;
       const prev = this.rivalPrevZ[i];
       this.rivalPrevZ[i] = r.z;
-      if (r.finishedAt >= 0 || r.knockedOut || prev >= L || r.z < L) continue;
+      if (r.finishedAt >= 0 || prev >= L || r.z < L) continue;
       r.finishedAt = crossAt(prev, r.z);
       this.addFinisher(r.spec.name, r.spec.id, false, r.finishedAt - this.raceStart);
     }
