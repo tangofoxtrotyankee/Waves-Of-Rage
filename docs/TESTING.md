@@ -35,9 +35,15 @@ and Escape back to the main menu, with no console errors, plus character
 select, the field of eight, punch and barge knockouts, a clean 360 and a
 crashed 180, forgiving spins (a tap in the air, a carve carried over a
 crest, weaving with carve taps, a spin let go at the top, a held spin
-through big air), RAGE, the barrel roll and boost combos, pause (which
-freezes wakes, spray and floating words), the endless course and the shore
-after a restart, boost gates, the follow camera and terrain, and a
+through big air), the health bar (exact damage from buoys, crashes, bumps
+and rivals' blows, healing from tricks you made, the cap, invulnerability,
+a wipeout at zero), rivals fighting back (a telegraphed punch, dodging it,
+countering it in the wind-up, the shoulder check's tell), RAGE, the barrel
+roll and boost combos, pause (which holds the race clock and freezes wakes,
+spray and floating words), the race (the field of six, the course near the
+finish, crossing the line with place, time and bonus, the clock stopping,
+rivals racing on, the best saved per course and shown on the title after a
+reload, restart), the shore after a restart, boost gates, the follow camera and terrain, and a
 phone-shaped page (touch, an upright view whose HUD fills the screen, tap
 to start and jump, the HIT and pause buttons, a held RIGHT on the pad, the
 pad's barrel roll, and a knockout that stays in frame). Waits are on game
@@ -97,15 +103,21 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
 3. Air: Space jumps; riding fast over a crest or any ramp launches without
    pressing anything; a landing after half a second shows `AIR +100`, after
    a second `BIG AIR +250`; the shadow shrinks while airborne.
-4. Hazards: hitting a skull bell buoy splashes, shakes the camera, makes the
-   surfer flinch and pulse white, shows `OUCH!` and costs a heart; the
-   third hit pitches the surfer over the nose into the water and the
-   results panel slams in after the fall; touching a rival pushes both
-   apart with a flinch.
-5. Endless: there is no finish; the buoys come thicker and the cruising
-   speed rises with distance; after a wipeout the results show distance,
-   place, score, knockouts and `NEW BEST!` when it is one; the title shows
-   the best; Space restarts from the start line with three hearts. Riding
+4. Hazards and health: hitting a skull bell buoy splashes, shakes the
+   camera, makes the surfer flinch and pulse white, shows `OUCH!` and
+   takes a quarter of the HEALTH bar (`-25` under it, the panel flashes
+   red); below a quarter the bar pulses red and the screen edges glow; at
+   zero the surfer pitches over the nose into the water, POS reads DNF and
+   the results say WIPED OUT / DID NOT FINISH; landing a JUMP, a spin, a
+   grab or a barrel roll cleanly heals (`+n HP` beside the surfer).
+5. Race: six riders start (POS n/6); DIST counts up as a percentage with
+   the race clock under it, and the course strip on the left shows the
+   whole race with the finish flag; the buoys come thicker towards the end;
+   `500 M TO GO` and `FINAL STRETCH` sweep across; the finish arch shows
+   from far off; crossing it calls `FINISH!` with fireworks, and the
+   results show the place title, PLACE, TIME, SCORE with the place bonus
+   counting up, KNOCKOUTS and a star on each new best; the title's BEST row
+   shows the best place and time; Space restarts with a full bar. Riding
    over a set of cyan chevrons shows `BOOST!` and a burst of speed, and
    the gate vanishes; the course strip (left edge) shows gates ahead.
 6. Combat: X beside a rival swings a punch at it (wind-up, strike,
@@ -116,7 +128,11 @@ Keep these when refactoring, or update `tests/e2e.mjs` alongside.
    flying off on its own, then it reappears behind you; two
    knockouts within four seconds show `X2`; Shift shoves a rival hard and
    costs you a little speed; a rival shoved into a buoy shows
-   `INTO THE BUOY +750`; strong rivals shove you (`SHOVED!`) when alongside.
+   `INTO THE BUOY +750`; a hit rival shows a small health bar over its
+   head. Fighters hit back: a red `!` over a rival (and a flash at that
+   screen edge) warns of a punch wind-up or a shoulder-check lean-out;
+   carving away or jumping shows `DODGED!`, striking it first shows
+   `COUNTER!`, and a blow that lands shows `PUNCHED!` and takes health.
 7. Tricks: in the air Left/Right spin and X grabs; a short tap or a spin
    let go settles back upright; a carve carried over a crest never spins;
    a spin held through about a second of air lands as a clean `360 +...`;

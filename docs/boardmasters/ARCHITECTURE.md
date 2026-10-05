@@ -172,9 +172,9 @@ speed, BOOST and RAGE, pulling back for a fight so both riders stay in
 frame, shaking on demand (`Run.shake`), and never going under the water.
 All in the `CAMERA` block.
 
-**Rival.** Follows a precomputed racing line (`x` as a function of `z`
-with noise) at 95 to 105 % of the player's speed; contact shoves both
-sideways. Collision is circles in track space, which is cheap and is all
+**Rival.** Rides its own wavy lane round the buoys, paced against the
+surfer (catching up from behind, easing off ahead, sprinting at the end);
+contact shoves both sideways. Collision is circles in track space, which is cheap and is all
 an arcade game needs.
 
 **Obstacle.** A skull bell buoy (tapered bell, cage top, skull decal) at fixed course positions;
@@ -185,12 +185,38 @@ pickup: the generator lays one every 110 to 190 m in a lane, and riding
 over it on the water gives a BOOST (ignoring the combo's cooldown), a
 little RAGE and `BOOST!`.
 
-**Course.** Endless, like Temple Run: `CourseGenerator` lays out ramps,
-troughs and buoy spots deterministically from the seed a few hundred
-metres ahead of the surfer and drops what is behind; buoys are a pool of
-meshes placed at the spots. Buoys come thicker and the cruising speed rises
-with distance. There is no finish line; a run ends with the last heart and
-the best score and distance persist on the device (`bm.best`).
+**Course and race.** A race of `CourseSpec.length` metres (Sunset Bay
+2,000 m) against five rivals. `CourseGenerator` lays out ramps, troughs,
+buoy and gate spots deterministically from the seed a few hundred metres
+ahead of the surfer and drops what is behind; buoys and gates are pools of
+meshes placed at the spots and stop 60 m before the line. Buoys come
+thicker over the final third and everyone's pace rises with progress (up
+to +15 % at the line). `entities/FinishLine.ts` is the arch at the line
+(drawn nearer and smaller past 112 m so it shows from afar). `Run`
+records every crossing in order (`finishOrder`); the surfer's crossing is
+the `finished` state with `finishTime`, `place` and a place bonus
+(`RACE.placeBonus`). The best time, place and score per course persist on
+the device (`bm.race.<course id>`). Rivals hold near the surfer for most of
+the race and the fastest two sprint over the last 30 %. All in `RACE`.
+
+**Health.** `Run.health` is 0..100 (`HEALTH`): rivals' punches (12) and
+shoulder checks (18, both scaled by the rival's POWER), buoys (25), crashes
+(20) and bumps (1) drain it, halved in RAGE; landing air the surfer made,
+spins, grabs and rolls heal it. Short invulnerability after each hit. Zero
+is the wipeout and the race ends unfinished. Rivals have 100 too; the
+player's punch and barge take 50, a RAGE blow 100.
+
+**Rivals fighting back.** Fighters (POWER at least 0.5) close in when
+their attack is ready and throw a telegraphed punch (a 0.4 s wind-up from a
+lane frozen at its start; it lands only if the surfer is still in reach
+and near the water) or a shoulder check with a lean-out tell. Striking
+during either cancels it (COUNTER!). Per-rival cooldowns, a stagger
+between any two attacks and a back-off after a blow lands keep it fair. In
+`COMBAT` and `Rival.think`; `Run.resolveRivalPunches` decides at contact.
+
+A rider whose water jumps by more than `PHYSICS.surfaceSnap` in one step
+(it was moved, or the course was generated under it) settles onto the
+surface instead of reading a huge climb.
 
 ## 7. File layout and size
 
