@@ -307,6 +307,9 @@ export class Run {
     this.surfer.reset(0, 0, this.ocean);
     this.surfer.maxHealth = HEALTH.max;
     this.surfer.health = HEALTH.max;
+    // The field's two fastest (by SPEED) sprint for the line hardest.
+    const bySpeed = [...this.rivals].sort((a, b) => b.spec.speed - a.spec.speed);
+    for (const r of this.rivals) r.sprinter = bySpeed.indexOf(r) < 2;
     const grid = title ? TITLE_GRID : RIVAL_GRID;
     this.rivals.forEach((rival, i) => {
       const [x, z] = grid[i % grid.length];
@@ -620,7 +623,11 @@ export class Run {
       this.shake(impact.shake[0], impact.shake[1]);
       this.float(impact.label, impact.color, impact.scale, impact.over);
       if (impact.slow !== 1) s.speed *= impact.slow;
-      if (impact.damage > 0) this.damage(impact.damage, '', HEALTH.blowInvulnerable);
+      if (impact.damage > 0) {
+        this.damage(impact.damage, '', HEALTH.blowInvulnerable);
+        // A blow landed on the surfer: the field backs off for a moment before anyone attacks again.
+        this.rivalAttackGate = Math.max(this.rivalAttackGate, this.time + COMBAT.rivalBackOff);
+      }
       // The spark: most of the way from the striker to the one struck, at chest height.
       const a = impact.from;
       const b = impact.to;
@@ -722,7 +729,7 @@ export class Run {
         const dir = Math.sign(target.x - s.x || 1);
         s.strikeDir = dir; // the clip swings at the rider the run shoves
         // Struck in its wind-up (or as it strikes, before contact), a rival's punch is called off: the counter.
-        const countered = target.attackPhase !== 'none';
+        const countered = target.attackPhase !== 'none' || target.checking;
         if (countered) target.cancelAttack();
         const damage = this.raging ? RAGE.attackDamage : barge ? COMBAT.bargeDamage : COMBAT.punchDamage;
         const shove = dir * (barge ? COMBAT.bargeShove : COMBAT.punchShove) * s.stats.power;
@@ -730,6 +737,7 @@ export class Run {
         // Damage and points count now; the victim feels it (shove, flinch, launch) when the blow arrives, and so does the camera.
         // The word waits for the blow too, over the victim: HIT!, BARGE!, or the knockout with its points.
         const out = target.takeHit(damage, shove, this.time);
+        if (!out) target.provoke(this.time); // a fighter hit and still up comes back at the surfer
         // A knocked-out body is thrown along with the surfer (beside and level with them), so the tumble and splash play out in frame.
         const label = out ? this.knockout(target, 'KNOCKOUT', COMBAT.knockoutPoints, false, s.speed) : countered ? 'COUNTER!' : barge ? 'BARGE!' : 'HIT!';
         // Keep the victim in sight through its flinch (or its knockout flight): the camera's near fade must not screen-door it out.
@@ -791,7 +799,9 @@ export class Run {
     for (const r of this.rivals) {
       if (!r.takePunchImpact(this.time) || r.knockedOut || r.wiped || s.wiped) continue;
       const dx = s.x - r.x;
-      if (Math.abs(dx) > COMBAT.punchRangeX || Math.abs(s.z - r.z) > COMBAT.punchRangeZ || s.airHeight(this.ocean) > 1.0) {
+      // Out of reach as the fist arrives: carved away, ahead or behind, in the air (the surfer, or a rival launched off a crest in its wind-up).
+      const apart = Math.abs(dx) > COMBAT.rivalPunchLandX || Math.abs(s.z - r.z) > COMBAT.punchRangeZ || Math.abs(r.y - s.y) > 1.2;
+      if (apart || r.airborne || s.airHeight(this.ocean) > COMBAT.rivalPunchDodgeAir) {
         this.float('DODGED!', hex(PALETTE.cyan), 1, s);
         continue;
       }
@@ -901,8 +911,9 @@ export class Run {
       const [amount, seconds] = IMPACT.shake.bump;
       this.shake(amount, seconds);
       this.bumpCooldown = 0.6; // the flinches and the shake say it; no word
-      // A bump costs a little health (not while invulnerable after a hit, and it gives no invulnerability of its own).
-      if (this.time >= this.invulnerableUntil) this.damage(HEALTH.bump, '', 0);
+      // A bump costs a little health (not while invulnerable after a hit, nor from a rival keeping station for an attack
+      // that is not its blow, and it gives no invulnerability of its own).
+      if (this.time >= this.invulnerableUntil && !r.stationing) this.damage(HEALTH.bump, '', 0);
     }
   }
 

@@ -405,7 +405,7 @@ export class HudView {
       if (r.health >= trail || r.knockedOut) this.rivalTrail[i] = r.health;
       else if (run.time - r.lastHitAt > TRAIL_HOLD) this.rivalTrail[i] = Math.max(r.health, trail - TRAIL_RATE * dt);
       else this.rivalTrail[i] = trail;
-      if (!r.windingUp || r.knockedOut) this.warnSince[i] = -1;
+      if (!r.threatening || r.knockedOut) this.warnSince[i] = -1;
       else if (!(this.warnSince[i] >= 0)) this.warnSince[i] = run.time;
     }
   }
@@ -413,7 +413,7 @@ export class HudView {
   /**
    * Red glow at the screen's edges: both sides as a blow lands and, faintly
    * pulsing, while health is low; one side, flashing, while a rival on that
-   * side winds up a punch.
+   * side winds up a punch or shapes up a shoulder check.
    */
   private drawEdges(): void {
     const run = this.run;
@@ -707,7 +707,7 @@ export class HudView {
   /**
    * Over the rivals: a small health bar for a while after a blow lands on
    * one (HEALTH.rivalBarSeconds), its lost chunk lit then draining; and a
-   * flashing red "!" burst over one winding up a punch at the surfer (the
+   * flashing red "!" burst over one winding up a punch or a shoulder check at the surfer (the
    * screen's edge on its side flashes too: drawEdges).
    */
   private drawRivalMarks(): void {

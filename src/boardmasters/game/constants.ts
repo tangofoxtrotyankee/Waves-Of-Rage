@@ -357,6 +357,8 @@ export const RACE = {
   sprintFrom: 0.7,
   catchUpFinal: 2,
   sprintPace: 2,
+  /** The field's two fastest rivals (by SPEED) sprint harder, up to this much more at the line: close to a pumping surfer's pace. */
+  sprintPaceFast: 5,
 } as const;
 
 /** HIT (punch), BARGE (shoulder), knockouts and rivals' own shoulder checks. Metres, seconds, points. */
@@ -392,10 +394,10 @@ export const COMBAT = {
    * Rivals fight back: those with POWER at least this, alongside the surfer
    * (within rivalReachX across and rivalReachZ along) with their attack
    * ready, throw a telegraphed PUNCH (RIDER_ANIM.rivalPunch: a long wind-up,
-   * then the strike, which lands only if the surfer is still in punch reach
-   * and not high in the air) or a shoulder check (steering in for
-   * rivalCheckSeconds, then a barge). Hitting a rival in its wind-up cancels
-   * the punch. Never in the first rivalGraceSeconds of a race, nor while the
+   * then the strike, which lands only if the surfer is still in reach and
+   * on the water) or a shoulder check (a tell, swinging out wide, then a
+   * lunge in and a barge). Hitting a rival in its wind-up or its check
+   * cancels the attack (COUNTER!). Never in the first rivalGraceSeconds of a race, nor while the
    * rival is stunned, airborne, wiped or knocked out.
    */
   rivalAggression: 0.5,
@@ -407,15 +409,25 @@ export const COMBAT = {
   /** Where an attacking rival keeps station: this far to the side of the surfer. */
   rivalStation: 1.15,
   /** Each rival waits rivalCooldown[0] plus up to rivalCooldown[1] seconds more between attacks... */
-  rivalCooldown: [3, 2] as const,
-  /** ...and once any rival starts one, no other starts for this long, so two rarely attack at once. */
-  rivalStagger: 1.4,
+  rivalCooldown: [8, 5] as const,
+  /** ...once any rival starts one, no other starts for this long, so two rarely attack at once... */
+  rivalStagger: 3.5,
+  /** ...and once a rival's blow lands on the surfer, none starts another for this long (the surfer gets a breather). */
+  rivalBackOff: 3,
+  /** Hit by the surfer (and not knocked out), a fighter's next attack is ready within rivalRetaliate[0] plus up to [1] seconds: it fights back. */
+  rivalRetaliate: [1.6, 1.2] as const,
   /** The chance an attacking rival throws the punch rather than the shoulder check. */
   rivalPunchChance: 0.6,
+  /** A rival's punch lands only if the surfer is still within this far across as it connects (and not this high above the water): carving away or a jump dodges it. */
+  rivalPunchLandX: 1.45,
+  rivalPunchDodgeAir: 0.4,
   /** A rival's punch shoves the surfer (m/s, times its POWER); its shoulder check harder. */
   rivalPunchShove: 2.5,
   rivalShove: 4,
-  rivalCheckSeconds: 0.7,
+  /** The shoulder check's tell: the rival swings out to this far beside the surfer for rivalCheckTell seconds, then lunges in for up to rivalCheckSeconds (the barge goes in once alongside). */
+  rivalCheckOut: 2.2,
+  rivalCheckTell: 0.4,
+  rivalCheckSeconds: 0.6,
   /** No rival attacks in the first seconds of a run (the field settles first). */
   rivalGraceSeconds: 3,
 } as const;
@@ -577,7 +589,7 @@ export const RIDER_ANIM = {
    * seen coming, then the same strike. It connects at impactDelay minus the
    * punch's windup after the strike starts, like the surfer's own.
    */
-  rivalPunch: { windup: 0.28, strike: 0.08, hold: 0.12, recover: 0.2 },
+  rivalPunch: { windup: 0.4, strike: 0.08, hold: 0.12, recover: 0.2 },
   /** A punch or barge connects this long after it starts (mid-strike): the victim's shove and flinch wait for the fist. */
   impactDelay: 0.09,
   /** The flinch's length, and how long the board wobbles after a hit. */
