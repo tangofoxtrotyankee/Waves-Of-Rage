@@ -312,15 +312,51 @@ export const SCORING = {
   airBonus: 100,
   bigAirSeconds: 1.0,
   bigAirBonus: 250,
-  /** The endless course: cruising speed grows with distance up to this much more... */
-  speedRampMax: 0.3,
-  /** ...reached after this many metres. */
-  speedRampOver: 4000,
   /** Speed kept after hitting a buoy, and after bumping a rival. */
   hitSpeedFactor: 0.4,
   bumpSpeedFactor: 0.85,
   /** Seconds the wipeout plays before the results accept input. */
   wipeoutSeconds: 1.6,
+} as const;
+
+/**
+ * The race: CourseSpec.length metres to the finish line (entities/FinishLine.ts).
+ * Crossing it ends the race for the surfer in 1st to 6th place (rivals who
+ * crossed first are ahead), with a place bonus on the score; a wipeout ends
+ * it unfinished. Rivals pace themselves round the surfer (Rival.think): in
+ * a pack window they ride their own pace, further back they catch up,
+ * further ahead they ease off; from `sprintFrom` of the race the leaders
+ * stop waiting and the catch-up fades, so everyone races for the line.
+ */
+export const RACE = {
+  /** Points for finishing 1st to 6th. */
+  placeBonus: [2000, 1200, 800, 500, 300, 150] as const,
+  /** Everyone's cruising speed rises with race progress, up to this much more at the finish. */
+  speedRampMax: 0.15,
+  /** No buoys or boost gates this close before the line, nor after it (ramps and swell run on past it). */
+  clearBeforeFinish: 60,
+  /** Buoys come closer with progress, at their tightest from this fraction of the race on. */
+  tightFrom: 2 / 3,
+  /** Callouts as the line nears: metres to go, and the words. */
+  callouts: [
+    [500, '500 M TO GO'],
+    [200, 'FINAL STRETCH'],
+  ] as const,
+  /** After the line: seconds before the results show (the FINISH! callout first), and before they take input. */
+  resultsDelay: 1.0,
+  resultsSeconds: 2.0,
+  /** Rival pacing: a rival rides its own pace from `packBehind` metres behind the surfer to `packAhead` ahead... */
+  packBehind: 8,
+  packAhead: 12,
+  /** ...further back it speeds up by catchUpRate m/s per metre (up to catchUp), further ahead it eases off (easeOffRate, up to easeOff)... */
+  catchUpRate: 0.25,
+  catchUp: 6,
+  easeOffRate: 0.2,
+  easeOff: 4,
+  /** ...and from this fraction of the race on, the easing off fades out, the catch-up fades to catchUpFinal and the rivals sprint (up to sprintPace m/s more at the line). */
+  sprintFrom: 0.7,
+  catchUpFinal: 2,
+  sprintPace: 2,
 } as const;
 
 /** HIT (punch), BARGE (shoulder), knockouts and rivals' own shoulder checks. Metres, seconds, points. */

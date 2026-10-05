@@ -5,11 +5,12 @@ import { requestImmersiveMode } from '../engine/immersive';
 import type { Input, InputState } from '../engine/Input';
 import { createPS1Material, sharedUniforms, syncLook } from '../engine/PS1Material';
 import type { Renderer } from '../engine/Renderer';
-import { damp, hex } from '../engine/math';
+import { clamp, damp, hex } from '../engine/math';
 import { skullTexture } from '../engine/Textures';
 import { THREE } from '../engine/three';
 import { Buoy } from '../entities/Buoy';
 import { Chevron, chevronMaterial } from '../entities/Chevron';
+import { FinishLine } from '../entities/FinishLine';
 import type { Landing, Rider } from '../entities/Rider';
 import { Rival, type RivalContext } from '../entities/Rival';
 import { Spray } from '../entities/Spray';
@@ -21,11 +22,27 @@ import { Scenery } from '../world/Scenery';
 import { Sky } from '../world/Sky';
 import { CHARACTER_ORDER, CHARACTER_STORAGE_KEY, CHARACTERS, RIVALS, type RiderSpec } from './characters';
 import { type Combo, ComboReader } from './Combos';
-import { CAMERA, COMBAT, FOG, HEALTH, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
+import { CAMERA, COMBAT, FOG, HEALTH, IMPACT, MENU_ZONE, PALETTE, PHYSICS, RACE, RAGE, RIDER_ANIM, SCORING, TRICKS } from './constants';
 import { PAUSE_ZONE, titleArrowX, titleRow } from './HudLayout';
 import { HudView } from './HudView';
 
-export type RunState = 'title' | 'playing' | 'paused' | 'wipeout';
+/** The title (attract and character select), a race in play, paused, and the two ends of a race: wiped out (did not finish) or over the line. */
+export type RunState = 'title' | 'playing' | 'paused' | 'wipeout' | 'finished';
+
+/** The best race on this device for one course: the fastest finish (race seconds) and best place (null until one finishes), and the best score (a wipeout can set it). */
+export interface RaceBest {
+  time: number | null;
+  place: number | null;
+  score: number;
+}
+
+/** A rider over the finish line: who, whether it is the surfer, and the race time they crossed it. */
+export interface Finisher {
+  name: string;
+  id: string;
+  player: boolean;
+  time: number;
+}
 
 export interface FloatingText {
   text: string;
@@ -57,8 +74,8 @@ const TITLE_GRID: [number, number][] = [[-4.5, 13], [4.5, 17], [-7.5, 22], [7.5,
 /** Seconds a hit spark (the comic star at the point of contact) shows. */
 export const SPARK_SECONDS = 0.24;
 
-/** localStorage key (through systems/Storage) for the best score and distance. */
-const BEST_KEY = 'bm.best';
+/** localStorage key prefix (through systems/Storage) for a course's best race (RaceBest), followed by the course id. */
+const RACE_KEY = 'bm.race.';
 /** Pooled skull buoys: enough for the generated stretch ahead at the tightest spacing. */
 const BUOY_POOL = 24;
 /** Pooled boost gates: the stretch ahead holds at most four. */
@@ -124,9 +141,26 @@ export class Run {
   characterIndex = 0;
   /** The last landing with the points it scored (tests read it). */
   lastLanding: (Landing & { points: number }) | null = null;
-  /** Best score and distance on this device, and whether this run set one. */
-  best: { score: number; distance: number };
+  /** The best race on this device for this course; whether this race set any of it, and which. */
+  best: RaceBest;
   newBest = false;
+  readonly newBests = { time: false, place: false, score: false };
+  /** The run time the race started (Run.start). */
+  raceStart = 0;
+  /** Over the line: the surfer's race time (seconds), place (1 to 6; 0 until then) and the place bonus added to the score. */
+  finishTime = 0;
+  place = 0;
+  placeBonus = 0;
+  /** Everyone over the line so far, in order (rivals keep racing after the surfer finishes). */
+  readonly finishOrder: Finisher[] = [];
+  /** The finish line across the course at its length. */
+  readonly finishLine = new FinishLine();
+  /** The race clock frozen when the race ended for the surfer (finished or wiped out), else -1. */
+  private raceOver = -1;
+  /** How many of RACE.callouts have shown, and every rider's z on the step before (for crossing the line). */
+  private calloutsShown = 0;
+  private playerPrevZ = 0;
+  private readonly rivalPrevZ: number[] = [];
   readonly ocean = new Ocean();
   readonly sky: Sky;
   readonly surfer: Surfer;
@@ -148,7 +182,7 @@ export class Run {
   private pulsing = false;
   private bumpCooldown = 0;
   /** What the rivals are told each step, and the run time before which no rival may start another attack (COMBAT.rivalStagger). */
-  private readonly rivalContext: RivalContext = { fight: false, attackOpen: true };
+  private readonly rivalContext: RivalContext = { fight: false, attackOpen: true, length: 1 };
   private rivalAttackGate = 0;
   /**
    * Blows on their way (the surfer's punches and barges, and rivals'
@@ -182,11 +216,12 @@ export class Run {
     readonly course: CourseSpec = COURSES.sunsetBay,
   ) {
     this.generator = new CourseGenerator(course);
-    this.best = loadJSON<{ score: number; distance: number }>(BEST_KEY, { score: 0, distance: 0 });
+    this.best = loadJSON<RaceBest>(RACE_KEY + course.id, { time: null, place: null, score: 0 });
+    this.finishLine.place(course.length);
     this.sky = new Sky();
     const scene = renderer.scene;
     scene.add(this.ocean.mesh, this.sky.group, this.scenery.group, this.spray.mesh);
-    scene.add(this.wake.mesh);
+    scene.add(this.wake.mesh, this.finishLine.group);
 
     this.characterIndex = Math.max(0, CHARACTER_ORDER.indexOf(spec.id as (typeof CHARACTER_ORDER)[number]));
     this.surfer = new Surfer(spec);
@@ -217,6 +252,17 @@ export class Run {
 
   get spec(): RiderSpec {
     return this.surfer.spec;
+  }
+
+  /** The surfer's progress along the race, 0 at the start to 1 at the finish line (where they wiped out, after a wipeout). */
+  get raceProgress(): number {
+    return clamp((this.state === 'wipeout' ? this.distance : this.surfer.z) / this.course.length, 0, 1);
+  }
+
+  /** Seconds since the start of the race (the run clock, so hit-stops do not count), frozen when it ends; 0 on the title. */
+  get raceTime(): number {
+    if (this.state === 'title') return 0;
+    return this.raceOver >= 0 ? this.raceOver : this.time - this.raceStart;
   }
 
   /** The floating texts on screen, oldest first (the HUD draws them). */
@@ -257,6 +303,18 @@ export class Run {
       rival.holdChecks(this.time + COMBAT.rivalGraceSeconds); // no shoulder checks in the first seconds of a run
     });
     this.newBest = false;
+    this.newBests.time = this.newBests.place = this.newBests.score = false;
+    this.finishTime = 0;
+    this.place = 0;
+    this.placeBonus = 0;
+    this.finishOrder.length = 0;
+    this.raceOver = -1;
+    this.calloutsShown = 0;
+    this.playerPrevZ = this.surfer.z;
+    this.rivals.forEach((r, i) => {
+      r.finishedAt = -1;
+      this.rivalPrevZ[i] = r.z;
+    });
     this.score = 0;
     this.health = HEALTH.max;
     this.changes = [];
@@ -290,6 +348,7 @@ export class Run {
     this.reset(false);
     this.state = 'playing';
     this.stateTime = 0;
+    this.raceStart = this.time;
   }
 
   /** Generate the course ahead of `z`, hand new spots to pooled buoys and gates, and retire what is left behind. */
@@ -351,6 +410,8 @@ export class Run {
           if (this.input.touch) void requestImmersiveMode();
           this.start();
         }
+        // The attract ride starts over before it reaches the finish line.
+        if (this.state === 'title' && this.surfer.z > this.course.length - 150) this.reset(true);
         this.simulate(dt, idle, false);
         break;
       case 'playing':
@@ -373,7 +434,9 @@ export class Run {
         }
         break;
       case 'wipeout':
-        if (this.stateTime > SCORING.wipeoutSeconds) {
+      case 'finished':
+        // The results: the surfer rides on (or floats) behind them with the field still racing; input after a moment.
+        if (this.stateTime > (this.state === 'finished' ? RACE.resultsSeconds : SCORING.wipeoutSeconds)) {
           if (input.back || this.tappedMenu(input)) this.mainMenu();
           else if (input.start) this.start();
         }
@@ -390,6 +453,7 @@ export class Run {
     this.updateCamera(dt);
     this.sky.update(this.renderer.camera, this.time);
     this.scenery.update(this.renderer.camera.position.z);
+    this.finishLine.update(this.time, this.ocean, this.renderer.camera.position);
     this.spray.update(dt, this.renderer.camera);
     this.wake.update(dt, this.ocean);
   }
@@ -421,13 +485,14 @@ export class Run {
     this.extendCourse(s.z);
     // The sea moves first so every rider samples the surface that is drawn this frame.
     this.ocean.advance(dt, s.z);
-    // The endless course speeds up with distance; RAGE on top.
-    const ramp = 1 + Math.min(SCORING.speedRampMax, (this.distance / SCORING.speedRampOver) * SCORING.speedRampMax);
+    // The pace rises with race progress (rivals' too, in Rival.think); RAGE on top.
+    const ramp = 1 + RACE.speedRampMax * this.raceProgress;
     s.targetSpeed = PHYSICS.baseSpeed * s.stats.speed * ramp * (this.raging ? RAGE.speedMul : 1);
     s.update(dt, s.fromInput(input), this.ocean, this.time);
     const buoyPositions = this.buoys.filter((b) => b.active && !b.smashed);
     const ctx = this.rivalContext;
     ctx.fight = live;
+    ctx.length = this.course.length;
     for (const r of this.rivals) {
       if (r.knockedOut && this.time >= r.respawnAt) r.respawn((r.index % 2 === 0 ? 1 : -1) * (3 + (r.index % 3) * 2.5), s.z - COMBAT.respawnBehind, this.ocean);
       // On the title the rivals ride parked in their slots ahead, clear of the selected character.
@@ -493,10 +558,15 @@ export class Run {
       if (!s.hitFlashing) s.setFlash(0);
     }
 
-    if (!live) return;
+    // The line: rivals' crossings are recorded as they happen, through the results too; the surfer's ends the race.
+    if (this.state !== 'title') this.trackFinish(dt);
+    if (!live || this.state !== 'playing') return;
     this.distance = s.z;
     this.score += s.speed * Math.cos(s.heading) * dt * SCORING.perMetre;
-    this.rank = 1 + this.rivals.filter((r) => r.z > s.z).length;
+    let ahead = 0;
+    for (const r of this.rivals) if (r.finishedAt >= 0 || r.z > s.z) ahead++;
+    this.rank = 1 + ahead;
+    this.callouts();
 
     // RAGE: drains while raging, decays slowly otherwise.
     if (this.raging) {
@@ -843,18 +913,93 @@ export class Run {
       this.shake(amount, seconds);
       this.endRage();
       this.float('WIPEOUT', hex(PALETTE.red), 2);
-      // The run is over: keep the best score and distance on this device.
-      const score = Math.floor(this.score);
-      const distance = Math.floor(this.distance);
-      if (score > this.best.score || distance > this.best.distance) {
-        this.best = { score: Math.max(score, this.best.score), distance: Math.max(distance, this.best.distance) };
-        this.newBest = true;
-        saveJSON(BEST_KEY, this.best);
-      }
+      // The race is over unfinished: only the best score can improve.
+      this.distance = s.z;
+      this.raceOver = this.time - this.raceStart;
+      this.saveBest(false);
     } else {
       this.invulnerableUntil = Math.max(this.invulnerableUntil, this.time + invulnerableFor);
       if (label) this.float(label, hex(PALETTE.red), 1);
     }
+  }
+
+  /**
+   * Who crossed the line this step: each rival's crossing is recorded in
+   * order (the moment within the step it crossed), and the surfer's ends
+   * the race (finish). A knocked-out body flying over the line does not
+   * count; the rival crosses when it is back in the race.
+   */
+  private trackFinish(dt: number): void {
+    const L = this.course.length;
+    const stepStart = this.time - dt;
+    const crossAt = (prev: number, z: number) => stepStart + dt * clamp((L - prev) / Math.max(1e-6, z - prev), 0, 1);
+    for (let i = 0; i < this.rivals.length; i++) {
+      const r = this.rivals[i];
+      const prev = this.rivalPrevZ[i];
+      this.rivalPrevZ[i] = r.z;
+      if (r.finishedAt >= 0 || r.knockedOut || prev >= L || r.z < L) continue;
+      r.finishedAt = crossAt(prev, r.z);
+      this.addFinisher(r.spec.name, r.spec.id, false, r.finishedAt - this.raceStart);
+    }
+    const s = this.surfer;
+    const prev = this.playerPrevZ;
+    this.playerPrevZ = s.z;
+    if (this.state === 'playing' && !s.wiped && prev < L && s.z >= L) this.finish(crossAt(prev, s.z));
+  }
+
+  private addFinisher(name: string, id: string, player: boolean, time: number): void {
+    let i = this.finishOrder.length;
+    while (i > 0 && this.finishOrder[i - 1].time > time) i--;
+    this.finishOrder.splice(i, 0, { name, id, player, time });
+  }
+
+  /**
+   * Over the line at run time `at`: the race time, the place (one behind
+   * every rival already over), the place bonus on the score, FINISH! and
+   * the best kept; the surfer rides on behind the results.
+   */
+  private finish(at: number): void {
+    const s = this.surfer;
+    this.state = 'finished';
+    this.stateTime = 0;
+    this.finishTime = at - this.raceStart;
+    this.raceOver = this.finishTime;
+    let before = 0;
+    for (const r of this.rivals) if (r.finishedAt >= 0 && r.finishedAt <= at) before++;
+    this.place = before + 1;
+    this.rank = this.place;
+    this.placeBonus = RACE.placeBonus[Math.min(this.place, RACE.placeBonus.length) - 1];
+    this.score += this.placeBonus;
+    this.addFinisher(s.spec.name, s.spec.id, true, this.finishTime);
+    // Blows still on their way no longer count, and the surfer stops pulsing and raging.
+    this.impacts = [];
+    this.invulnerableUntil = 0;
+    this.endRage();
+    this.combos.clear();
+    this.float('FINISH!', hex(PALETTE.gold), 2, s, 1.4);
+    this.saveBest(true);
+  }
+
+  /** Keep this race's best on the device (per course): time and place only from a finish, the score either way. */
+  private saveBest(finished: boolean): void {
+    const b = this.best;
+    const nb = this.newBests;
+    const score = Math.floor(this.score);
+    nb.score = score > b.score;
+    nb.time = finished && (b.time === null || this.finishTime < b.time);
+    nb.place = finished && (b.place === null || this.place < b.place);
+    this.newBest = nb.score || nb.time || nb.place;
+    if (!this.newBest) return;
+    this.best = { time: nb.time ? this.finishTime : b.time, place: nb.place ? this.place : b.place, score: nb.score ? score : b.score };
+    saveJSON(RACE_KEY + this.course.id, this.best);
+  }
+
+  /** "500 M TO GO" and "FINAL STRETCH" as the line nears (only the latest, if several are passed at once). */
+  private callouts(): void {
+    const left = this.course.length - this.surfer.z;
+    let text = '';
+    while (this.calloutsShown < RACE.callouts.length && left <= RACE.callouts[this.calloutsShown][0]) text = RACE.callouts[this.calloutsShown++][1];
+    if (text) this.float(text, hex(PALETTE.cyan), 2);
   }
 
   /** Give back `amount` of health (clean tricks), up to HEALTH.max. */
