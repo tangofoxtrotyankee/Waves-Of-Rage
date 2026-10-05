@@ -81,6 +81,8 @@ try {
     await wait(ms);
     await page.keyboard.up(key);
   };
+  // Wait for this much GAME time (the run clock).
+  const gameWait = (seconds) => ev(() => window.bm.run.time).then((t0) => page.waitForFunction((end) => window.bm.run.time >= end, t0 + seconds, { timeout: 30000, polling: 20 }).catch(() => {}));
   // Rivals fight back: for the checks that are not about that, hold their attacks (a restart lets them fight again) and keep them clear of the surfer.
   const calm = () => ev(() => {
     const r = window.bm.run;
@@ -211,70 +213,125 @@ try {
   const barged = await strike(3, -1.0, 100, 'Shift');
   check('a barge shoves a rival hard and takes 50 of its 100 health', !!barged && barged.peak > 4 && barged.health === 50, JSON.stringify(barged));
 
-  // --- rivals fight back: BIG GUY (rival 2, a fighter) alongside with its attack ready; its pick forced to the punch ---
-  // Every step is watched inside the page (a hook on run.update), so a slow machine cannot miss the wind-up; `counter`
-  // presses HIT the step the wind-up starts.
-  const rivalPunch = async (counter) => {
+  // --- rivals fight back: BIG GUY (rival 2, a fighter, POWER 0.95) alongside with its attack ready; its pick forced ---
+  // Every step is watched inside the page (a hook on run.update), so a slow machine cannot miss the wind-up. Options:
+  // `check` forces the shoulder check (else the punch); `counter` presses HIT `counterAt` seconds into the attack;
+  // `carveAt` holds LEFT (away from the rival, which is on the -x side) from that many seconds in; `rage` starts RAGE first.
+  const rivalAttack = async (opts = {}) => {
     let log = null;
     for (let tries = 0; tries < 5; tries++) {
       if ((await state()) !== 'playing') return log;
       await grounded();
       await calm();
-      log = await ev((counter) => new Promise((resolve) => {
+      log = await ev((o) => new Promise((resolve) => {
         const r = window.bm.run; const s = r.surfer; const v = r.rivals[2];
         r.floating.length = 0; // only this attempt's words
         v.reset(s.x - 1.2, s.z + 0.3, r.ocean);
         v.health = 100;
         v.holdChecks(0);
-        r.rivalAttackGate = 0; r.invulnerableUntil = 0; r.health = 100; r.rage = 0; r.rageUntil = 0;
+        r.rivalAttackGate = 0; r.invulnerableUntil = 0; r.health = 100; r.rage = 0;
+        if (o.rage) r.startRage(); else r.rageUntil = 0;
         const random = Math.random;
-        Math.random = () => 0;
-        const out = { windupAt: -1, strikeAt: -1, hitAt: -1, counteredAt: -1, health: 100, rivalHealth: 100, words: [] };
+        Math.random = () => (o.check ? 0.99 : 0);
+        const out = { startAt: -1, strikeAt: -1, bargeAt: -1, hitAt: -1, counteredAt: -1, warned: false, invulnerableFor: 0, health: 100, rivalHealth: 100, words: [] };
+        const key = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, key: code === 'KeyX' ? 'x' : code }));
+        let pressed = false; let carving = false;
         const t0 = r.time;
         const step = Object.getPrototypeOf(r).update;
         r.update = function (dt) {
           step.call(this, dt);
           const phase = v.attackPhase;
-          if (phase === 'windup' && out.windupAt < 0) {
-            out.windupAt = r.time;
+          if ((phase === 'windup' || v.checking) && out.startAt < 0) {
+            out.startAt = r.time;
             Math.random = random;
-            if (counter) {
-              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', key: 'x' }));
-              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyX', key: 'x' }));
-            }
           }
+          const since = out.startAt >= 0 ? r.time - out.startAt : -1;
+          if (since >= 0 && o.counter && !pressed && since >= (o.counterAt ?? 0)) {
+            pressed = true;
+            key('keydown', 'KeyX'); key('keyup', 'KeyX');
+          }
+          if (since >= 0 && o.carveAt !== undefined && !carving && since >= o.carveAt) {
+            carving = true;
+            key('keydown', 'ArrowLeft');
+          }
+          if (v.threatening) out.warned = true;
           if (phase === 'strike' && out.strikeAt < 0) out.strikeAt = r.time;
-          if (r.health <= 100 - 12 && out.hitAt < 0) out.hitAt = r.time;
+          if (v.barging && out.bargeAt < 0) out.bargeAt = r.time;
+          if (r.health < 100 && out.hitAt < 0) {
+            out.hitAt = r.time;
+            out.invulnerableFor = +(r.invulnerableTill - r.time).toFixed(3);
+          }
           if (v.health < 100 && out.counteredAt < 0) out.counteredAt = r.time;
           for (const f of r.floats) if (!out.words.includes(f.text)) out.words.push(f.text);
-          if (r.time - t0 > 3 || (out.windupAt >= 0 && r.time - out.windupAt > 1)) {
+          if (r.time - t0 > 3 || (out.startAt >= 0 && r.time - out.startAt > 1.4)) {
             delete r.update;
             Math.random = random;
+            if (carving) key('keyup', 'ArrowLeft');
             out.health = r.health;
             out.rivalHealth = v.health;
             resolve(out);
           }
         };
-      }), counter);
-      if (log.windupAt >= 0 && (counter ? log.counteredAt >= 0 : log.hitAt >= 0)) return log;
+      }), opts);
+      // Done when the attack started and something answered it (a blow landed, the counter, or the dodge).
+      if (log.startAt >= 0 && (log.hitAt >= 0 || log.counteredAt >= 0 || log.words.includes('DODGED!'))) return log;
       await wait(400);
     }
     return log;
   };
-  const punched = await rivalPunch(false);
-  check('a rival\'s punch is telegraphed (a wind-up of at least 0.25 s) and then costs health', !!punched && punched.windupAt >= 0 && punched.strikeAt - punched.windupAt >= 0.25 && punched.hitAt >= punched.strikeAt && punched.health <= 88 && punched.words.includes('PUNCHED!'), JSON.stringify(punched));
+  // BIG GUY's blows: 12 (punch) or 18 (shoulder check) times its POWER multiplier (0.7 + 0.6 * 0.95), halved in RAGE.
+  const power = 0.7 + 0.6 * 0.95;
+  const punched = await rivalAttack();
+  check('a rival\'s punch is telegraphed (a wind-up of at least 0.35 s, the warning up) and then costs 12 x its POWER', !!punched && punched.startAt >= 0 && punched.strikeAt - punched.startAt >= 0.35 && punched.warned && punched.hitAt >= punched.strikeAt && punched.health === 100 - Math.round(12 * power) && punched.words.includes('PUNCHED!'), JSON.stringify(punched));
+  check('a blow leaves the surfer untouchable for 0.35 s (no double hits)', !!punched && punched.invulnerableFor > 0.3 && punched.invulnerableFor <= 0.35 + 1e-6, JSON.stringify(punched && punched.invulnerableFor));
   await wait(400);
-  const countered = await rivalPunch(true);
-  check('striking a rival in its wind-up cancels its punch', !!countered && countered.counteredAt >= 0 && countered.counteredAt < countered.windupAt + 0.28 && countered.hitAt < 0 && countered.health > 88 && countered.rivalHealth === 50 && countered.words.includes('COUNTER!') && !countered.words.includes('PUNCHED!'), JSON.stringify(countered));
+  const countered = await rivalAttack({ counter: true });
+  check('striking a rival in its wind-up cancels its punch (COUNTER!)', !!countered && countered.counteredAt >= 0 && countered.counteredAt < countered.startAt + 0.4 && countered.hitAt < 0 && countered.health === 100 && countered.rivalHealth === 50 && countered.words.includes('COUNTER!') && !countered.words.includes('PUNCHED!'), JSON.stringify(countered));
+  await wait(400);
+  const carved = await rivalAttack({ carveAt: 0.2 });
+  check('carving away 0.2 s into the wind-up dodges the punch', !!carved && carved.startAt >= 0 && carved.hitAt < 0 && carved.health === 100 && carved.words.includes('DODGED!'), JSON.stringify(carved));
+  await wait(400);
+  const checked = await rivalAttack({ check: true });
+  check('a rival\'s shoulder check has a tell (at least 0.35 s, the warning up) before the barge, then costs 18 x its POWER', !!checked && checked.startAt >= 0 && checked.warned && checked.bargeAt - checked.startAt >= 0.35 && checked.hitAt >= checked.bargeAt && checked.health === 100 - Math.round(18 * power) && checked.words.includes('SHOVED!'), JSON.stringify(checked));
+  await wait(400);
+  const checkCountered = await rivalAttack({ check: true, counter: true, counterAt: 0.15 });
+  check('striking a rival in its shoulder check\'s tell counters it', !!checkCountered && checkCountered.counteredAt >= 0 && checkCountered.hitAt < 0 && checkCountered.health === 100 && checkCountered.words.includes('COUNTER!') && !checkCountered.words.includes('SHOVED!'), JSON.stringify(checkCountered));
+  await wait(400);
+  const ragePunched = await rivalAttack({ rage: true });
+  check('RAGE halves the damage taken', !!ragePunched && ragePunched.hitAt >= 0 && ragePunched.health === 100 - Math.round(12 * power * 0.5), JSON.stringify(ragePunched));
+  await ev(() => { const r = window.bm.run; r.rageUntil = 0; r.rage = 0; });
+  await gameWait(0.2); // RAGE ends on the next step
+  // A rider-on-rider bump (POSER, who does not fight) costs 1.
+  let bump = null;
+  for (let tries = 0; tries < 4 && !(bump && bump.delta !== null); tries++) {
+    await grounded();
+    await calm();
+    bump = await ev(() => new Promise((resolve) => {
+      const r = window.bm.run; const s = r.surfer; const v = r.rivals[1];
+      r.health = 100; r.invulnerableUntil = 0; r.bumpCooldown = 0;
+      v.reset(s.x + 0.6, s.z + 0.2, r.ocean);
+      const t0 = r.time;
+      const step = Object.getPrototypeOf(r).update;
+      r.update = function (dt) {
+        step.call(this, dt);
+        if (r.health < 100 || r.time - t0 > 0.5) {
+          delete r.update;
+          resolve({ delta: r.health < 100 ? r.health - 100 : null });
+        }
+      };
+    }));
+  }
+  check('a rider-on-rider bump costs 1 health', !!bump && bump.delta === -1, JSON.stringify(bump));
   await calm();
   await ev(() => { window.bm.run.health = 100; });
   await wait(400);
 
   // --- tricks: a full spin lands clean, scores and heals; a half spin held into the landing crashes; stray or carried steering in the air does not ---
-  const trick = async (spin) => {
+  const trick = async (spin, health = 60) => {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
-      await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 60; });
+      await clearAhead();
+      await ev((health) => { window.bm.run.lastLanding = null; window.bm.run.health = health; window.bm.run.invulnerableUntil = 0; }, health);
       await page.keyboard.press('Space'); await wait(60);
       if (!(await surfer()).airborne) { await wait(300); continue; }
       await ev((spin) => { window.bm.run.surfer.spin = spin; }, spin);
@@ -282,14 +339,30 @@ try {
         await wait(50);
         const l = await ev(() => window.bm.run.lastLanding);
         // The health it gave back: the latest gain in the change log.
-        if (l) return { ...l, heal: await ev(() => { const gains = window.bm.run.healthChanges.filter((c) => c.delta > 0); return gains.length ? gains[gains.length - 1].delta : 0; }) };
+        if (l) return { ...l, health: await ev(() => window.bm.run.health), heal: await ev(() => { const gains = window.bm.run.healthChanges.filter((c) => c.delta > 0); return gains.length ? gains[gains.length - 1].delta : 0; }) };
       }
     }
     return null;
   };
   const spun = await trick(Math.PI * 2);
   check('a 360 landed clean scores air, spin and landing', !!spun && spun.clean && spun.points >= 850, JSON.stringify(spun));
-  check('a clean trick heals: air (or big air) plus 6 per half turn', !!spun && spun.clean && spun.heal === (spun.airTime >= 1 ? 8 : 4) + 12, JSON.stringify(spun));
+  check('a clean trick heals: air (or big air) plus 6 per half turn', !!spun && spun.clean && spun.jumped && spun.heal === (spun.airTime >= 1 ? 8 : 4) + 12, JSON.stringify(spun));
+  await wait(400);
+  const topped = await trick(Math.PI * 2, 95);
+  check('healing stops at full health (100)', !!topped && topped.clean && topped.health === 100 && topped.heal === 5, JSON.stringify(topped));
+  await wait(400);
+  // Air a ramp or a swell throws an idle surfer into (no JUMP, no trick) scores but does not heal: the bar never refills on its own.
+  let thrown = null;
+  for (let tries = 0; tries < 5 && !thrown; tries++) {
+    await grounded();
+    await clearAhead();
+    await ev(() => { const r = window.bm.run; const s = r.surfer; r.lastLanding = null; r.health = 60; r.invulnerableUntil = 0; s.vy = 6; s.y += 0.05; s.takeOff(); });
+    if (!(await until(() => window.bm.run.lastLanding !== null, 4000))) continue;
+    const l = await ev(() => ({ ...window.bm.run.lastLanding, health: window.bm.run.health }));
+    if (l.clean && l.airTime >= 0.45) thrown = l;
+  }
+  check('air without a JUMP or a trick scores but does not heal', !!thrown && !thrown.jumped && thrown.points > 0 && thrown.health === 60, JSON.stringify(thrown));
+  await ev(() => { window.bm.run.health = 100; });
   await wait(400);
   // Released, a spin settles towards the nearest upright, so the half spin is held into the landing: the steer
   // stays down (no settling) and the spin is kept at 180 through the descent.
@@ -471,10 +544,19 @@ try {
   await page.keyboard.press('Escape'); await wait(150);
   check('Escape pauses', (await state()) === 'paused');
   const frozen = () => ev(() => { const r = window.bm.run; return { z: r.surfer.z, wake: r.wake.mesh.geometry.drawRange.count, spray: r.spray.mesh.count, floats: r.floats.map((f) => f.age).join() }; });
-  const atPause = await frozen(); await wait(300);
+  const clocks = () => ev(() => ({ time: window.bm.run.time, race: window.bm.run.raceTime }));
+  const atPause = await frozen();
+  const clockAtPause = await clocks();
+  // 40 frames of the game loop (counted, not timed: the run clock itself holds while paused).
+  await ev(() => new Promise((resolve) => {
+    const r = window.bm.run; const step = Object.getPrototypeOf(r).update; let n = 0;
+    r.update = function (dt) { step.call(this, dt); if (++n >= 40) { delete r.update; resolve(); } };
+  }));
   const afterPause = await frozen();
+  const clockAfterPause = await clocks();
   // The wakes, the spray and the words hold too (they used to age away behind the PAUSED panel).
   check('nothing moves while paused', JSON.stringify(atPause) === JSON.stringify(afterPause), `${JSON.stringify(atPause)} -> ${JSON.stringify(afterPause)}`);
+  check('the run clock and the race time hold while paused', clockAfterPause.time === clockAtPause.time && clockAfterPause.race === clockAtPause.race, JSON.stringify({ clockAtPause, clockAfterPause }));
   await page.keyboard.press('Space'); await wait(150);
   check('Space resumes', (await state()) === 'playing');
   check('the course is generated ahead with buoys and ramps', world.buoys > 3 && world.ramps > 3 && world.ahead > 250, `${world.buoys} buoys, ${world.ramps} ramps, ${world.ahead.toFixed(0)} m ahead`);
@@ -526,7 +608,6 @@ try {
 
   // --- the finish line: the course near it ---
   await calm();
-  const gameWait = (seconds) => ev(() => window.bm.run.time).then((t0) => page.waitForFunction((end) => window.bm.run.time >= end, t0 + seconds, { timeout: 30000, polling: 20 }).catch(() => {}));
   await ev(() => { const r = window.bm.run; const s = r.surfer; s.z = r.course.length - 200; s.x = 0; s.heading = 0; s.shoveVx = 0; s.y = r.ocean.height(0, s.z); s.vy = 0; r.health = 100; });
   await gameWait(0.3);
   const nearEnd = await ev(() => {
@@ -569,13 +650,22 @@ try {
   check('the place bonus (800 for 3rd) is added to the score', !!crossed && crossed.bonus === 800 && crossed.score >= crossed.before + 800, JSON.stringify(crossed));
   await gameWait(0.5);
   check('the race clock stops at the line', !!crossed && (await ev(() => window.bm.run.raceTime)) === crossed.time);
+  // Over the line the rules are off: a buoy in the surfer's path costs nothing and the score holds.
+  const afterLine = await ev(() => { const r = window.bm.run; const s = r.surfer; r.buoys[0].place(s.x, s.z + 4); return { health: r.health, score: r.score }; });
+  await gameWait(1);
+  const laterLine = await ev(() => ({ health: window.bm.run.health, score: window.bm.run.score, state: window.bm.run.state }));
+  check('after the finish nothing costs health or scores', laterLine.state === 'finished' && laterLine.health === afterLine.health && laterLine.score === afterLine.score, JSON.stringify({ afterLine, laterLine }));
   const savedRace = await ev(() => JSON.parse(localStorage.getItem('waves-of-rage.bm.race.sunset-bay') || 'null'));
   check('the best place and time are kept for the course', !!crossed && crossed.newBest && !!savedRace && savedRace.place === 3 && Math.abs(savedRace.time - crossed.time) < 1e-6 && savedRace.score >= Math.floor(crossed.score), JSON.stringify(savedRace));
   await page.keyboard.press('Space');
   await wait(200);
   check('the finish results ignore input at first', (await state()) === 'finished');
   // The rivals race on after the surfer finishes: the three far behind cross later, in order.
-  const allOver = await page.waitForFunction(() => window.bm.run.finishOrder.length === 6, null, { timeout: 60000, polling: 100 }).then(() => true, () => false);
+  let allOver = false;
+  for (let i = 0; i < 40 && !allOver; i++) {
+    allOver = await ev(() => window.bm.run.finishOrder.length === 6);
+    if (!allOver) await gameWait(1.5);
+  }
   const order = await ev(() => window.bm.run.finishOrder.map((f) => ({ name: f.name, time: +f.time.toFixed(2) })));
   check('the rivals race on and cross after the surfer, recorded in order', allOver && order.every((f, i) => i === 0 || f.time >= order[i - 1].time) && order[2].name === 'SAM', JSON.stringify(order));
   await until(() => window.bm.run.stateTime > 2.6); // RACE.resultsSeconds: the results take input
