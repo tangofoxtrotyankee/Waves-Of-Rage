@@ -218,7 +218,7 @@ export class Run {
     readonly course: CourseSpec = COURSES.sunsetBay,
   ) {
     this.generator = new CourseGenerator(course);
-    this.best = loadJSON<RaceBest>(RACE_KEY + course.id, { time: null, place: null, score: 0 });
+    this.best = Run.loadBest(course.id);
     this.finishLine.place(course.length);
     this.sky = new Sky();
     const scene = renderer.scene;
@@ -250,6 +250,15 @@ export class Run {
       scene.add(chevron.mesh);
     }
     this.reset(true);
+  }
+
+  /** A course's saved best, normalised: anything missing, corrupt or hand-edited reads as no best. */
+  private static loadBest(id: string): RaceBest {
+    const raw = loadJSON<Partial<RaceBest> | null>(RACE_KEY + id, null);
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const saved = raw !== null && typeof raw === 'object' ? raw : null;
+    const place = num(saved?.place);
+    return { time: num(saved?.time), place: place !== null && place >= 1 ? place : null, score: num(saved?.score) ?? 0 };
   }
 
   get spec(): RiderSpec {
@@ -400,7 +409,8 @@ export class Run {
       this.updateCamera(dt);
       return;
     }
-    this.time += dt;
+    // Paused, the run clock holds (the race time, rivals' wind-ups, invulnerability and RAGE all wait); the panel's own clock runs.
+    if (this.state !== 'paused') this.time += dt;
     this.stateTime += dt;
     syncLook();
     this.input.buttonsActive = this.state === 'playing';
