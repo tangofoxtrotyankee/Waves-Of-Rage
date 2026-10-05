@@ -30,6 +30,8 @@ export interface Landing {
   rolled: boolean;
   /** Landed within the tolerance of upright (and not mid-roll). */
   clean: boolean;
+  /** The rider made this air with JUMP (a press, or a lip pop off a crest), rather than being thrown up by a ramp or a swell. */
+  jumped: boolean;
 }
 
 const CONTROL_IDLE: RiderControl = { steer: 0, pump: false, brake: false, jump: false, attack: false, barge: false };
@@ -645,7 +647,7 @@ export class Rider {
         const rolled = this.rolling && this.rollProgress >= TRICKS.rollLandingFraction;
         const upright = off <= TRICKS.landingToleranceDeg || off >= 360 - TRICKS.landingToleranceDeg;
         const clean = upright && (!this.rolling || rolled);
-        this.landing = { airTime: this.airTime, spinDeg, grabbed: this.grabbing, rolled, clean };
+        this.landing = { airTime: this.airTime, spinDeg, grabbed: this.grabbing, rolled, clean, jumped: this.jumpedThisAir };
         // Landed clean but a little off true: ease the rest of the way rather than snapping straight in one frame.
         if (clean) this.landYaw = this.spin - Math.round(this.spin / TWO_PI) * TWO_PI;
         this.airTime = 0;

@@ -446,10 +446,15 @@ export const HEALTH = {
   barge: 18,
   buoy: 25,
   crash: 20,
-  bump: 3,
+  bump: 1,
   /** Damage is multiplied by this while RAGE is on. */
   rageFactor: 0.5,
-  /** Healing on a clean landing after real air (SCORING.airSeconds), on top of the points: air or big air, per half turn of spin, a grab, a barrel roll. */
+  /**
+   * Healing on a clean landing after real air (SCORING.airSeconds), on top
+   * of the points: air or big air (only air the surfer made: a JUMP or a
+   * trick, not a ramp throwing an idle rider up), per half turn of spin, a
+   * grab, a barrel roll.
+   */
   healAir: 4,
   healBigAir: 8,
   healPerHalfTurn: 6,

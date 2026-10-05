@@ -685,9 +685,11 @@ export class Run {
     if (tricked) points += TRICKS.landingPoints;
     this.score += points;
     this.lastLanding = { ...l, points };
-    // Clean air gives health back: more for big air, spins, grabs and rolls.
+    // Clean air the surfer made gives health back: a JUMP (more for big air), and spins, grabs and rolls; a ramp or a swell
+    // throwing an idle rider up gives nothing on its own, so the bar never refills by itself.
+    const made = l.jumped || tricked;
     this.heal(
-      (big ? HEALTH.healBigAir : HEALTH.healAir) + halfTurns * HEALTH.healPerHalfTurn + (l.grabbed ? HEALTH.healGrab : 0) + (l.rolled ? HEALTH.healRoll : 0),
+      (made ? (big ? HEALTH.healBigAir : HEALTH.healAir) : 0) + halfTurns * HEALTH.healPerHalfTurn + (l.grabbed ? HEALTH.healGrab : 0) + (l.rolled ? HEALTH.healRoll : 0),
     );
     this.float(`${name} +${points}`, hex(PALETTE.gold), tricked ? 2 : 1);
     this.addRage(RAGE.perTrick * (1 + halfTurns * 0.5 + (l.grabbed ? 0.5 : 0) + (l.rolled ? 1 : 0)));
