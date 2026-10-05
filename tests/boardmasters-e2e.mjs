@@ -81,7 +81,7 @@ try {
     await wait(ms);
     await page.keyboard.up(key);
   };
-  // Rivals fight back: for the checks that are not about that, hold their attacks (until `fight()`) and keep them clear of the surfer.
+  // Rivals fight back: for the checks that are not about that, hold their attacks (a restart lets them fight again) and keep them clear of the surfer.
   const calm = () => ev(() => {
     const r = window.bm.run;
     r.rivals.forEach((v, k) => {
@@ -89,7 +89,8 @@ try {
       if (!v.knockedOut && Math.abs(v.z - r.surfer.z) < 30) v.reset(-9 + k * 4.5, r.surfer.z - 60 - k * 5, r.ocean);
     });
   });
-  const fight = () => ev(() => { const r = window.bm.run; for (const v of r.rivals) v.holdChecks(r.time); });
+  // No course buoy in the way of a trick check: a buoy clipped in the air would cost health that the check is not about.
+  const clearAhead = () => ev(() => { const r = window.bm.run; for (const b of r.buoys) if (b.active && b.z > r.surfer.z - 5 && b.z < r.surfer.z + 80) b.retire(); });
 
   // --- boot and title ---
   check('page boots with the dev handle and the HUD font', booted);
@@ -324,6 +325,7 @@ try {
     for (let tries = 0; tries < 5; tries++) {
       await grounded();
       await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 100; });
+      await clearAhead();
       await page.keyboard.press('Space');
       // Past the first moment of air (where the steer is ignored for spinning), then a tap of about a tenth of a second.
       if (!(await until(() => window.bm.run.surfer.airborne && window.bm.run.surfer.airTime > 0.16, 1000))) { await wait(300); continue; }
@@ -345,6 +347,7 @@ try {
   for (let tries = 0; tries < 5 && !carried; tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 100; });
+    await clearAhead();
     await page.keyboard.down('ArrowLeft'); await wait(150);
     if ((await surfer()).airborne) { await page.keyboard.up('ArrowLeft'); await wait(300); continue; } // a crest hop took it into the air first
     await page.keyboard.press('Space');
@@ -368,6 +371,7 @@ try {
   for (let tries = 0; tries < 5 && !released; tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 100; });
+    await clearAhead();
     await page.keyboard.press('Space');
     if (!(await until(() => window.bm.run.surfer.airborne, 600))) { await wait(300); continue; }
     // The jump gets a known height and LEFT goes down in the same frame, inside the page, so a slow machine cannot press it late.
@@ -395,6 +399,7 @@ try {
   for (let tries = 0; tries < 5 && !held360; tries++) {
     await grounded();
     await ev(() => { window.bm.run.lastLanding = null; window.bm.run.health = 100; });
+    await clearAhead();
     await page.keyboard.press('Space');
     if (!(await until(() => window.bm.run.surfer.airborne, 600))) { await wait(300); continue; }
     await ev(() => { window.bm.run.surfer.vy = 9.6; }); // about 1.2 s of air
@@ -585,19 +590,20 @@ try {
   const clockText = (t) => { const d = Math.floor(t * 10 + 1e-6); const sec = Math.floor(d / 10) % 60; return `${Math.floor(d / 600)}:${sec < 10 ? '0' : ''}${sec}.${d % 10}`; };
   check('the title shows the best place and time for the course', titleBest.state === 'title' && titleBest.best.place === 3 && !!crossed && titleBest.row.includes('3RD') && titleBest.row.includes(clockText(crossed.time)), JSON.stringify(titleBest));
   await page.keyboard.press('Space');
-  await until(() => window.bm.run.state === 'playing', 5000);
+  await until(() => window.bm.run.state === 'playing', 8000);
 
-  // --- back to the main menu, from the pause panel ---
+  // --- back to the main menu, from the pause panel (each key waits for the game to take the last) ---
   const errorsOnSequelPage = errors.slice(); // the original game's page then calls the score API, which this test does not run
-  await page.keyboard.press('Escape'); await wait(150);
+  await page.keyboard.press('Escape');
+  await until(() => window.bm.run.state === 'paused', 5000);
   await page.keyboard.press('m');
   await wait(1000);
   let phaserReady = false; // the original game's bundle takes a moment on a cold dev server
-  for (let i = 0; i < 48 && !phaserReady; i++) {
+  for (let i = 0; i < 80 && !phaserReady; i++) {
     await wait(250);
-    phaserReady = await ev(() => !!(window.game && window.game.scene));
+    phaserReady = await ev(() => !!(window.game && window.game.scene)).catch(() => false); // mid-navigation the page has no context yet
   }
-  check('Escape returns to the main menu page', new globalThis.URL(page.url()).pathname === '/' && phaserReady);
+  check('Escape returns to the main menu page', new globalThis.URL(page.url()).pathname === '/' && phaserReady, `${page.url()} phaser ${phaserReady}`);
 
   check('no console or page errors on the sequel page', errorsOnSequelPage.length === 0, errorsOnSequelPage.join(' | '));
 
