@@ -237,6 +237,10 @@ export class HudView {
   private readonly changeArt = new Map<number, HTMLCanvasElement>();
   /** Per rival: the health its bar's lost chunk still shows, and the run time its punch wind-up was first seen (-1 when not winding up). */
   private readonly rivalTrail: number[] = [];
+  /** The "+n HP" words beside the surfer after a heal, by amount. */
+  private readonly hpArt = new Map<number, HTMLCanvasElement>();
+  /** The POS panel's DNF after a wipeout (baked on first use). */
+  private dnf: HTMLCanvasElement | null = null;
   private readonly warnSince: number[] = [];
   private readonly warnArt = [warnIcon(false), warnIcon(true)];
   /** Callout banners by text (the stripe and the lettering), made on first use or ahead on the title. */
@@ -524,9 +528,15 @@ export class HudView {
     // POS: the place big, the field size small.
     hud.blit(this.panels.get('pos') as HTMLCanvasElement, b.px, top);
     hud.text(b.px + 9, top + 2, 'POS', HUD_COLORS.label, TIGHT);
-    const place = this.small.get(run.rank);
-    BIG.draw(hud, place, b.px + 7, valueY, HUD_COLORS.gold);
-    hud.text(b.px + 7 + BIG.width(place), valueY + 3, this.field, HUD_COLORS.label, TIGHT);
+    // Wiped out the race is not finished: no place to show (the last rank would read as one).
+    if (run.state === 'wipeout') {
+      this.dnf ??= hud.heavyText('DNF', 12, HUD_COLORS.red, 1);
+      hud.blit(this.dnf, b.px + 6, Math.round(valueY + 4.5 - this.dnf.height / 2));
+    } else {
+      const place = this.small.get(run.rank);
+      BIG.draw(hud, place, b.px + 7, valueY, HUD_COLORS.gold);
+      hud.text(b.px + 7 + BIG.width(place), valueY + 3, this.field, HUD_COLORS.label, TIGHT);
+    }
     // DIST: how far through the race, as a percentage, with the race clock small under it.
     hud.blit(this.panels.get('dist') as HTMLCanvasElement, b.dx, top);
     hud.text(b.dx + 9, top + 2, 'DIST', HUD_COLORS.label, TIGHT);
@@ -745,8 +755,11 @@ export class HudView {
         const age = run.time - this.warnSince[i];
         const icon = this.warnArt[Math.floor(age * 14) % 2];
         const pop = age < 0.1 ? 1.7 - 7 * age : 1 + 0.1 * Math.max(0, Math.sin(age * 30));
-        const ix = Math.max(2, Math.min(this.W - icon.width - 2, x - Math.round(icon.width / 2)));
+        let ix = Math.max(2, Math.min(this.W - icon.width - 2, x - Math.round(icon.width / 2)));
         const iy = Math.max(RAGE_Y + 16, y - (bar ? 9 : 3) - icon.height);
+        // Not on the course strip's path (a rival at the screen-left edge): just right of the strip, so the warning reads on its own.
+        const st = this.strip;
+        if (ix < st.x + STRIP_W + 1 && iy + icon.height > st.y && iy < st.y + st.h) ix = st.x + STRIP_W + 2;
         hud.blit(icon, ix, iy, 1, pop);
       }
     }
@@ -822,7 +835,6 @@ export class HudView {
    */
   private drawFloats(): void {
     const list = this.run.floats;
-    const anchorX = IS_PORTRAIT ? this.W - 3 : Math.round(this.W * 0.6);
     // Beside the surfer: upright, right of his head and above his arm; landscape, right of him, with the stack's room reaching down to the bottom fifth.
     const baseY = IS_PORTRAIT ? VIEW.frame.top + Math.round(VIEW.frame.height * 0.5) : Math.round(this.H * (this.run.input.touch ? 0.62 : 0.8));
     const at = FLOAT_AT;
@@ -836,7 +848,8 @@ export class HudView {
       if (f.anchor) {
         // Over the rider, kept on screen and under the RAGE row.
         if (!this.run.floatPoint(f, at)) continue;
-        const x = Math.max(8, Math.min(this.W - 8 - c.width, Math.round(at.x - c.width / 2)));
+        const grow = Math.ceil(((pop - 1) * c.width) / 2);
+        const x = Math.max(2 + grow, Math.min(this.W - 2 - grow - c.width, Math.round(at.x - c.width / 2)));
         const top = Math.max(FLOAT_TOP, Math.min(this.H - c.height, Math.round(at.y) - c.height - rise));
         this.hud.blit(c, x, top, alpha, pop);
         continue;
@@ -844,9 +857,43 @@ export class HudView {
       const top = baseY - c.height - stack - rise;
       // Only the entries that would cover the RAGE row give way; the rest still show.
       if (top < FLOAT_TOP) continue;
-      this.hud.blit(c, IS_PORTRAIT ? anchorX - c.width : anchorX, top, alpha, pop);
+      this.hud.blit(c, this.columnX(c.width, pop), top, alpha, pop);
       stack += c.height;
     }
+    this.drawHealGain(baseY);
+  }
+
+  /**
+   * The health a clean landing gave back ("+14 HP" in green) just under the
+   * trick's word beside the surfer, rising with it: where the eye already
+   * is, not only in the HEALTH panel's corner.
+   */
+  private drawHealGain(baseY: number): void {
+    const run = this.run;
+    const gain = this.lastChange(1);
+    if (!gain) return;
+    const age = run.time - gain.at;
+    if (age < 0 || age >= FLOAT_LIFE) return;
+    let art = this.hpArt.get(gain.delta);
+    if (!art) {
+      if (this.hpArt.size > 40) this.hpArt.clear();
+      art = this.hud.heavyText(`+${gain.delta} HP`, IS_PORTRAIT ? 15 : 16, HUD_COLORS.green, 1);
+      this.hpArt.set(gain.delta, art);
+    }
+    const pop = age < FLOAT_POP ? 1 + 0.6 * (1 - age / FLOAT_POP) ** 2 : 1;
+    const alpha = Math.min(1, (FLOAT_LIFE - age) / FLOAT_FADE);
+    this.hud.blit(art, this.columnX(art.width, pop), baseY + 1 - Math.round(age * 10), alpha, pop);
+  }
+
+  /**
+   * The left of a column word `w` wide: right-aligned upright, left-aligned
+   * in landscape, and kept on screen while it pops (blit scales about the
+   * centre, so a popping word grows by (pop - 1) * w / 2 each side).
+   */
+  private columnX(w: number, pop: number): number {
+    const grow = Math.ceil(((pop - 1) * w) / 2);
+    const x = IS_PORTRAIT ? this.W - 3 - w : Math.round(this.W * 0.6);
+    return Math.max(2 + grow, Math.min(this.W - 2 - grow - w, x));
   }
 
   /**
@@ -914,7 +961,8 @@ export class HudView {
       const points = this.heavyFit(match[2], big, 14, maxW, stops);
       const name = this.heavyFit(match[1], f.scale >= 2 ? big - 1 : big - 3, 14, maxW - 4, stops);
       const shift = 4;
-      const w = Math.max(points.width, name.width + shift);
+      // The line set back carries the shift: upright the name (right-aligned), in landscape the points (left-aligned).
+      const w = IS_PORTRAIT ? Math.max(points.width, name.width + shift) : Math.max(points.width + shift, name.width);
       // The name goes on last, so the points' outline never hides the tops of its letters (a T's bar).
       const made = makeCanvas(w, points.height + name.height - 2);
       made.ctx.drawImage(points, IS_PORTRAIT ? w - points.width : shift, 0);
@@ -1025,6 +1073,8 @@ export class HudView {
     const slam = t < 0.15 ? 1.4 - t * 2.6 : 1;
     const title = finished ? this.placeTitle(run.place, pw - 12) : titles.wipeout;
     hud.blit(title, Math.round(W / 2 - title.width / 2) + shake, py + 5, 1, slam);
+    // Under WIPED OUT, between the title and the rows: the race was not finished, so there is no place.
+    if (!finished && t > 0.2) hud.text(W / 2, py + 28, 'DID NOT FINISH', '#ff8a9a', TIGHT_CENTER_OUTLINE);
     const rx = px + 10;
     const rw = pw - 20;
     // The rows slide in one after another; the score counts the place bonus up.
