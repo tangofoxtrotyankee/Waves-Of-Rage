@@ -426,8 +426,8 @@ export const COMBAT = {
   /** A rival's punch shoves the surfer (m/s, times its POWER); its shoulder check harder. */
   rivalPunchShove: 2.5,
   rivalShove: 4,
-  /** The shoulder check's tell: the rival swings out to this far beside the surfer for rivalCheckTell seconds, then lunges in for up to rivalCheckSeconds (the barge goes in once alongside). */
-  rivalCheckOut: 2.2,
+  /** The shoulder check's tell: the rival leans out to this far beside the surfer (still in punch reach) for rivalCheckTell seconds, then lunges in for up to rivalCheckSeconds (the barge goes in once alongside). */
+  rivalCheckOut: 1.6,
   rivalCheckTell: 0.4,
   rivalCheckSeconds: 0.6,
   /** No rival attacks in the first seconds of a run (the field settles first). */

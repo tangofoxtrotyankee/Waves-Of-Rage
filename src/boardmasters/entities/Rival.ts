@@ -151,8 +151,11 @@ export class Rival extends Rider {
     else if (checking) lane = player.x;
     else if (station || seeking) lane = player.x - side * COMBAT.rivalStation;
     else if (Math.abs(dz) < 3 && Math.abs(lane - player.x) < 2.2) lane = player.x - side * 2.2; // otherwise give the surfer room (a bump costs both)
-    lane = clamp(lane, -PHYSICS.trackHalfWidth + 1.5, PHYSICS.trackHalfWidth - 1.5);
-    const steer = clamp((lane - this.x) * 0.3 - this.heading * 1.2, -1, 1);
+    // Racing, it keeps off the whitewater at the edges; attacking, it follows the surfer nearly to the edge (no safe haven there).
+    const edge = PHYSICS.trackHalfWidth - (this.stationing ? 0.5 : 1.5);
+    lane = clamp(lane, -edge, edge);
+    // An attack steers harder, so the check's swing out and lunge in read as moves.
+    const steer = clamp((lane - this.x) * (checking ? 0.7 : 0.3) - this.heading * 1.2, -1, 1);
     const progress = clamp(this.z / ctx.length, 0, 1);
     const sprint = smoothstep(RACE.sprintFrom, 1, progress);
     if (this.stationing) {
