@@ -1099,9 +1099,10 @@ export class Run {
     return this.renderer.worldToHud(s.x + a.x, s.y + a.y, s.z + a.z, out);
   }
 
-  /** Where the point `lift` metres over a rider's head shows on the HUD (VIEW pixels, into `out`); false behind the camera. */
+  /** Where the point `lift` metres over the top of a rider's head (as last drawn) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */
   headPoint(r: Rider, lift: number, out: { x: number; y: number }): boolean {
-    return this.renderer.worldToHud(r.x, r.y + FLOAT_HEAD * r.spec.build + lift, r.z, out);
+    const head = r.headTop(this.tmp2);
+    return this.renderer.worldToHud(head.x, head.y + lift, head.z, out);
   }
 
   /** Where a point given in metres from the surfer (a hit spark) shows on the HUD (VIEW pixels, into `out`); false behind the camera. */

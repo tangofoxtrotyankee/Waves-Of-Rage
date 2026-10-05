@@ -79,8 +79,8 @@ const FLOAT_AT = { x: 0, y: 0 };
 const HEAD_AT = { x: 0, y: 0 };
 const SURFER_AT = { x: 0, y: 0 };
 const MINI = new MiniDigits();
-/** Metres from Run's float point over a rider down to just over its head (the rival marks sit there). */
-const HEAD_LIFT = -0.45;
+/** Metres over the top of a rider's head where its marks sit. */
+const HEAD_LIFT = 0.12;
 /** Scratch for a hit spark's projected centre and a point above it (its size on screen). */
 const SPARK_AT = { x: 0, y: 0 };
 const SPARK_UP = { x: 0, y: 0 };

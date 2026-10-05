@@ -6,7 +6,7 @@ import { BOOST, COMBAT, PALETTE, PHYSICS, RIDER_ANIM, TRICKS } from '../game/con
 import type { Ocean } from '../world/Ocean';
 import { RiderAnimator, type AnimInput, type Splash } from './RiderAnimator';
 import { buildFoamGeometry, createFoamMaterial } from './RiderFoam';
-import { buildRiderModel, type RiderModel } from './RiderModel';
+import { BONE, buildRiderModel, type RiderModel } from './RiderModel';
 
 /** The animation set from the character sheet, plus `punch` (the sheet's HIT, delivered rather than taken) and `knockout`. */
 export type RiderPose = 'idle' | 'carveLeft' | 'carveRight' | 'accelerate' | 'jump' | 'airTrick' | 'hit' | 'punch' | 'barge' | 'wipeout' | 'knockout';
@@ -479,6 +479,11 @@ export class Rider {
   /** Whether the white flash of a hit (flinch) is showing or about to: the run's own pulses leave the model alone meanwhile. */
   get hitFlashing(): boolean {
     return this.flashUntil > 0;
+  }
+
+  /** The top of the head (the hair bone) in world space, as last drawn: the HUD's marks over a rider sit on it. */
+  headTop(out: THREE.Vector3): THREE.Vector3 {
+    return this.model.bones[BONE.hair].getWorldPosition(out);
   }
 
   /** Whiten the model (RAGE pulses, hit flashes). */
