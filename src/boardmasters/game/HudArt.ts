@@ -247,7 +247,7 @@ export class BigDigits {
   }
 }
 
-/** The course strip's player arrow, milestone flag, and a rival dot. */
+/** The course strip's player arrow, finish flag, and rival, buoy and gate dots. */
 export function stripMarkers(): {
   arrow: HTMLCanvasElement;
   flag: HTMLCanvasElement;

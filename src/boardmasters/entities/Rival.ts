@@ -72,6 +72,8 @@ export class Rival extends Rider {
    */
   think(player: Rider, buoys: { x: number; z: number }[], time: number, slot: readonly [number, number] | null, ctx: RivalContext): RiderControl {
     this.startedAttack = false;
+    // The race over (or not begun): a punch still on its way is called off.
+    if (!ctx.fight && this.attackPhase !== 'none') this.cancelAttack();
     if (this.wiped) return IDLE;
     // Punched or barged: ride the shove out in a straight line rather than steering straight back (the reaction stays readable).
     if (time < this.shovedUntil + 0.3) return IDLE;

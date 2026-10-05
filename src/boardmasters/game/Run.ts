@@ -170,7 +170,7 @@ export class Run {
   readonly spray = new Spray();
   readonly wake = new Wake();
   readonly scenery = new Scenery();
-  /** The endless course, generated ahead of the surfer. */
+  /** The race course, generated ahead of the surfer. */
   generator: CourseGenerator;
   private featureCount = -1;
   private floating: FloatingText[] = [];
@@ -360,11 +360,14 @@ export class Run {
     }
     for (const b of this.buoys) if (b.active && b.z < z - 60) b.retire();
     for (const c of this.chevrons) if (c.active && c.z < z - 30) c.retire();
+    // Spots already behind (a jump down the course generates the stretch passed over too) take no pooled mesh.
     for (const spot of added.buoys) {
+      if (spot.z < z - 60) continue;
       const free = this.buoys.find((b) => !b.active);
       if (free) free.place(spot.x, spot.z);
     }
     for (const spot of added.chevrons) {
+      if (spot.z < z - 30) continue;
       const free = this.chevrons.find((c) => !c.active);
       if (free) free.place(spot.x, spot.z);
     }

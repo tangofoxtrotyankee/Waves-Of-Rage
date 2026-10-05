@@ -421,7 +421,7 @@ function waterfall(b: Builder, u: number, top: number, z: number, rng: () => num
  * banner, then a beach with palms and lower hills behind. Built once,
  * merged per material (lit, glowing, the festival atlas, the scrolling
  * falls) and per 100 m chunk, and shared by two spans that leapfrog ahead
- * of the camera, so the endless course always has a shore.
+ * of the camera, so the course (and its run-out past the finish) always has a shore.
  */
 export class Scenery {
   readonly group = new THREE.Group();
