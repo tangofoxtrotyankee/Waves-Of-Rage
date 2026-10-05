@@ -235,7 +235,7 @@ try {
         if (o.rage) r.startRage(); else r.rageUntil = 0;
         const random = Math.random;
         Math.random = () => (o.check ? 0.99 : 0);
-        const out = { startAt: -1, strikeAt: -1, bargeAt: -1, hitAt: -1, counteredAt: -1, warned: false, invulnerableFor: 0, health: 100, rivalHealth: 100, words: [] };
+        const out = { blow: 0, startAt: -1, strikeAt: -1, bargeAt: -1, hitAt: -1, counteredAt: -1, warned: false, invulnerableFor: 0, health: 100, rivalHealth: 100, words: [] };
         const key = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code, key: code === 'KeyX' ? 'x' : code }));
         let pressed = false; let carving = false;
         const t0 = r.time;
@@ -262,6 +262,9 @@ try {
           if (r.health < 98 && out.hitAt < 0) { // a blow, not a bump (1) on the way
             out.hitAt = r.time;
             out.invulnerableFor = +(r.invulnerableTill - r.time).toFixed(3);
+            // The blow's own loss (a bump of 1 from someone else on the way does not count against it).
+            const blows = r.healthChanges.filter((c) => c.delta < -2);
+            out.blow = blows.length ? -blows[blows.length - 1].delta : 0;
           }
           if (v.health < 100 && out.counteredAt < 0) out.counteredAt = r.time;
           for (const f of r.floats) if (!out.words.includes(f.text)) out.words.push(f.text);
@@ -286,7 +289,7 @@ try {
   // BIG GUY's blows: 12 (punch) or 18 (shoulder check) times its POWER multiplier (0.7 + 0.6 * 0.95), halved in RAGE.
   const power = 0.7 + 0.6 * 0.95;
   const punched = await rivalAttack();
-  check('a rival\'s punch is telegraphed (a wind-up of at least 0.35 s, the warning up) and then costs 12 x its POWER', !!punched && punched.startAt >= 0 && punched.strikeAt - punched.startAt >= 0.35 && punched.warned && punched.hitAt >= punched.strikeAt && punched.health === 100 - Math.round(12 * power) && punched.words.includes('PUNCHED!'), JSON.stringify(punched));
+  check('a rival\'s punch is telegraphed (a wind-up of at least 0.35 s, the warning up) and then costs 12 x its POWER', !!punched && punched.startAt >= 0 && punched.strikeAt - punched.startAt >= 0.35 && punched.warned && punched.hitAt >= punched.strikeAt && punched.blow === Math.round(12 * power) && punched.words.includes('PUNCHED!'), JSON.stringify(punched));
   check('a blow leaves the surfer untouchable for 0.35 s (no double hits)', !!punched && punched.invulnerableFor > 0.3 && punched.invulnerableFor <= 0.35 + 1e-6, JSON.stringify(punched && punched.invulnerableFor));
   await wait(400);
   const countered = await rivalAttack({ counter: true });
@@ -296,13 +299,13 @@ try {
   check('carving away 0.2 s into the wind-up dodges the punch', !!carved && carved.startAt >= 0 && carved.hitAt < 0 && carved.health === 100 && carved.words.includes('DODGED!'), JSON.stringify(carved));
   await wait(400);
   const checked = await rivalAttack({ check: true });
-  check('a rival\'s shoulder check has a tell (at least 0.35 s, the warning up) before the barge, then costs 18 x its POWER', !!checked && checked.startAt >= 0 && checked.warned && checked.bargeAt - checked.startAt >= 0.35 && checked.hitAt >= checked.bargeAt && checked.health === 100 - Math.round(18 * power) && checked.words.includes('SHOVED!'), JSON.stringify(checked));
+  check('a rival\'s shoulder check has a tell (at least 0.35 s, the warning up) before the barge, then costs 18 x its POWER', !!checked && checked.startAt >= 0 && checked.warned && checked.bargeAt - checked.startAt >= 0.35 && checked.hitAt >= checked.bargeAt && checked.blow === Math.round(18 * power) && checked.words.includes('SHOVED!'), JSON.stringify(checked));
   await wait(400);
   const checkCountered = await rivalAttack({ check: true, counter: true, counterAt: 0.15 });
   check('striking a rival in its shoulder check\'s tell counters it', !!checkCountered && checkCountered.counteredAt >= 0 && checkCountered.hitAt < 0 && checkCountered.health === 100 && checkCountered.words.includes('COUNTER!') && !checkCountered.words.includes('SHOVED!'), JSON.stringify(checkCountered));
   await wait(400);
   const ragePunched = await rivalAttack({ rage: true });
-  check('RAGE halves the damage taken', !!ragePunched && ragePunched.hitAt >= 0 && ragePunched.health === 100 - Math.round(12 * power * 0.5), JSON.stringify(ragePunched));
+  check('RAGE halves the damage taken', !!ragePunched && ragePunched.hitAt >= 0 && ragePunched.blow === Math.round(12 * power * 0.5), JSON.stringify(ragePunched));
   await ev(() => { const r = window.bm.run; r.rageUntil = 0; r.rage = 0; });
   await gameWait(0.2); // RAGE ends on the next step
   // A rider-on-rider bump (POSER, who does not fight) costs 1.
